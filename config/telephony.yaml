@@ -1,0 +1,8 @@
+# Non-secret telephony policy (loaded by config.settings.load_policy_file). Environment variables are authoritative
+# for everything in config/settings.py; this file only ADDS policy that is awkward as env vars.
+# Tenant-specific policy lives in the database (tenant_policies) and is managed through the admin API.
+
+# Prefixes denied for every tenant, in addition to MME_TEL_DEFAULT_DENY_PREFIXES.
+# Review with compliance before production (DoT/TRAI rules, premium-rate, international).
+# NOTE: do not add broad prefixes such as +9190 -- that is ordinary Indian mobile space.
+deny_prefixes: []

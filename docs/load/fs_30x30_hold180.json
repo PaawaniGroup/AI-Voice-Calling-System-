@@ -1,0 +1,67 @@
+{
+  "mode": "fs",
+  "calls_requested": 30,
+  "target_concurrency": 30,
+  "hold_seconds": 180.0,
+  "client_concurrency": 30,
+  "max_initiation_rate_cps": 5.0,
+  "elapsed_s": 188.0,
+  "throughput_calls_per_s": 0.16,
+  "peak_active_calls_observed": 30,
+  "final_states": {
+    "completed": 30
+  },
+  "errors": {},
+  "non_completed_reasons": {},
+  "api_latency_s": {
+    "n": 60,
+    "p50": 0.6271,
+    "p95": 0.7544,
+    "p99": 0.78,
+    "max": 0.78
+  },
+  "setup_latency_initiating_to_answered_s": {
+    "n": 30,
+    "p50": 0.3264,
+    "p95": 0.3756,
+    "p99": 0.3765,
+    "max": 0.3765
+  },
+  "queue_wait_s": {
+    "n": 30,
+    "p50": 3.4968,
+    "p95": 6.5386,
+    "p99": 6.7468,
+    "max": 6.7468
+  },
+  "connected_duration_observed_s": {
+    "n": 30,
+    "p50": 180.0718,
+    "p95": 180.0812,
+    "p99": 180.1591,
+    "max": 180.1591
+  },
+  "timing_note": "latencies use the harness monotonic clock; WSL2 wall-clock steps (observed ~50s) make DB timestamps unreliable here",
+  "fs_channels_after_run": "0 total.",
+  "esl": {
+    "events_received": 450,
+    "dropped": 0,
+    "handler_errors": 0,
+    "last_lag_s": 0.004168978999587125
+  },
+  "cpu_mem_peak": {
+    "api_cpu": 39.4,
+    "api_rss_mb": 76.4,
+    "fs_cpu": 17.8,
+    "fs_rss_mb": 104.3
+  },
+  "host": {
+    "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "cpus": 4,
+    "mem_gb": 6.2,
+    "python": "3.12.3"
+  },
+  "db": "local mongod 7.0.14 (standalone, same host)",
+  "mock_originations": null,
+  "limitations": "Single host; MongoDB, API and FreeSWITCH share CPU; loopback legs have no real codec/RTP/carrier path."
+}

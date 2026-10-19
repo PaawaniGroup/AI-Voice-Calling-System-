@@ -1,0 +1,293 @@
+"""Typed, validated settings for MME_TELEPHONY.
+
+Authoritative sources, highest precedence first:
+  1. process environment variables (``MME_TEL_*``)
+  2. ``.env`` file (development only; never committed)
+  3. defaults declared here
+Non-secret policy lives in ``config/telephony.yaml`` (see ``load_policy_file``).
+Secrets are only ever read from the environment / secret manager, never YAML.
+"""
+from __future__ import annotations
+
+import ipaddress
+import logging
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
+from pydantic import Field, SecretStr, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT = Path(__file__).resolve().parent.parent
+log = logging.getLogger("mme_telephony.config")
+
+Env = Literal["development", "test", "staging", "production"]
+
+
+def F(default: Any, desc: str, *, restart: bool = True, dev_only: bool = False, **kw: Any) -> Any:
+    """Field helper that records documentation metadata used by the docs generator."""
+    extra = {"restart": restart, "dev_only": dev_only}
+    return Field(default, description=desc, json_schema_extra=extra, **kw)
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="MME_TEL_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    # ---- Application / runtime -------------------------------------------------
+    app_name: str = F("mme-telephony", "Service name used in logs/metrics.")
+    app_version: str = F("0.2.0", "Service version.")
+    env: Env = F("development", "Deployment environment.")
+    bind_host: str = F("127.0.0.1", "API bind address. Terminate TLS in front of it.")
+    bind_port: int = F(8800, "API port.", ge=1, le=65535)
+    workers: int = F(1, "Uvicorn workers. MUST be 1: the controller owns the ESL event stream.", ge=1, le=1)
+    request_timeout_s: float = F(30.0, "Per-request timeout for outbound HTTP made by the service.", gt=0, le=300)
+    shutdown_timeout_s: float = F(15.0, "Graceful shutdown budget.", gt=0, le=120)
+    max_body_bytes: int = F(65536, "Maximum accepted request body.", ge=1024, le=10_485_760)
+    trusted_proxies: str = F("", "Comma-separated CIDRs allowed to set X-Forwarded-For. Empty = none.")
+    api_prefix: str = F("/v1", "API version prefix.")
+    docs_enabled: bool = F(True, "Expose /docs and /openapi.json. Disable in production.", dev_only=True)
+    cors_origins: str = F("", "Comma-separated allowed browser origins. Empty = CORS disabled.")
+
+    # ---- Database -----------------------------------------------------------------
+    mongo_uri: SecretStr = F(SecretStr(""), "MongoDB connection URI (secret). Required.")
+    mongo_db: str = F("mme_telephony", "Dedicated telephony database name.", min_length=1)
+    mongo_connect_timeout_ms: int = F(5000, "Connect timeout.", ge=100, le=60000)
+    mongo_server_selection_timeout_ms: int = F(5000, "Server selection timeout.", ge=100, le=60000)
+    mongo_max_pool: int = F(50, "Max pool size.", ge=1, le=500)
+    mongo_min_pool: int = F(0, "Min pool size.", ge=0, le=100)
+    mongo_init_indexes: bool = F(True, "Create indexes/schema version on startup (idempotent).")
+    retention_events_days: int = F(180, "Call event retention.", ge=1)
+    retention_calls_days: int = F(730, "Call record retention.", ge=1)
+    retention_idempotency_hours: int = F(48, "Idempotency record retention.", ge=1)
+    retention_audit_days: int = F(365, "Audit log retention.", ge=1)
+    retention_dedup_hours: int = F(72, "Provider-callback replay/nonce window.", ge=1)
+    retention_interval_s: int = F(3600, "Retention sweep interval.", ge=10)
+
+    # ---- FreeSWITCH / ESL --------------------------------------------------------------
+    esl_host: str = F("127.0.0.1", "ESL host. Must be loopback/private unless esl_allow_non_private=true.")
+    esl_port: int = F(8021, "ESL port.", ge=1, le=65535)
+    esl_password: SecretStr = F(SecretStr(""), "ESL password (secret). Required unless fs_enabled=false.")
+    esl_allow_non_private: bool = F(False, "Allow a non-private ESL address. Requires security review.")
+    fs_enabled: bool = F(True, "Enable the FreeSWITCH controller.")
+    esl_connect_timeout_s: float = F(5.0, "ESL connect+auth timeout.", gt=0, le=60)
+    esl_command_timeout_s: float = F(10.0, "Per ESL command timeout.", gt=0, le=120)
+    esl_reconnect_initial_s: float = F(0.5, "Initial reconnect delay.", gt=0, le=60)
+    esl_reconnect_max_s: float = F(30.0, "Max reconnect delay.", gt=0, le=600)
+    esl_reconnect_jitter: float = F(0.25, "Jitter fraction (0..1).", ge=0, le=1)
+    esl_event_queue_size: int = F(10000, "Event queue bound.", ge=100)
+    esl_event_concurrency: int = F(8, "Concurrent event handlers.", ge=1, le=256)
+    esl_idle_timeout_s: float = F(60.0, "No event/heartbeat for this long => connection considered dead.", gt=5)
+    reconcile_interval_s: float = F(30.0, "Reconciliation sweep interval.", ge=1)
+    reconcile_grace_s: float = F(20.0, "Do not finalize a call younger than this on reconcile.", ge=0)
+    reconcile_batch: int = F(200, "Max calls per reconcile pass.", ge=1, le=5000)
+    fs_gateway: str = F("mme_carrier", "FreeSWITCH gateway name used for PSTN legs.")
+    fs_dial_template: str = F(
+        "sofia/gateway/{gateway}/{destination}",
+        "Dial-string template. {gateway}, {destination} only. Test mode may use loopback.",
+    )
+    fs_transfer_template: str = F("sofia/gateway/{gateway}/{destination}", "Dial-string template used by the mme_transfer dialplan bridge.")
+    fs_inbound_context: str = F("mme_inbound", "Dialplan context for inbound calls handled by the controller.")
+    fs_recordings_dir: str = F("/var/lib/mme_telephony/recordings", "Local spool dir for recordings.")
+
+    # ---- SIP/RTP/WebRTC (documented; FreeSWITCH XML is authoritative) --------------------
+    rtp_port_start: int = F(16384, "RTP range start (must match FreeSWITCH switch.conf).", ge=1024, le=65535)
+    rtp_port_end: int = F(32768, "RTP range end.", ge=1024, le=65535)
+    ring_timeout_s: int = F(45, "Outbound ring timeout.", ge=5, le=180)
+    answer_timeout_s: int = F(15, "Inbound: max time to take a routing decision.", ge=1, le=120)
+    transfer_timeout_s: int = F(30, "Transfer completion timeout.", ge=5, le=120)
+    max_call_duration_s: int = F(1800, "Hard cap on call duration.", ge=10, le=14400)
+    initiating_timeout_s: int = F(90, "Max time in 'initiating' before declared failed.", ge=10)
+    webrtc_enabled: bool = F(False, "Browser calling. NOT implemented in Phase 2; must remain false.")
+
+    # ---- Provider -------------------------------------------------------------------
+    provider: Literal["freeswitch_gateway", "plivo_api", "mock"] = F(
+        "freeswitch_gateway", "Call path. 'mock' is rejected outside development/test."
+    )
+    plivo_auth_id: SecretStr = F(SecretStr(""), "Plivo Auth ID (secret).")
+    plivo_auth_token: SecretStr = F(SecretStr(""), "Plivo Auth Token (secret); also verifies webhook signatures.")
+    webhook_public_base_url: str = F("", "Public HTTPS base URL Plivo calls back (no trailing slash).")
+    provider_timeout_s: float = F(10.0, "Provider API timeout.", gt=0, le=120)
+    provider_max_concurrent: int = F(10, "Provider concurrency ceiling. VERIFY against the Plivo account.", ge=1)
+    provider_max_cps: float = F(1.0, "Provider calls-per-second ceiling. VERIFY against the account.", gt=0)
+    provider_callback_max_age_s: int = F(300, "Reject provider callbacks older than this (nonce replay window).", ge=30)
+    real_calls_enabled: bool = F(False, "Explicit opt-in to dial real PSTN numbers. Default off.")
+    estimate_rate_per_min: float = F(0.0, "Estimated carrier rate/minute used ONLY for estimates; 0 disables.", ge=0)
+
+    # ---- Call control / queue ----------------------------------------------------------
+    max_active_global: int = F(30, "Global max active calls.", ge=1)
+    max_active_per_tenant: int = F(10, "Default per-tenant max active calls.", ge=1)
+    max_queued: int = F(200, "Max queued calls (global).", ge=0)
+    queue_policy: Literal["queue", "reject"] = F("queue", "On capacity exhaustion: queue or reject (429).")
+    queue_max_wait_s: int = F(300, "Queued calls older than this fail with queue_timeout.", ge=1)
+    max_initiation_rate: float = F(1.0, "Max originations/second (also bounded by provider_max_cps).", gt=0)
+    dispatch_poll_s: float = F(0.25, "Dispatcher poll interval.", gt=0, le=10)
+    default_allowed_countries: str = F("IN", "Comma-separated ISO regions allowed by default.")
+    default_deny_prefixes: str = F("+911860,+911900,+91140", "Premium/telemarketing prefixes always denied by default.")
+    default_region: str = F("IN", "Region for parsing national-format numbers.", min_length=2, max_length=2)
+
+    # ---- Auth / security ---------------------------------------------------------------------
+    jwt_secret: SecretStr = F(SecretStr(""), "HS256 verification secret shared with MME identity (secret). Required.")
+    jwt_algorithm: Literal["HS256"] = F("HS256", "JWT algorithm.")
+    jwt_issuer: str = F("", "Expected 'iss' claim; empty disables the check.")
+    jwt_audience: str = F("", "Expected 'aud' claim; empty disables the check.")
+    jwt_tenant_claim: str = F("tenant_id", "Claim carrying the tenant id.")
+    jwt_roles_claim: str = F("roles", "Claim carrying the role list.")
+    role_admin: str = F("telephony:admin", "Role granting tenant-admin operations.")
+    role_user: str = F("telephony:user", "Role granting call operations.")
+    role_platform: str = F("platform:admin", "Role granting cross-tenant/system admin operations.")
+    rate_limit_per_min: int = F(120, "Per-principal API requests/minute.", ge=1)
+    rate_limit_call_create_per_min: int = F(30, "Per-tenant POST /calls per minute.", ge=1)
+    metrics_token: SecretStr = F(SecretStr(""), "Bearer token required for /metrics. Empty = loopback clients only.")
+    status_requires_auth: bool = F(True, "Require auth for /v1/telephony/status.")
+    webhook_signing_master: SecretStr = F(SecretStr(""), "Master key deriving per-endpoint outbound webhook secrets.")
+
+    # ---- Recording / storage -------------------------------------------------------------------
+    recording_enabled: bool = F(False, "Feature flag. Needs consent_mode + storage configured.")
+    recording_consent_mode: Literal["", "announce", "contractual"] = F("", "Consent/disclosure mechanism. Required to record.")
+    recording_max_seconds: int = F(3600, "Max recording length.", ge=10)
+    recording_retention_days: int = F(90, "Recording retention.", ge=1)
+    storage_backend: Literal["none", "local", "s3"] = F("none", "Recording storage backend.")
+    s3_bucket: str = F("", "S3 bucket (operator supplied).")
+    s3_region: str = F("", "S3 region.")
+    s3_prefix: str = F("telephony/recordings/", "S3 key prefix.")
+    s3_kms_key_id: str = F("", "SSE-KMS key id; empty = SSE-S3 (AES256).")
+    s3_upload_timeout_s: float = F(60.0, "Upload timeout.", gt=0)
+    s3_upload_retries: int = F(3, "Upload retry attempts.", ge=0, le=10)
+    recording_url_ttl_s: int = F(300, "Presigned download URL lifetime.", ge=30, le=3600)
+
+    # ---- Outbound webhooks ----------------------------------------------------------------------
+    webhooks_enabled: bool = F(True, "Deliver outbound lifecycle webhooks.")
+    webhook_allow_http: bool = F(False, "Permit http:// destinations.", dev_only=True)
+    webhook_allow_private: bool = F(False, "Permit private/loopback destinations (SSRF protection off).", dev_only=True)
+    webhook_connect_timeout_s: float = F(3.0, "Connect timeout.", gt=0)
+    webhook_read_timeout_s: float = F(10.0, "Read timeout.", gt=0)
+    webhook_max_attempts: int = F(8, "Max delivery attempts before dead-letter.", ge=1, le=50)
+    webhook_backoff_base_s: float = F(5.0, "Backoff base (exponential, jittered).", gt=0)
+    webhook_backoff_max_s: float = F(3600.0, "Backoff cap.", gt=0)
+    webhook_queue_limit: int = F(50000, "Max pending deliveries before new ones are dropped+alerted.", ge=1)
+    webhook_concurrency: int = F(8, "Concurrent deliveries.", ge=1, le=128)
+
+    # ---- Observability -----------------------------------------------------------------------------
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = F("INFO", "Log level.", restart=False)
+    log_format: Literal["json", "text"] = F("json", "Log format.")
+    tracing_enabled: bool = F(False, "Reserved; tracing not implemented.")
+    ready_max_event_age_s: float = F(120.0, "Readiness: FreeSWITCH heartbeat must be fresher than this.", gt=1)
+
+    # ---- AI (Phase 3) -----------------------------------------------------------------------------------
+    ai_enabled: bool = F(False, "Phase 3 AI integration. MUST be false in Phase 2.")
+
+    @property
+    def is_prod_like(self) -> bool:
+        return self.env in ("staging", "production")
+
+    def csv(self, value: str) -> list[str]:
+        return [v.strip() for v in value.split(",") if v.strip()]
+
+    # ------------------------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _cross_validate(self) -> "Settings":
+        errs, warns = self.problems()
+        if errs:
+            raise ValueError("; ".join(errs))
+        for w in warns:
+            log.warning("config: %s", w)
+        return self
+
+    def problems(self) -> tuple[list[str], list[str]]:
+        """Return (errors, warnings). Messages never contain secret values."""
+        e: list[str] = []
+        w: list[str] = []
+        if self.ai_enabled:
+            e.append("MME_TEL_AI_ENABLED must be false in Phase 2")
+        if self.webrtc_enabled:
+            e.append("MME_TEL_WEBRTC_ENABLED is not implemented in Phase 2 and must be false")
+        if self.rtp_port_end <= self.rtp_port_start:
+            e.append("RTP port range invalid (end must exceed start)")
+        if self.esl_reconnect_max_s < self.esl_reconnect_initial_s:
+            e.append("ESL_RECONNECT_MAX_S must be >= ESL_RECONNECT_INITIAL_S")
+        if self.max_active_per_tenant > self.max_active_global:
+            e.append("MAX_ACTIVE_PER_TENANT must be <= MAX_ACTIVE_GLOBAL")
+        if self.provider_max_concurrent < self.max_active_global and self.provider != "mock":
+            w.append("provider_max_concurrent < max_active_global: provider ceiling will bind first")
+        if self.ring_timeout_s >= self.max_call_duration_s:
+            e.append("RING_TIMEOUT_S must be < MAX_CALL_DURATION_S")
+        if self.recording_enabled and (
+            not self.recording_consent_mode or self.storage_backend == "none"
+        ):
+            e.append("recording_enabled requires recording_consent_mode and a storage_backend")
+        if self.storage_backend == "s3" and not (self.s3_bucket and self.s3_region):
+            e.append("storage_backend=s3 requires S3_BUCKET and S3_REGION")
+        if not self._esl_private() and not self.esl_allow_non_private:
+            e.append("ESL host is not loopback/private; set ESL_ALLOW_NON_PRIVATE only after security review")
+        if self.esl_allow_non_private:
+            w.append("ESL_ALLOW_NON_PRIVATE is set: ESL must be firewalled and reviewed")
+        if self.provider == "plivo_api" and not (
+            self.plivo_auth_id.get_secret_value() and self.plivo_auth_token.get_secret_value()
+        ):
+            e.append("provider=plivo_api requires PLIVO_AUTH_ID and PLIVO_AUTH_TOKEN")
+        if self.provider == "plivo_api" and not self.webhook_public_base_url.startswith("https://"):
+            e.append("provider=plivo_api requires WEBHOOK_PUBLIC_BASE_URL (https)")
+
+        if self.is_prod_like:
+            if self.provider == "mock":
+                e.append("mock provider is forbidden in staging/production")
+            if not self.mongo_uri.get_secret_value():
+                e.append("MONGO_URI is required")
+            if len(self.jwt_secret.get_secret_value()) < 32:
+                e.append("JWT_SECRET must be set and >= 32 chars")
+            if len(self.webhook_signing_master.get_secret_value()) < 32:
+                e.append("WEBHOOK_SIGNING_MASTER must be set and >= 32 chars")
+            if self.fs_enabled and not self.esl_password.get_secret_value():
+                e.append("ESL_PASSWORD is required")
+            if self.docs_enabled:
+                w.append("DOCS_ENABLED=true in a production-like environment")
+            if self.webhook_allow_http or self.webhook_allow_private:
+                e.append("webhook_allow_http/private are development-only")
+            if self.bind_host in ("0.0.0.0", "::"):
+                w.append("API binds to all interfaces; ensure a TLS proxy and firewall front it")
+            if self.real_calls_enabled and not self.default_allowed_countries:
+                e.append("DEFAULT_ALLOWED_COUNTRIES must be set when real calls are enabled")
+        else:
+            if self.webhook_allow_private or self.webhook_allow_http:
+                w.append("development-only webhook relaxations are enabled")
+            if not self.jwt_secret.get_secret_value():
+                w.append("JWT_SECRET empty: all authenticated endpoints will reject requests")
+        if self.env in ("development", "test") and self.provider != "mock" and not self.real_calls_enabled:
+            w.append("real_calls_enabled=false: PSTN-looking destinations will be refused")
+        return e, w
+
+    def _esl_private(self) -> bool:
+        try:
+            ip = ipaddress.ip_address(self.esl_host)
+        except ValueError:
+            return self.esl_host in ("localhost",)
+        return ip.is_loopback or ip.is_private
+
+    def redacted(self) -> dict[str, Any]:
+        """Settings for diagnostics with every secret masked."""
+        out: dict[str, Any] = {}
+        for k, v in self.model_dump().items():
+            if isinstance(v, SecretStr):
+                out[k] = "***set***" if v.get_secret_value() else "***unset***"
+            else:
+                out[k] = v
+        return out
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+def load_policy_file(path: Path | None = None) -> dict[str, Any]:
+    """Non-secret telephony policy (config/telephony.yaml). Missing file => {}."""
+    p = path or ROOT / "config" / "telephony.yaml"
+    if not p.exists():
+        return {}
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("telephony.yaml must be a mapping")
+    return data

@@ -1,0 +1,37 @@
+<!-- Isolated TEST context used by loopback integration tests. Never routes to carriers. Not for production. -->
+<include>
+  <context name="mme_test">
+    <extension name="t_answer_park">
+      <condition field="destination_number" expression="^9001$">
+        <action application="ring_ready"/>
+        <action application="sleep" data="300"/>
+        <action application="answer"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+    <extension name="t_busy">
+      <condition field="destination_number" expression="^9002$">
+        <action application="hangup" data="USER_BUSY"/>
+      </condition>
+    </extension>
+    <extension name="t_noroute">
+      <condition field="destination_number" expression="^9003$">
+        <action application="respond" data="404"/>
+      </condition>
+    </extension>
+    <extension name="t_bridge_target">
+      <condition field="destination_number" expression="^9004$">
+        <action application="answer"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+    <extension name="t_ringing_long">
+      <condition field="destination_number" expression="^9005$">
+        <action application="ring_ready"/>
+        <action application="sleep" data="30000"/>
+        <action application="answer"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+  </context>
+</include>

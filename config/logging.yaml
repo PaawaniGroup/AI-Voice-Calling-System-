@@ -1,0 +1,8 @@
+# Logging is configured in code (app/core/logging.py) from MME_TEL_LOG_LEVEL / MME_TEL_LOG_FORMAT.
+# This file documents the contract so log shippers can be configured consistently.
+format: json
+fields: [ts, level, service, env, logger, request_id, correlation_id, msg, "+structured context (call_id, state, ...)"]
+redaction:
+  keys_matching: "pass(word)?|secret|token|authorization|api[-_]?key|auth[-_]?id|signature|private[-_]?key|cookie|mongo_uri"
+  value_patterns: ["scheme://user:pass@ -> credentials masked", "phone numbers masked to +CC*****NN"]
+rotation: "stdout only; rotate via systemd-journald or the container runtime (see docs/DEPLOYMENT.md)"

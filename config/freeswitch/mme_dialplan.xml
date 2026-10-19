@@ -1,0 +1,38 @@
+<!--
+  MME_TELEPHONY inbound/outbound dialplan contexts.
+  Safe default: nothing is ever dialed from here. Outbound legs are created only by the controller over ESL
+  (originate with a validated gateway/destination). Inbound calls land in `mme_inbound`, are parked, and the
+  controller decides (route lookup, tenant policy, concurrency) via ESL; unknown/unauthorised calls are rejected.
+  Point the carrier gateway's `context` param (or the SIP profile's default context) at `mme_inbound`.
+-->
+<include>
+  <context name="mme_inbound">
+    <extension name="mme_park_all">
+      <condition field="destination_number" expression="^\+?(\d{7,15})$">
+        <action application="set" data="mme_direction=inbound"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="ring_ready"/>
+        <!-- parked: the controller (ESL) answers/bridges/rejects. -->
+        <action application="park"/>
+      </condition>
+    </extension>
+    <extension name="mme_default_reject">
+      <condition field="destination_number" expression=".*">
+        <action application="respond" data="404"/>
+      </condition>
+    </extension>
+  </context>
+  <!-- Transfers: the controller sets ${mme_xfer_dial} (validated) then transfers here. A failed bridge keeps the
+       original call alive (parked) and fires CUSTOM mme::transfer_failed so the controller can record the outcome. -->
+  <context name="mme_transfer">
+    <extension name="mme_xfer">
+      <condition field="destination_number" expression="^mme_xfer$">
+        <action application="set" data="continue_on_fail=true"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="bridge" data="${mme_xfer_dial}"/>
+        <action application="event" data="Event-Name=CUSTOM,Event-Subclass=mme::transfer_failed,Cause=${bridge_hangup_cause},Disposition=${originate_disposition}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+  </context>
+</include>

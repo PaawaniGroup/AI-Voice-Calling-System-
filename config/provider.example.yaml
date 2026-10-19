@@ -1,0 +1,15 @@
+# Provider configuration STRUCTURE (no credentials). Real values come from environment variables / secret manager.
+provider:
+  name: plivo_api            # plivo_api | freeswitch_gateway | mock (mock is rejected in production)
+  credentials:
+    auth_id_env: MME_TEL_PLIVO_AUTH_ID          # secret reference, not the value
+    auth_token_env: MME_TEL_PLIVO_AUTH_TOKEN
+  callbacks:
+    public_base_url_env: MME_TEL_WEBHOOK_PUBLIC_BASE_URL   # https://<public host>; Plivo posts to <base>/v1/providers/plivo/{answer,status}
+    signature: v3                                           # X-Plivo-Signature-V3 + nonce, validated with the SDK
+  limits:                    # MUST be confirmed on the actual Plivo account before use
+    max_concurrent_env: MME_TEL_PROVIDER_MAX_CONCURRENT
+    max_cps_env: MME_TEL_PROVIDER_MAX_CPS
+freeswitch_gateway:          # SIP trunk path (e.g. Plivo Zentrunk); the gateway XML lives in FreeSWITCH, not here
+  gateway_name_env: MME_TEL_FS_GATEWAY
+  dial_template_env: MME_TEL_FS_DIAL_TEMPLATE

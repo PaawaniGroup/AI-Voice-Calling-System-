@@ -1,0 +1,13 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+pymongo==4.10.1
+httpx==0.28.1
+PyJWT==2.10.1
+prometheus-client==0.21.1
+PyYAML==6.0.2
+plivo==4.55.0
+phonenumbers==8.13.52
+python-multipart==0.0.20
+# optional: boto3==1.35.90 (only when MME_TEL_STORAGE_BACKEND=s3)

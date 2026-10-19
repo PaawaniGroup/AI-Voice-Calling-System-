@@ -1,0 +1,31 @@
+[Unit]
+Description=MME Telephony service (Phase 2)
+After=network-online.target freeswitch.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mme-telephony
+Group=mme-telephony
+WorkingDirectory=/opt/mme-telephony/current
+# Root-owned, mode 0600 (systemd reads it before dropping privileges). Contains secrets; never in the repo.
+EnvironmentFile=/etc/mme-telephony/mme-telephony.env
+ExecStartPre=/opt/mme-telephony/venv/bin/python scripts/validate_config.py
+ExecStart=/opt/mme-telephony/venv/bin/uvicorn app.main:create_app --factory --host ${MME_TEL_BIND_HOST} --port ${MME_TEL_BIND_PORT} --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --no-access-log
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mme-telephony
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
