@@ -43,7 +43,9 @@ Media (audio) never passes through this service. ESL is control and events only.
 
 Background tasks started at boot: ESL event reader + 8 handlers, controller loops (dispatch, timeouts every 2 s, reconcile every 30 s), webhook worker, housekeeping (recording upload/purge, stuck webhook claims). MongoDB TTL indexes handle retention.
 
-## 3. Complete route table (27 routes)
+> **Update 2026-10-19:** the service now has 54 routes (sessions, auth/users, dashboard data, SSE, AI contracts, logs) and a static dashboard; the authoritative table is the generated [ROUTES.md](ROUTES.md). New components are described in [PLATFORM_ARCHITECTURE.md](PLATFORM_ARCHITECTURE.md). The table below is the original Phase 2 subset.
+
+## 3. Phase 2 route table (27 routes)
 
 Auth: **none** = public; **user** = `telephony:user`/admin/platform; **admin** = `telephony:admin`/platform (own tenant); **platform** = `platform:admin`; **signature** = Plivo V3. Every `/v1` route except the provider callbacks requires `Authorization: Bearer <JWT>`; the tenant always comes from the token.
 

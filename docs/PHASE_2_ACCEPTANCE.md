@@ -26,8 +26,8 @@ Evidence: `docs/TEST_REPORT.md` (T), `docs/CAPACITY_REPORT.md` (C). Environment:
 | Database backup and restore verified | PARTIAL | verified on local mongod (`verify_backup_restore.sh`); Atlas not tested |
 | Deployment and rollback instructions complete | PARTIAL | `docs/DEPLOYMENT.md`, systemd unit, scripts written; **never executed on a production-like host**; no Dockerfile (Docker unavailable) |
 | Automated tests reproducible | PASS | 134 tests, `scripts/run.sh pytest -q` (needs local mongod + FreeSWITCH for 20 of them; those skip if unavailable) |
-| No AI model required | PASS | no model code; `ai_enabled` forced false |
-| No AI integration activated | PASS | startup rejects `AI_ENABLED`; status shows `ai_enabled:false` |
+| No AI model required | PASS | calls/sessions/dashboard work with no model reachable |
+| No AI integration activated | PASS (updated 2026-10-19) | AI contracts now exist (`docs/AI_MEDIA_ADAPTER.md`) but `AI_ENABLED` defaults to false and AI sessions refuse to start without a verified media bridge (`media_bridge_unavailable`); see `docs/ACCEPTANCE_AI_PLATFORM.md` |
 | Known limitations documented | PASS | this file, SECURITY.md, PROVIDER_SETUP.md, CAPACITY_REPORT.md |
 
 ## Production-readiness gates (all external)
