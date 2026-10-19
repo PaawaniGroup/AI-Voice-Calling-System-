@@ -341,6 +341,8 @@ class Controller:
         fs_uuid, job = new_uuid(), new_uuid()
         # Persist identifiers BEFORE the external call so uncertain outcomes can be reconciled.
         await self.repos.update_call(call["_id"], {"fs_uuid": fs_uuid, "job_uuid": job, "originate_started_at": utcnow()})
+        if self.sessions is not None:
+            await self.sessions.attach_fs_uuid(call, fs_uuid)
         fresh = await self.repos.get_call(call["_id"])
         if fresh is None or S(fresh["state"]) in sm.TERMINAL:
             return  # cancelled while being claimed: do not originate

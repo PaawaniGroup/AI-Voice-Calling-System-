@@ -68,14 +68,18 @@ $('#logout').addEventListener('click', logout);
 window.addEventListener('hashchange', route);
 
 const pages = { overview, live, call: callDetail, sessions, session: sessionDetail, controls, recordings, ai: aiPage, logs, users };
+let renderSeq = 0;
 function route() {
   if (!me) return;
   if (stopLive) { stopLive(); stopLive = null; }
   const [, page = 'overview', arg] = location.hash.split('/');
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#/' + page));
-  const main = $('#main');
+  const main = $('#main'), mine = ++renderSeq, box = h('div');
   main.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
-  (pages[page] || overview)(main, arg && decodeURIComponent(arg)).catch((e) => main.replaceChildren(h('p', { class: 'err' }, e.message)));
+  // Render into a detached box and attach only if this is still the newest navigation (no stale overwrite).
+  (pages[page] || overview)(box, arg && decodeURIComponent(arg))
+    .then(() => { if (mine === renderSeq) main.replaceChildren(box); })
+    .catch((e) => { if (mine === renderSeq) main.replaceChildren(h('p', { class: 'err' }, e.message)); });
 }
 
 function table(cols, rows, onRow) {
@@ -157,7 +161,7 @@ async function live(main) {
 
 // ---------------------------------------------------------------- call details
 async function callDetail(main, id) {
-  const [c, ev, rec] = await Promise.all([api('/v1/calls/' + id), safe(api(`/v1/calls/${id}/events`)), safe(api(`/v1/calls/${id}/recording`))]);
+  const [c, ev, rec] = await Promise.all([api('/v1/calls/' + id), safe(api(`/v1/calls/${id}/events`)), safe(api(`/v1/calls/${id}/recordings`))]);
   const sess = c.session_id ? await safe(api('/v1/sessions/' + c.session_id)) : null;
   const aiS = c.session_id ? await safe(api('/v1/ai/sessions/' + c.session_id)) : null;
   const kv = (o) => h('div', { class: 'kv' }, Object.entries(o).flatMap(([k, v]) => [h('div', {}, k), h('div', {}, v == null || v === '' ? '—' : v)]));
@@ -184,7 +188,7 @@ async function callDetail(main, id) {
     h('h2', {}, 'Lifecycle timeline'),
     ev.__error ? h('p', { class: 'err' }, ev.__error) : h('div', { class: 'card tl' }, ev.items.length ? ev.items.map((e) => h('div', {}, `${t(e.ts)} · `, h('b', {}, e.type), ` · ${e.source}`, e.payload && Object.keys(e.payload).length ? ' · ' + JSON.stringify(e.payload) : '')) : 'No events'),
     h('h2', {}, 'Recording'), rec.__error ? h('p', { class: 'muted' }, rec.__error) : table([{ h: 'Id', f: (r) => r.id }, { h: 'Status', f: (r) => pill(r.status) }, { h: 'Duration', f: (r) => dur(r.duration_s) }, { h: 'Retention until', f: (r) => t(r.retention_until) },
-      { h: '', f: (r) => isRole('operator') && r.status === 'available' ? h('button', { class: 'ghost', onclick: async () => { try { const u = await api(r.download); window.open(u.url, '_blank', 'noopener'); } catch (e) { alert(e.message); } } }, 'Play / download') : '' }], rec.items),
+      { h: '', f: (r) => isRole('operator') && r.status === 'available' ? h('button', { class: 'ghost', onclick: async () => { try { const u = await api('/v1/recordings/' + r.id + '/download-url'); window.open(u.url, '_blank', 'noopener'); } catch (e) { alert(e.message); } } }, 'Play / download') : '' }], rec.items),
     h('h2', {}, 'Transcript & summary'), h('p', { class: 'muted' }, 'Not available: transcripts and AI summaries are not stored by this release.'));
 }
 

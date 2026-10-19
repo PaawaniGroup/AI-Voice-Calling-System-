@@ -130,6 +130,8 @@ async def create_session(request: Request, body: SessionCreate, p: Principal = D
         raise Unprocessable("metadata too large", code="metadata_too_large")
     svc = request.app.state.sessions
     call = await request.app.state.repos.get_call(body.call_id, p.tenant_id) if body.call_id else None
+    if call is None and body.call_id:  # the reference may be a FreeSWITCH UUID of a call we already track
+        call = await request.app.state.db["calls"].find_one({"tenant_id": p.tenant_id, "fs_uuid": body.call_id})
     sess, created = await svc.create(p.tenant_id, call_ref=body.call_id, caller=body.caller_id or (call or {}).get("from_number"),
                                      destination=(call or {}).get("to_number"), language=body.language, metadata=body.metadata,
                                      source="external", call_id=call["_id"] if call else None)

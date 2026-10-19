@@ -45,7 +45,7 @@ class SessionService:
     # ------------------------------------------------------------------ create
     async def create(self, tenant_id: str, *, call_ref: str | None, caller: str | None, destination: str | None = None,
                      language: str = "auto", metadata: dict | None = None, source: str = "api",
-                     call_id: str | None = None) -> tuple[dict, bool]:
+                     call_id: str | None = None, fs_uuid: str | None = None) -> tuple[dict, bool]:
         """Idempotent per (tenant, call_ref). Returns (session, created)."""
         if language not in LANGUAGES:
             from app.core.errors import Unprocessable
@@ -60,6 +60,14 @@ class SessionService:
         }
         if not doc["call_ref"]:
             doc.pop("call_ref")  # sparse unique index: sessions without a call reference are never deduplicated
+        else:
+            # one session per call, whichever identifier the caller knows: our call id OR the FreeSWITCH UUID
+            existing = await self.db["sessions"].find_one(
+                {"tenant_id": tenant_id, "$or": [{"call_ref": doc["call_ref"]}, {"fs_uuid": doc["call_ref"]}, {"call_id": doc["call_ref"]}]})
+            if existing:
+                return existing, False
+        if fs_uuid:
+            doc["fs_uuid"] = fs_uuid
         try:
             await self.db["sessions"].insert_one(doc)
         except DuplicateKeyError:
@@ -77,7 +85,12 @@ class SessionService:
         return s
 
     async def get_for_call(self, tenant_id: str, call_id: str) -> dict | None:
-        return await self.db["sessions"].find_one({"tenant_id": tenant_id, "$or": [{"call_id": call_id}, {"call_ref": call_id}]})
+        return await self.db["sessions"].find_one({"tenant_id": tenant_id, "$or": [{"call_id": call_id}, {"call_ref": call_id}, {"fs_uuid": call_id}]})
+
+    async def attach_fs_uuid(self, call: dict, fs_uuid: str) -> None:
+        """Called once the FreeSWITCH UUID is known so external clients can reference the session by it."""
+        if call.get("session_id"):
+            await self.db["sessions"].update_one({"_id": call["session_id"]}, {"$set": {"fs_uuid": fs_uuid}})
 
     async def list(self, tenant_id: str, *, status: str | None, q: str | None, limit: int, cursor: str | None) -> tuple[list[dict], str | None]:
         flt: dict[str, Any] = {"tenant_id": tenant_id}
@@ -86,7 +99,7 @@ class SessionService:
         if q:
             import re
             rx = re.escape(q[:40])
-            flt["$or"] = [{"_id": q[:60]}, {"call_id": q[:60]}, {"call_ref": q[:150]}, {"caller": {"$regex": rx}}, {"destination": {"$regex": rx}}]
+            flt["$or"] = [{"_id": q[:60]}, {"call_id": q[:60]}, {"call_ref": q[:150]}, {"fs_uuid": q[:60]}, {"caller": {"$regex": rx}}, {"destination": {"$regex": rx}}]
         if cursor:
             from datetime import datetime
             ts_s, _, sid = cursor.partition("|")
@@ -149,7 +162,7 @@ class SessionService:
             if sess is None:
                 sess, _ = await self.create(
                     call["tenant_id"], call_ref=call["_id"], call_id=call["_id"],
-                    caller=call.get("from_number"), destination=call.get("to_number"),
+                    caller=call.get("from_number"), destination=call.get("to_number"), fs_uuid=call.get("fs_uuid"),
                     language=call.get("language", "auto"), metadata=call.get("metadata") or {}, source="call")
                 await self.db["calls"].update_one({"_id": call["_id"]}, {"$set": {"session_id": sess["_id"]}})
             st = call["state"]

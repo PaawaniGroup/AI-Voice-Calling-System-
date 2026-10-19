@@ -210,7 +210,8 @@ async def call_recordings(request: Request, call_id: str, p: Principal = Depends
     await _own_call(request, p, call_id)
     rows = await repos.db["recordings"].find({"call_id": call_id, "tenant_id": p.tenant_id}).to_list(50)
     return {"items": [{"id": r["_id"], "status": r["status"], "duration_s": r.get("duration_s"),
-                       "size_bytes": r.get("size_bytes"), "created_at": r["created_at"]} for r in rows]}
+                       "size_bytes": r.get("size_bytes"), "created_at": r["created_at"],
+                       "retention_until": r.get("retention_until")} for r in rows]}
 
 
 @v1.get("/recordings/{recording_id}/download-url")
