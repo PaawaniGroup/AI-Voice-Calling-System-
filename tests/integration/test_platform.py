@@ -59,6 +59,16 @@ async def test_login_is_rate_limited_and_hashes_are_scrypt(env):
         userlib.hash_password("short")
 
 
+async def test_platform_role_only_from_cli_not_http(env):
+    r = await env.client.post("/v1/admin/users", json={"username": "root1", "password": PW, "role": "platform"}, headers=auth("t1", ("telephony:admin",)))
+    assert r.status_code == 422  # not an allowed value over HTTP
+    await userlib.create_user(env.db, "root1", PW, "t1", "platform", allow_platform=True)
+    tok = (await env.client.post("/v1/auth/login", json={"username": "root1", "password": PW})).json()["access_token"]
+    h = {"Authorization": "Bearer " + tok}
+    r = await env.client.put("/v1/admin/tenants/t9/policy", json={"enabled": True, "caller_ids": ["+911140000000"]}, headers=h)
+    assert r.status_code == 200 and r.json()["tenant_id"] == "t9"
+
+
 async def test_disabled_user_cannot_login_and_users_are_tenant_scoped(env):
     await userlib.create_user(env.db, "carl", PW, "t1", "operator")
     await userlib.create_user(env.db, "dina", PW, "t2", "admin")

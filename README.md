@@ -1,6 +1,8 @@
-# MME_TELEPHONY (Phase 2)
+# MME_TELEPHONY — telephony backend, sessions, dashboard, AI contracts
 
-Standalone telephony service for Make My Education: FreeSWITCH control over ESL, durable call lifecycle, tenant-isolated REST API, Plivo/gateway provider adapters, webhooks, usage/analytics. **No AI/voice-agent code is included or active (Phase 3).**
+Standalone service for Make My Education: FreeSWITCH control over ESL, durable call + counselling-session lifecycle, tenant-isolated REST API (54 routes, [docs/ROUTES.md](docs/ROUTES.md)), a web **management dashboard** at `/dashboard/`, Plivo/gateway provider adapters, signed webhooks, usage/analytics, and **AI session contracts** (model adapters, media WebSocket protocol). **AI is off by default and cannot start a session until a real media bridge exists (none is installed); real STT/Brain/TTS models have not been reached.**
+
+Start here: [docs/ACCEPTANCE_AI_PLATFORM.md](docs/ACCEPTANCE_AI_PLATFORM.md) (what works / what is blocked), [docs/API_INTEGRATION_GUIDE.md](docs/API_INTEGRATION_GUIDE.md), [docs/MIGRATION_FROM_PROTOTYPE.md](docs/MIGRATION_FROM_PROTOTYPE.md).
 
 Status and honest limits: `docs/PHASE_2_ACCEPTANCE.md`. Nothing has been verified against a real carrier, Plivo, Atlas or a production host.
 
@@ -28,6 +30,12 @@ Minimum for local dev: `MME_TEL_MONGO_URI`, `MME_TEL_JWT_SECRET`, `MME_TEL_WEBHO
 
 ## FreeSWITCH dialplan (once per FreeSWITCH)
 `scripts/install_fs_dialplan.sh [--with-test-context]` backs up the conf tree, installs `config/freeswitch/mme_dialplan.xml` (+ the isolated loopback test context for development), then `python scripts/esl_check.py reloadxml`. Needs write access to the FreeSWITCH config directory.
+
+## Dashboard
+`http://127.0.0.1:8800/dashboard/` — Overview, Live calls (SSE with polling fallback), Call details, Call controls, Sessions, Recordings, AI configuration, Logs & system, Users. Create the first user on the host: `MME_TEL_NEW_USER_PASSWORD='…' python scripts/create_user.py <name> <tenant> <viewer|operator|admin|platform>`. Roles: viewer (read, numbers masked) < operator (place/hang up/transfer, AI start/stop) < admin (users, AI config, webhooks, logs); platform = cross-tenant (CLI-created only). Tested in real headless Chromium (`tests/e2e`; install with `pip install playwright && PLAYWRIGHT_BROWSERS_PATH=~/pw-browsers python -m playwright install chromium` and system libs via `playwright install-deps`).
+
+## Record your existing inbound DID calls (no dialplan change)
+`MME_TEL_OBSERVE_CONTEXTS=public` + an inbound route for the DID: the service records the call and session and sends **no** command to FreeSWITCH. Check on loopback: `bash scripts/verify_observe_inbound.sh`.
 
 ## Run
 ```bash

@@ -21,6 +21,7 @@ from config.settings import Settings
 _N, _R, _P = 2**14, 8, 1
 _USERNAME = re.compile(r"^[a-z0-9._@-]{3,64}$")
 ROLE_NAMES = {"viewer", "operator", "admin"}
+CLI_ONLY_ROLES = {"platform"}  # cross-tenant; can only be created from the host (scripts/create_user.py), never over HTTP
 
 
 def hash_password(password: str) -> str:
@@ -46,7 +47,8 @@ def verify_password(password: str, stored: str | None) -> bool:
 
 def roles_for(s: Settings, role: str) -> list[str]:
     return {"viewer": [s.role_viewer], "operator": [s.role_user, s.role_viewer],
-            "admin": [s.role_admin, s.role_user, s.role_viewer]}[role]
+            "admin": [s.role_admin, s.role_user, s.role_viewer],
+            "platform": [s.role_platform, s.role_admin, s.role_user, s.role_viewer]}[role]
 
 
 def issue_token(s: Settings, user: dict) -> tuple[str, int]:
@@ -69,11 +71,11 @@ def valid_username(u: str) -> str:
     return u
 
 
-async def create_user(db, username: str, password: str, tenant_id: str, role: str) -> dict:
+async def create_user(db, username: str, password: str, tenant_id: str, role: str, *, allow_platform: bool = False) -> dict:
     from pymongo.errors import DuplicateKeyError
 
     from app.core.errors import Conflict
-    if role not in ROLE_NAMES:
+    if role not in ROLE_NAMES and not (allow_platform and role in CLI_ONLY_ROLES):
         raise Unprocessable("role must be viewer, operator or admin", code="invalid_role")
     doc = {"username": valid_username(username), "password_hash": hash_password(password), "tenant_id": tenant_id,
            "role": role, "disabled": False, "created_at": utcnow(), "last_login_at": None}

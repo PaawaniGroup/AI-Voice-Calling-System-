@@ -1,6 +1,7 @@
 """Create a dashboard user (bootstrap the first admin).
 
-Usage:  MME_TEL_MONGO_URI=... MME_TEL_MONGO_DB=... python scripts/create_user.py <username> <tenant_id> <viewer|operator|admin>
+Usage:  MME_TEL_MONGO_URI=... MME_TEL_MONGO_DB=... python scripts/create_user.py <username> <tenant_id> <viewer|operator|admin|platform>
+(`platform` = cross-tenant administrator; it can only be created here, never through the HTTP API.)
 The password is read from the MME_TEL_NEW_USER_PASSWORD environment variable or an interactive hidden prompt;
 it is never accepted as a command-line argument (it would appear in `ps` and shell history) and never printed.
 """
@@ -26,7 +27,7 @@ async def main() -> int:
     db = Database(Settings())
     await db.connect()
     try:
-        u = await create_user(db, username, pw, tenant, role)
+        u = await create_user(db, username, pw, tenant, role, allow_platform=True)
         print(f"created user '{u['username']}' tenant={tenant} role={role}")
         return 0
     except Exception as e:

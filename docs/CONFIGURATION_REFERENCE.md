@@ -11,7 +11,15 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 
 | Variable | Type | Required | Default | Secret | Valid range / values | Restart | Env | Purpose |
 |---|---|---|---|---|---|---|---|---|
-| `MME_TEL_AI_ENABLED` | bool | no | False | no | - | yes | all | Phase 3 AI integration. MUST be false in Phase 2. |
+| `MME_TEL_AI_ALLOWED_HOSTS` | str | no | '127.0.0.1,localhost' | no | - | yes | all | Comma-separated host allowlist for model/RAG URLs set through the dashboard. |
+| `MME_TEL_AI_API_KEY` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | Bearer key sent to model servers (secret; never shown in the UI). |
+| `MME_TEL_AI_BRAIN_MODEL` | str | no | 'Qwen3-30B-A3B-Instruct-2507' | no | - | yes | all | Brain/LLM model identifier. |
+| `MME_TEL_AI_ENABLED` | bool | no | False | no | - | yes | all | Global AI switch. Default off. Even when true, an AI session only starts when the media bridge is ready. |
+| `MME_TEL_AI_MAX_CONCURRENCY` | int | no | 4 | no | ge=1, le=64 | yes | all | Max concurrent model requests per process. |
+| `MME_TEL_AI_MEDIA_BRIDGE` | enum | no | 'none' | no | one of 'none', 'ws_fork' | yes | all | Media bridge implementation. 'none' = not available (default). 'ws_fork' needs a FreeSWITCH media-fork module that is NOT installed on the audited host. |
+| `MME_TEL_AI_REQUEST_TIMEOUT_S` | float | no | 15.0 | no | gt=0, le=120 | yes | all | Default timeout for model service requests. |
+| `MME_TEL_AI_STT_MODEL` | str | no | 'Oriserve/Whisper-Hindi2Hinglish-Prime' | no | - | yes | all | STT model identifier (informational; the model server owns the weights). |
+| `MME_TEL_AI_TTS_MODEL` | str | no | 'Qwen/Qwen3-TTS-12Hz-1.7B-Base' | no | - | yes | all | TTS model identifier. |
 ## API/runtime
 
 | Variable | Type | Required | Default | Secret | Valid range / values | Restart | Env | Purpose |
@@ -39,12 +47,14 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_JWT_ROLES_CLAIM` | str | no | 'roles' | no | - | yes | all | Claim carrying the role list. |
 | `MME_TEL_JWT_SECRET` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | HS256 verification secret shared with MME identity (secret). Required. |
 | `MME_TEL_JWT_TENANT_CLAIM` | str | no | 'tenant_id' | no | - | yes | all | Claim carrying the tenant id. |
+| `MME_TEL_JWT_TTL_S` | int | no | 28800 | no | ge=300, le=604800 | yes | all | Lifetime of tokens issued by /v1/auth/login. |
 | `MME_TEL_METRICS_TOKEN` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | Bearer token required for /metrics. Empty = loopback clients only. |
 | `MME_TEL_RATE_LIMIT_CALL_CREATE_PER_MIN` | int | no | 30 | no | ge=1 | yes | all | Per-tenant POST /calls per minute. |
 | `MME_TEL_RATE_LIMIT_PER_MIN` | int | no | 120 | no | ge=1 | yes | all | Per-principal API requests/minute. |
 | `MME_TEL_ROLE_ADMIN` | str | no | 'telephony:admin' | no | - | yes | all | Role granting tenant-admin operations. |
 | `MME_TEL_ROLE_PLATFORM` | str | no | 'platform:admin' | no | - | yes | all | Role granting cross-tenant/system admin operations. |
 | `MME_TEL_ROLE_USER` | str | no | 'telephony:user' | no | - | yes | all | Role granting call operations. |
+| `MME_TEL_ROLE_VIEWER` | str | no | 'telephony:viewer' | no | - | yes | all | Read-only dashboard role. |
 | `MME_TEL_STATUS_REQUIRES_AUTH` | bool | no | True | no | - | yes | all | Require auth for /v1/telephony/status. |
 | `MME_TEL_WEBHOOK_SIGNING_MASTER` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | Master key deriving per-endpoint outbound webhook secrets. |
 ## Call control/queue
@@ -112,6 +122,15 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_LOG_LEVEL` | enum | no | 'INFO' | no | one of 'DEBUG', 'INFO', 'WARNING', 'ERROR' | no | all | Log level. |
 | `MME_TEL_READY_MAX_EVENT_AGE_S` | float | no | 120.0 | no | gt=1 | yes | all | Readiness: FreeSWITCH heartbeat must be fresher than this. |
 | `MME_TEL_TRACING_ENABLED` | bool | no | False | no | - | yes | all | Reserved; tracing not implemented. |
+## Other
+
+| Variable | Type | Required | Default | Secret | Valid range / values | Restart | Env | Purpose |
+|---|---|---|---|---|---|---|---|---|
+| `MME_TEL_DASHBOARD_ENABLED` | bool | no | True | no | - | yes | all | Serve the management dashboard at /dashboard. |
+| `MME_TEL_ERROR_LOG_BUFFER` | int | no | 500 | no | ge=10, le=10000 | yes | all | Recent warning/error log records kept in memory for the dashboard. |
+| `MME_TEL_LOGIN_ENABLED` | bool | no | True | no | - | yes | all | Enable POST /v1/auth/login (local users in MongoDB, scrypt hashes). |
+| `MME_TEL_LOGIN_RATE_LIMIT_PER_MIN` | int | no | 10 | no | ge=1 | yes | all | Failed+successful login attempts per client IP per minute. |
+| `MME_TEL_OBSERVE_CONTEXTS` | str | no | `""` | no | - | yes | all | Comma-separated FreeSWITCH contexts (e.g. 'public') whose inbound calls are RECORDED ONLY (call+session created for numbers with an inbound route; nothing is answered/rejected/bridged). |
 ## Outbound webhooks
 
 | Variable | Type | Required | Default | Secret | Valid range / values | Restart | Env | Purpose |
