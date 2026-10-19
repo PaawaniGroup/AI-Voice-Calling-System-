@@ -13,11 +13,12 @@ from config.settings import Settings
 
 log = logging.getLogger("mme_telephony.db")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 COLLECTIONS = [
     "calls", "call_events", "idempotency", "recordings", "audit", "tenant_policies",
-    "inbound_routes", "webhook_endpoints", "webhook_deliveries", "provider_dedup", "_schema",
+    "inbound_routes", "webhook_endpoints", "webhook_deliveries", "provider_dedup", "sessions", "ai_sessions", "ai_config",
+    "users", "_schema",
 ]
 
 
@@ -83,6 +84,9 @@ class Database:
         await calls.create_index([("fs_uuid", ASCENDING)], name="fs_uuid", sparse=True)
         await calls.create_index([("fs_uuids", ASCENDING)], name="fs_uuids", sparse=True)
         await calls.create_index([("job_uuid", ASCENDING)], name="job_uuid", sparse=True)
+        # backstop: one inbound call record per FreeSWITCH channel even if two events race past the in-memory guard
+        await calls.create_index([("fs_uuid", ASCENDING)], name="uniq_inbound_fs_uuid", unique=True,
+                                 partialFilterExpression={"direction": "inbound", "fs_uuid": {"$type": "string"}})
         await calls.create_index([("provider", ASCENDING), ("provider_call_id", ASCENDING)],
                                  name="provider_call", sparse=True)
         await calls.create_index([("created_at", ASCENDING), ("tenant_id", ASCENDING), ("state", ASCENDING)],
@@ -110,6 +114,17 @@ class Database:
         await self["webhook_deliveries"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)
         await self["provider_dedup"].create_index([("key", ASCENDING)], name="key", unique=True)
         await self["provider_dedup"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)
+        await self["sessions"].create_index([("tenant_id", ASCENDING), ("call_ref", ASCENDING)], name="uniq_call_ref", unique=True,
+                                            partialFilterExpression={"call_ref": {"$type": "string"}})
+        await self["sessions"].create_index([("tenant_id", ASCENDING), ("created_at", DESCENDING)], name="tenant_created")
+        await self["sessions"].create_index([("tenant_id", ASCENDING), ("status", ASCENDING)], name="tenant_status")
+        await self["sessions"].create_index([("call_id", ASCENDING)], name="call_id", sparse=True)
+        await self["sessions"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)
+        await self["ai_sessions"].create_index([("session_id", ASCENDING)], name="session", unique=True)
+        await self["ai_sessions"].create_index([("tenant_id", ASCENDING), ("state", ASCENDING)], name="tenant_state")
+        await self["ai_config"].create_index([("tenant_id", ASCENDING)], name="tenant", unique=True)
+        await self["users"].create_index([("username", ASCENDING)], name="username", unique=True)
+        await self["users"].create_index([("tenant_id", ASCENDING)], name="tenant")
         await self["_schema"].update_one(
             {"_id": "version"}, {"$set": {"v": SCHEMA_VERSION, "updated_at": utcnow()}}, upsert=True)
         log.info("schema ready v%s", SCHEMA_VERSION)

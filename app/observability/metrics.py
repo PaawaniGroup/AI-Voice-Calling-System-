@@ -31,6 +31,12 @@ API_LATENCY = Histogram("mme_tel_api_seconds", "API latency", ["route_group", "s
                         buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5))
 RECONCILE_FIXES = Counter("mme_tel_reconcile_total", "Reconciliation actions", ["action"], registry=REGISTRY)
 RECORDING_FAILURES = Counter("mme_tel_recording_failures_total", "Recording failures", registry=REGISTRY)
+SESSIONS = Counter("mme_tel_sessions_total", "Session state changes", ["state"], registry=REGISTRY)
+AI_REQUESTS = Counter("mme_tel_ai_requests_total", "Model service requests", ["service", "outcome"], registry=REGISTRY)
+AI_LATENCY = Histogram("mme_tel_ai_seconds", "Model service latency", ["service"], registry=REGISTRY,
+                       buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30))
+AI_SESSIONS = Counter("mme_tel_ai_sessions_total", "AI session lifecycle", ["state"], registry=REGISTRY)
+LOGINS = Counter("mme_tel_logins_total", "Dashboard logins", ["outcome"], registry=REGISTRY)
 RATE_LIMITED = Counter("mme_tel_rate_limited_total", "Requests rejected by rate limiting", registry=REGISTRY)
 
 

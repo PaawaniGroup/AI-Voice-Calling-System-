@@ -69,9 +69,10 @@ def test_esl_must_be_private_unless_explicit():
     S(esl_host="8.8.8.8", esl_allow_non_private=True)  # explicit override, warns
 
 
-def test_phase3_features_cannot_be_enabled():
-    with pytest.raises(ValidationError, match="AI"):
-        S(ai_enabled=True)
+def test_ai_is_off_by_default_and_webrtc_cannot_be_enabled():
+    s = S()
+    assert not s.ai_enabled and s.ai_media_bridge == "none"
+    assert any("media bridge" in w.lower() for w in S(ai_enabled=True).problems()[1])
     with pytest.raises(ValidationError, match="WEBRTC"):
         S(webrtc_enabled=True)
 

@@ -25,8 +25,10 @@ from config.settings import Settings
 
 log = logging.getLogger("mme_telephony.webhooks")
 
-EVENT_TYPES = {"call.initiated", "call.ringing", "call.answered", "call.bridged", "call.transferring",
-               "call.completed", "call.failed", "call.cancelled", "call.busy", "call.no_answer"}
+EVENT_TYPES = {"call.created", "call.initiated", "call.ringing", "call.answered", "call.bridged", "call.transferring",
+               "call.completed", "call.ended", "call.failed", "call.cancelled", "call.busy", "call.no_answer",
+               "session.created", "session.answered", "session.ended",
+               "ai.session.started", "ai.session.stopped", "ai.session.failed", "transcript.ready", "summary.ready"}
 _STATE_EVENT = {"initiating": "call.initiated", "ringing": "call.ringing", "answered": "call.answered",
                 "bridged": "call.bridged", "transferring": "call.transferring", "completed": "call.completed",
                 "failed": "call.failed", "cancelled": "call.cancelled", "busy": "call.busy",
@@ -84,8 +86,22 @@ class WebhookEmitter:
     async def emit_for_call(self, call: dict, event_type: str, event_id: str, extra: dict | None = None) -> None:
         if not self.s.webhooks_enabled:
             return
+        # Payload deliberately excludes recording URLs and unneeded personal data (numbers are masked).
+        data = {
+            "call_id": call["_id"], "tenant_id": call["tenant_id"], "direction": call.get("direction"),
+            "state": call.get("state"), "session_id": call.get("session_id"),
+            "failure_reason": call.get("failure_reason"),
+            "hangup_cause": call.get("hangup_cause"), "connected_duration_s": call.get("connected_duration_s"),
+            "to_masked": _mask(call.get("to_number", "")), **(extra or {}),
+        }
+        await self.emit_generic(call["tenant_id"], event_type, event_id, data)
+
+    async def emit_generic(self, tenant_id: str, event_type: str, event_id: str, data: dict) -> None:
+        """Queue one delivery per matching endpoint. Unique (endpoint, event) index makes re-emitting harmless."""
+        if not self.s.webhooks_enabled:
+            return
         eps = await self.db["webhook_endpoints"].find(
-            {"tenant_id": call["tenant_id"], "enabled": True, "events": {"$in": [event_type, "*"]}}).to_list(50)
+            {"tenant_id": tenant_id, "enabled": True, "events": {"$in": [event_type, "*"]}}).to_list(50)
         if not eps:
             return
         if await self.db["webhook_deliveries"].count_documents({"status": {"$in": ["pending", "retrying"]}}) \
@@ -94,20 +110,12 @@ class WebhookEmitter:
             log.error("webhook queue full; dropping event")
             return
         now = utcnow()
-        # Payload deliberately excludes recording URLs and unneeded personal data (numbers are masked).
-        payload = {
-            "id": event_id, "type": event_type, "api_version": "2025-01", "created_at": now.isoformat(),
-            "data": {
-                "call_id": call["_id"], "tenant_id": call["tenant_id"], "direction": call.get("direction"),
-                "state": call.get("state"), "failure_reason": call.get("failure_reason"),
-                "hangup_cause": call.get("hangup_cause"), "connected_duration_s": call.get("connected_duration_s"),
-                "to_masked": _mask(call.get("to_number", "")), **(extra or {}),
-            },
-        }
+        payload = {"id": event_id, "type": event_type, "api_version": "2025-01", "created_at": now.isoformat(),
+                   "data": {"tenant_id": tenant_id, **data}}
         for ep in eps:
             try:
                 await self.db["webhook_deliveries"].insert_one({
-                    "_id": new_id("dlv"), "tenant_id": call["tenant_id"], "endpoint_id": ep["_id"], "event_id": event_id,
+                    "_id": new_id("dlv"), "tenant_id": tenant_id, "endpoint_id": ep["_id"], "event_id": event_id,
                     "event_type": event_type, "payload": payload, "status": "pending", "attempts": [],
                     "attempt_count": 0, "next_attempt_at": now, "created_at": now,
                     "purge_at": now + timedelta(days=self.s.retention_events_days)})

@@ -17,6 +17,9 @@ _SENSITIVE_KEYS = re.compile(
 )
 _URI_CRED = re.compile(r"(\w+://)([^/@\s:]+):([^/@\s]+)@")
 _PHONE = re.compile(r"\+?\d{8,15}")
+# inline secrets in free text: password=..., token: ..., Bearer <jwt>, api_key=...
+_INLINE_SECRET = re.compile(r"(?i)\b(pass(?:word|wd)?|secret|token|api[_-]?key|authorization|auth[_-]?token)\b(\s*[=:]\s*)(?:bearer\s+)?[^\s,;&\"']+")
+_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 
 
 def mask_phone(value: str) -> str:
@@ -37,6 +40,7 @@ def redact(obj: Any, depth: int = 0) -> Any:
         return [redact(v, depth + 1) for v in obj]
     if isinstance(obj, str):
         s = _URI_CRED.sub(r"\1\2:***@", obj)
+        s = _BEARER.sub("Bearer ***", _INLINE_SECRET.sub(r"\1\2***", s))
         return _PHONE.sub(lambda m: mask_phone(m.group(0)), s) if len(s) < 400 else s[:400]
     return obj
 
@@ -78,6 +82,29 @@ def setup_logging(level: str = "INFO", fmt: str = "json", service: str = "mme-te
     root.setLevel(level)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+
+class RingHandler(logging.Handler):
+    """Keeps the most recent WARNING+ records (redacted) for the dashboard's log view."""
+
+    def __init__(self, size: int = 500):
+        super().__init__(level=logging.WARNING)
+        from collections import deque
+        self.buf = deque(maxlen=size)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = redact(record.getMessage())
+            if record.exc_info:
+                msg += " | " + type(record.exc_info[1]).__name__
+            self.buf.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)), "level": record.levelname,
+                             "logger": record.name, "msg": msg, "request_id": request_id_var.get(), **redact(getattr(record, "ctx", None) or {})})
+        except Exception:
+            pass
+
+    def snapshot(self, limit: int = 100, level: str | None = None, q: str | None = None) -> list[dict]:
+        rows = [r for r in self.buf if (not level or r["level"] == level.upper()) and (not q or q.lower() in r["msg"].lower())]
+        return rows[-limit:][::-1]
 
 
 def event(logger: logging.Logger, msg: str, level: int = logging.INFO, **ctx: Any) -> None:

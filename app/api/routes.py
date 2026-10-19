@@ -17,7 +17,7 @@ from app.events import webhooks as wh
 from app.observability import metrics as m
 from app.persistence.repos import Repos
 from app.providers import plivo as plivo_mod
-from app.security.auth import Principal, require_admin, require_platform, require_user
+from app.security.auth import Principal, require_admin, require_platform, require_user, require_viewer
 from app.services import calls as call_svc
 from app.services import recordings as rec_svc
 from app.telephony.state_machine import CONNECTED, TERMINAL, S
@@ -95,7 +95,7 @@ async def metrics(request: Request):
 async def status(request: Request):
     s, repos, ctrl = _ctx(request)
     if s.status_requires_auth:
-        require_user(request)
+        require_viewer(request)
     ev = ctrl.esl_events
     return {
         "service": s.app_name, "version": s.app_version, "env": s.env, "provider": s.provider,
@@ -103,18 +103,29 @@ async def status(request: Request):
                        "command_channel_connected": bool(ctrl.esl_cmd and ctrl.esl_cmd.connected)},
         "active_calls": await repos.count_active(), "queued_calls": await repos.count_queued(),
         "real_calls_enabled": s.real_calls_enabled, "recording_enabled": s.recording_enabled,
-        "ai_enabled": False,
+        "ai_enabled": s.ai_enabled,
     }
 
 
 # ------------------------------------------------------------------ calls
 @v1.post("/calls", status_code=202)
 async def create_call(request: Request, body: CallCreate, response: Response,
-                      idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=128),
+                      idempotency_key: str | None = Header(None, alias="Idempotency-Key", min_length=8, max_length=128),
                       p: Principal = Depends(require_user)):
     s, repos, _ = _ctx(request)
     request.app.state.limiter.check(f"create:{p.tenant_id}", s.rate_limit_call_create_per_min)
-    call, created = await call_svc.create_call(s, repos, p, body.model_dump(exclude_none=True), idempotency_key)
+    payload = body.model_dump(exclude_none=True)
+    key = idempotency_key or body.idempotency_key
+    if not key:
+        raise Unprocessable("Idempotency-Key header (or idempotency_key) is required", code="idempotency_key_required")
+    call, created = await call_svc.create_call(s, repos, p, payload, key)
+    if created:
+        sess, _ = await request.app.state.sessions.create(
+            p.tenant_id, call_ref=call["_id"], call_id=call["_id"], caller=call["from_number"], destination=call["to_number"],
+            language=call.get("language", "auto"), metadata=call.get("metadata"), source="api")
+        await repos.update_call(call["_id"], {"session_id": sess["_id"]})
+        call["session_id"] = sess["_id"]
+        await request.app.state.controller.emitter.emit_for_call(call, "call.created", f"{call['_id']}:created")
     if created:
         await repos.audit(p.tenant_id, p.sub, "call.create", call["_id"], {"direction": "outbound"},
                           request.state.request_id)
@@ -128,7 +139,7 @@ async def create_call(request: Request, body: CallCreate, response: Response,
 async def list_calls(request: Request, state: str | None = None, direction: str | None = None,
                      start: datetime | None = None, end: datetime | None = None,
                      limit: int = Query(50, ge=1, le=200), cursor: str | None = None,
-                     p: Principal = Depends(require_user)):
+                     p: Principal = Depends(require_viewer)):
     _, repos, _ = _ctx(request)
     if state and state not in {x.value for x in S}:
         raise Unprocessable("unknown state", code="invalid_state")
@@ -137,12 +148,15 @@ async def list_calls(request: Request, state: str | None = None, direction: str 
                                            limit=limit, cursor=cursor)
     except ValueError:
         raise Unprocessable("invalid cursor", code="invalid_cursor") from None
-    return {"items": [call_out(c) for c in rows], "next_cursor": nxt}
+    from app.api.routes_platform import _can_see_numbers
+    full = _can_see_numbers(request, p)
+    return {"items": [call_out(c, mask=not full) for c in rows], "next_cursor": nxt}
 
 
 @v1.get("/calls/{call_id}")
-async def get_call(request: Request, call_id: str, p: Principal = Depends(require_user)):
-    return call_out(await _own_call(request, p, call_id))
+async def get_call(request: Request, call_id: str, p: Principal = Depends(require_viewer)):
+    from app.api.routes_platform import _can_see_numbers
+    return call_out(await _own_call(request, p, call_id), mask=not _can_see_numbers(request, p))
 
 
 @v1.post("/calls/{call_id}/hangup")
@@ -181,7 +195,7 @@ async def transfer(request: Request, call_id: str, body: TransferRequest, p: Pri
 
 
 @v1.get("/calls/{call_id}/events")
-async def call_events(request: Request, call_id: str, p: Principal = Depends(require_user)):
+async def call_events(request: Request, call_id: str, p: Principal = Depends(require_viewer)):
     _, repos, _ = _ctx(request)
     await _own_call(request, p, call_id)
     evs = await repos.list_events(call_id, p.tenant_id)
@@ -191,7 +205,7 @@ async def call_events(request: Request, call_id: str, p: Principal = Depends(req
 
 # ------------------------------------------------------------------ recordings
 @v1.get("/calls/{call_id}/recordings")
-async def call_recordings(request: Request, call_id: str, p: Principal = Depends(require_user)):
+async def call_recordings(request: Request, call_id: str, p: Principal = Depends(require_viewer)):
     _, repos, _ = _ctx(request)
     await _own_call(request, p, call_id)
     rows = await repos.db["recordings"].find({"call_id": call_id, "tenant_id": p.tenant_id}).to_list(50)
@@ -231,7 +245,7 @@ async def _aggregate(repos: Repos, tenant: str | None, start, end, group_by: lis
 
 @v1.get("/usage")
 async def usage(request: Request, start: datetime | None = None, end: datetime | None = None,
-                tenant_id: str | None = None, p: Principal = Depends(require_user)):
+                tenant_id: str | None = None, p: Principal = Depends(require_viewer)):
     s, repos, _ = _ctx(request)
     tenant = p.tenant_id
     if tenant_id and tenant_id != p.tenant_id:
@@ -258,7 +272,7 @@ async def usage(request: Request, start: datetime | None = None, end: datetime |
 
 @v1.get("/analytics/calls")
 async def analytics(request: Request, start: datetime | None = None, end: datetime | None = None,
-                    format: str = Query("json", pattern="^(json|csv)$"), p: Principal = Depends(require_user)):
+                    format: str = Query("json", pattern="^(json|csv)$"), p: Principal = Depends(require_viewer)):
     _, repos, _ = _ctx(request)
     rows = await _aggregate(repos, p.tenant_id, start, end, ["direction"])
     outcomes: dict[str, int] = {}

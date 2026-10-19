@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class Strict(BaseModel):
@@ -12,7 +12,13 @@ class Strict(BaseModel):
 
 class CallCreate(Strict):
     to: str = Field(min_length=5, max_length=32, description="Destination (E.164 preferred)")
-    from_number: str = Field(min_length=5, max_length=32, description="Approved caller ID")
+    from_number: str = Field(min_length=5, max_length=32, validation_alias=AliasChoices("from_number", "from"),
+                             description="Approved caller ID (accepted as `from` or `from_number`)")
+    tenant_id: str | None = Field(None, max_length=100, description="Optional; must equal the tenant in the token. Never used for authorization.")
+    ai_enabled: bool = Field(False, description="Request AI handling. The AI session still only starts when the media bridge is ready.")
+    language: str = Field("auto", description="auto | hi | en | hinglish")
+    webhook_url: str | None = Field(None, description="Not supported per call; register /v1/webhooks/endpoints instead (must be null).")
+    idempotency_key: str | None = Field(None, min_length=8, max_length=128, description="Alternative to the Idempotency-Key header (header wins).")
     bridge_to: str | None = Field(None, max_length=32, description="Optional second party to bridge on answer")
     max_duration_s: int | None = Field(None, ge=10, le=14400)
     metadata: dict[str, str | int | bool] | None = Field(None, description="Opaque client metadata (<=10 keys)")
@@ -32,6 +38,9 @@ class TransferRequest(Strict):
 class CallOut(BaseModel):
     id: str
     tenant_id: str
+    session_id: str | None = None
+    ai_enabled: bool = False
+    language: str = "auto"
     direction: str
     state: str
     provider: str
@@ -58,11 +67,15 @@ class CallOut(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-def call_out(c: dict) -> dict:
+def call_out(c: dict, mask: bool = False) -> dict:
+    """mask=True hides caller/destination digits (read-only viewers)."""
+    from app.core.logging import mask_phone
+    mk = (lambda n: mask_phone(n) if n else n) if mask else (lambda n: n)
     return CallOut(
-        id=c["_id"], tenant_id=c["tenant_id"], direction=c.get("direction", "outbound"), state=c["state"],
-        provider=c.get("provider", ""), from_number=c.get("from_number", ""), to_number=c.get("to_number", ""),
-        bridge_to=c.get("bridge_to"), provider_call_id=c.get("provider_call_id"), fs_uuid=c.get("fs_uuid"),
+        id=c["_id"], tenant_id=c["tenant_id"], session_id=c.get("session_id"), ai_enabled=bool(c.get("ai_enabled")),
+        language=c.get("language", "auto"), direction=c.get("direction", "outbound"), state=c["state"],
+        provider=c.get("provider", ""), from_number=mk(c.get("from_number", "")), to_number=mk(c.get("to_number", "")),
+        bridge_to=mk(c.get("bridge_to")), provider_call_id=c.get("provider_call_id"), fs_uuid=c.get("fs_uuid"),
         created_at=c["created_at"], queued_at=c.get("queued_at"), initiated_at=c.get("initiated_at"),
         ringing_at=c.get("ringing_at"), answered_at=c.get("answered_at"), bridged_at=c.get("bridged_at"),
         ended_at=c.get("ended_at"), ring_duration_s=c.get("ring_duration_s"),

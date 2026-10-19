@@ -52,6 +52,15 @@ def principal_dep(request: Request) -> Principal:
     return p
 
 
+def require_viewer(request: Request) -> Principal:
+    """Read-only access: viewer, operator (user), admin or platform."""
+    p = principal_dep(request)
+    s: Settings = request.app.state.settings
+    if not any(p.has(r) for r in (s.role_viewer, s.role_user, s.role_admin, s.role_platform)):
+        raise Forbidden("insufficient role")
+    return p
+
+
 def require_user(request: Request) -> Principal:
     p = principal_dep(request)
     s: Settings = request.app.state.settings

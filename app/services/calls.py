@@ -45,6 +45,14 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
         raise Forbidden("calling is not enabled for this tenant", code="tenant_calling_disabled")
     if pstn_path(s) and not s.real_calls_enabled:
         raise Forbidden("real PSTN calls are disabled (MME_TEL_REAL_CALLS_ENABLED=false)", code="real_calls_disabled")
+    from app.services.sessions import LANGUAGES
+    if body.get("tenant_id") not in (None, tenant):
+        raise Forbidden("tenant_id does not match the authenticated tenant", code="tenant_mismatch")
+    if body.get("webhook_url"):
+        raise phone.Unprocessable("per-call webhook_url is not supported; register /v1/webhooks/endpoints", code="webhook_url_unsupported")
+    language = body.get("language", "auto")
+    if language not in LANGUAGES:
+        raise phone.Unprocessable("unsupported language", code="invalid_language", details={"supported": sorted(LANGUAGES)})
     to = phone.normalize(body["to"], s.default_region)
     frm = phone.normalize(body["from_number"], s.default_region)
     dp.check_destination(to)
@@ -56,7 +64,7 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
     max_dur = min(body.get("max_duration_s") or pol["max_duration_s"], pol["max_duration_s"])
 
     fp = fingerprint({"to": to, "from": frm, "bridge_to": bridge_to, "max_duration_s": body.get("max_duration_s"),
-                      "metadata": body.get("metadata")})
+                      "metadata": body.get("metadata"), "ai_enabled": bool(body.get("ai_enabled")), "language": language})
     call_id = new_id("call")
     existing = await repos.claim_idempotency(tenant, "create_call", idem_key, fp, call_id)
     if existing is not None:
@@ -83,7 +91,7 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
             "queued_at": now, "created_at": now, "idempotency_key": idem_key, "created_by": p.sub,
             "correlation_id": correlation_id_var.get() if correlation_id_var.get() != "-" else new_id("cor"),
             "max_duration_s": max_dur, "metadata": body.get("metadata") or {},
-            "recording_policy": pol["recording"],
+            "recording_policy": pol["recording"], "ai_enabled": bool(body.get("ai_enabled")), "language": language,
         }
         await repos.insert_call(call)
         await repos.add_event(call, "state.queued", "api", f"created:{call_id}", {})

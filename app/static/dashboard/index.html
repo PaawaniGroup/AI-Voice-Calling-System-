@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MME Voice Counselling · Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form" class="card">
+      <h1>MME Voice Console</h1>
+      <label>Username <input id="lu" autocomplete="username" required></label>
+      <label>Password <input id="lp" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+      <p id="login-err" class="err"></p>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <nav id="nav">
+      <div class="brand">MME Voice</div>
+      <a href="#/overview">Overview</a>
+      <a href="#/live">Live calls</a>
+      <a href="#/sessions">Sessions</a>
+      <a href="#/controls" data-role="operator">Call controls</a>
+      <a href="#/recordings">Recordings</a>
+      <a href="#/ai">AI configuration</a>
+      <a href="#/logs">Logs &amp; system</a>
+      <a href="#/users" data-role="admin">Users</a>
+      <div class="who"><span id="who"></span><button id="logout" class="link">Sign out</button></div>
+    </nav>
+    <main id="main"></main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

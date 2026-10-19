@@ -49,6 +49,9 @@ class Controller:
                  esl_cmd: EslCommandClient | None = None, esl_events: EslEventClient | None = None):
         self.s, self.repos, self.provider, self.emitter = s, repos, provider, emitter
         self.esl_cmd, self.esl_events = esl_cmd, esl_events
+        self._inbound_seen: dict[str, float] = {}  # fs_uuid -> first-seen time (bounded); stops CREATE+PARK double handling
+        self.sessions = None  # set by the app factory (SessionService); kept optional so the controller stays unit-testable
+        self.ai = None        # set by the app factory (AiService)
         self.bucket = TokenBucket(min(s.max_initiation_rate, s.provider_max_cps))
         self.max_active = min(s.max_active_global, s.provider_max_concurrent)
         self._tasks: list[asyncio.Task] = []
@@ -85,6 +88,12 @@ class Controller:
         if et:
             await self.emitter.emit_for_call(call, et, f"{call['_id']}:{st}:{call['state_version']}")
         if st in {s.value for s in sm.TERMINAL}:
+            await self.emitter.emit_for_call(call, "call.ended", f"{call['_id']}:ended:{call['state_version']}")
+        if self.sessions is not None:
+            await self.sessions.on_call_state(call)
+        if self.ai is not None and st in {s.value for s in sm.TERMINAL}:
+            await self.ai.on_call_ended(call)  # cancels the AI session/pipeline; never raises
+        if st in {s.value for s in sm.TERMINAL}:
             if call.get("transfer", {}).get("current"):
                 await self._finish_transfer(call, "call_ended")  # never leave a dangling attempt on a dead call
             m.CALLS_TERMINAL.labels(st).inc()
@@ -111,12 +120,14 @@ class Controller:
         return outcome, c
 
     async def finalize_from_cause(self, call: dict, cause: str, *, source: str, dedup_id: str, ts=None,
-                                  forced: tuple[S, str] | None = None) -> tuple[str, dict]:
+                                  forced: tuple[S, str] | None = None, fs_ts=None) -> tuple[str, dict]:
         answered = bool(call.get("answered_at")) or S(call["state"]) in sm.CONNECTED
         timed_out = bool(call.get("timed_out"))
         state, reason = forced or sm.classify_hangup(cause, answered=answered,
                                                       cancel_requested=bool(call.get("cancel_requested")), timed_out=timed_out)
         fields = {"hangup_cause": cause[:60], "failure_reason": reason if state != S.COMPLETED else call.get("failure_reason")}
+        if fs_ts is not None:
+            fields["fs_ended_ts"] = fs_ts
         if state == S.COMPLETED:
             fields["end_reason"] = reason
         # Pre-connect states cannot move straight to COMPLETED; classify already prevents this.
@@ -137,9 +148,16 @@ class Controller:
             if name in ("CHANNEL_CREATE", "CHANNEL_PARK") and ev.get("Call-Direction") == "inbound" \
                     and ev.get("Caller-Context") == self.s.fs_inbound_context:
                 await self._on_inbound(ev)
+            elif name in ("CHANNEL_CREATE", "CHANNEL_PARK") and ev.get("Call-Direction") == "inbound" \
+                    and ev.get("Caller-Context") in self.s.csv(self.s.observe_contexts):
+                await self._on_observed_inbound(ev)
             return
         key = f"{name}:{uuid}:{ev.get('Event-Sequence', ev.get('Event-Date-Timestamp', ''))}"
-        ts = _event_ts(ev)
+        # Clock domains: FreeSWITCH's Event-Date-Timestamp can be hours/days off this host's wall clock (observed
+        # 2.5 days on the WSL dev host). All stored timestamps and every sweeper comparison use THIS process's clock;
+        # FreeSWITCH timestamps are used only as a delta between two FreeSWITCH events (same domain).
+        fs_ts = _event_ts(ev)
+        ts = utcnow()
         if uuid != call.get("fs_uuid"):
             return await self._on_other_leg(call, ev, key, ts)
         if name == "CUSTOM" and ev.get("Event-Subclass") == "mme::transfer_failed":
@@ -150,7 +168,7 @@ class Controller:
         if name in ("CHANNEL_PROGRESS", "CHANNEL_PROGRESS_MEDIA"):
             await self.apply(call, S.RINGING, source="esl", dedup_id=key, ts=ts)
         elif name == "CHANNEL_ANSWER":
-            await self.apply(call, S.ANSWERED, source="esl", dedup_id=key, ts=ts)
+            await self.apply(call, S.ANSWERED, source="esl", dedup_id=key, ts=ts, fields={"fs_answered_ts": fs_ts})
             if call.get("direction") == "outbound":
                 await self._maybe_start_recording(call["_id"])
         elif name == "CHANNEL_BRIDGE":
@@ -165,7 +183,7 @@ class Controller:
             if call.get("transfer", {}).get("current"):
                 await self._finish_transfer(c, "completed")
         elif name in ("CHANNEL_HANGUP", "CHANNEL_HANGUP_COMPLETE"):
-            await self.finalize_from_cause(call, ev.get("Hangup-Cause", "UNKNOWN"), source="esl", dedup_id=key, ts=ts)
+            await self.finalize_from_cause(call, ev.get("Hangup-Cause", "UNKNOWN"), source="esl", dedup_id=key, ts=ts, fs_ts=fs_ts)
 
     async def _on_other_leg(self, call: dict, ev: dict, key: str, ts) -> None:
         # B-leg events: only its hangup before A-leg hangup is recorded (A-leg hangup drives the final state).
@@ -186,7 +204,19 @@ class Controller:
             m.ORIGINATIONS.labels("ok").inc()
 
     # ------------------------------------------------------------------ inbound (SIP)
+    def _first_time(self, uuid: str) -> bool:
+        """Synchronous check-and-set (no await between check and set), so concurrent handlers cannot both pass."""
+        if uuid in self._inbound_seen:
+            return False
+        if len(self._inbound_seen) > 5000:
+            for k in sorted(self._inbound_seen, key=self._inbound_seen.get)[:2500]:
+                self._inbound_seen.pop(k, None)
+        self._inbound_seen[uuid] = time.monotonic()
+        return True
+
     async def _on_inbound(self, ev: dict) -> None:
+        if not self._first_time(ev["Unique-ID"]):
+            return
         uuid, dest = ev["Unique-ID"], ev.get("Caller-Destination-Number", "")
         from app.core import phone
 
@@ -231,6 +261,38 @@ class Controller:
                 await self.esl_cmd.api(ds.kill_command(uuid, "NORMAL_CLEARING"))
         except (EslError, Unavailable, ValueError):
             await self.finalize_from_cause(c, "NORMAL_TEMPORARY_FAILURE", source="inbound", dedup_id=f"in:{uuid}:err")
+
+    async def _on_observed_inbound(self, ev: dict) -> None:
+        """RECORD-ONLY inbound handling for contexts the operator already routes elsewhere (e.g. `public`).
+
+        Creates the call + session for a number that has an inbound route, then lets normal events (answer,
+        hangup) drive state. Sends NO command to FreeSWITCH: nothing is answered, rejected, bridged or killed.
+        """
+        from app.core import phone
+
+        if not self._first_time(ev["Unique-ID"]):
+            return
+        uuid, dest = ev["Unique-ID"], ev.get("Caller-Destination-Number", "")
+        try:
+            to = phone.normalize(dest if dest.startswith("+") else "+" + dest.lstrip("+"))
+        except ApiError:
+            return
+        route = await self.repos.get_route(to)
+        if not route:
+            return
+        call = {
+            "_id": new_id("call"), "tenant_id": route["tenant_id"], "direction": "inbound", "provider": self.provider.name,
+            "fs_uuid": uuid, "from_number": ev.get("Caller-Caller-ID-Number", "")[:20], "to_number": to,
+            "state": S.INITIATING.value, "initiated_at": utcnow(), "correlation_id": new_id("cor"), "observed": True,
+            "max_duration_s": self.s.max_call_duration_s, "ai_enabled": False, "language": "auto",
+        }
+        try:
+            await self.repos.insert_call(call)
+        except Exception:
+            log.exception("observed inbound insert failed")
+            return
+        m.CALLS_CREATED.labels("inbound").inc()
+        await self.apply(call, S.RINGING, source="observed", dedup_id=f"obs:{uuid}:ring")
 
     async def _reject_inbound(self, uuid: str, cause: str) -> None:
         log_event(log, "inbound.rejected", cause=cause)

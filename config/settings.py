@@ -138,6 +138,14 @@ class Settings(BaseSettings):
     role_admin: str = F("telephony:admin", "Role granting tenant-admin operations.")
     role_user: str = F("telephony:user", "Role granting call operations.")
     role_platform: str = F("platform:admin", "Role granting cross-tenant/system admin operations.")
+    role_viewer: str = F("telephony:viewer", "Read-only dashboard role.")
+    login_enabled: bool = F(True, "Enable POST /v1/auth/login (local users in MongoDB, scrypt hashes).")
+    jwt_ttl_s: int = F(28800, "Lifetime of tokens issued by /v1/auth/login.", ge=300, le=604800)
+    login_rate_limit_per_min: int = F(10, "Failed+successful login attempts per client IP per minute.", ge=1)
+    dashboard_enabled: bool = F(True, "Serve the management dashboard at /dashboard.")
+    error_log_buffer: int = F(500, "Recent warning/error log records kept in memory for the dashboard.", ge=10, le=10000)
+    observe_contexts: str = F("", "Comma-separated FreeSWITCH contexts (e.g. 'public') whose inbound calls are RECORDED ONLY "
+                                  "(call+session created for numbers with an inbound route; nothing is answered/rejected/bridged).")
     rate_limit_per_min: int = F(120, "Per-principal API requests/minute.", ge=1)
     rate_limit_call_create_per_min: int = F(30, "Per-tenant POST /calls per minute.", ge=1)
     metrics_token: SecretStr = F(SecretStr(""), "Bearer token required for /metrics. Empty = loopback clients only.")
@@ -177,7 +185,15 @@ class Settings(BaseSettings):
     ready_max_event_age_s: float = F(120.0, "Readiness: FreeSWITCH heartbeat must be fresher than this.", gt=1)
 
     # ---- AI (Phase 3) -----------------------------------------------------------------------------------
-    ai_enabled: bool = F(False, "Phase 3 AI integration. MUST be false in Phase 2.")
+    ai_enabled: bool = F(False, "Global AI switch. Default off. Even when true, an AI session only starts when the media bridge is ready.")
+    ai_media_bridge: Literal["none", "ws_fork"] = F("none", "Media bridge implementation. 'none' = not available (default). 'ws_fork' needs a FreeSWITCH media-fork module that is NOT installed on the audited host.")
+    ai_allowed_hosts: str = F("127.0.0.1,localhost", "Comma-separated host allowlist for model/RAG URLs set through the dashboard.")
+    ai_api_key: SecretStr = F(SecretStr(""), "Bearer key sent to model servers (secret; never shown in the UI).")
+    ai_request_timeout_s: float = F(15.0, "Default timeout for model service requests.", gt=0, le=120)
+    ai_max_concurrency: int = F(4, "Max concurrent model requests per process.", ge=1, le=64)
+    ai_stt_model: str = F("Oriserve/Whisper-Hindi2Hinglish-Prime", "STT model identifier (informational; the model server owns the weights).")
+    ai_brain_model: str = F("Qwen3-30B-A3B-Instruct-2507", "Brain/LLM model identifier.")
+    ai_tts_model: str = F("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "TTS model identifier.")
 
     @property
     def is_prod_like(self) -> bool:
@@ -200,8 +216,8 @@ class Settings(BaseSettings):
         """Return (errors, warnings). Messages never contain secret values."""
         e: list[str] = []
         w: list[str] = []
-        if self.ai_enabled:
-            e.append("MME_TEL_AI_ENABLED must be false in Phase 2")
+        if self.ai_enabled and self.ai_media_bridge == "none":
+            w.append("AI_ENABLED=true but AI_MEDIA_BRIDGE=none: AI sessions cannot start until a media bridge is verified")
         if self.webrtc_enabled:
             e.append("MME_TEL_WEBRTC_ENABLED is not implemented in Phase 2 and must be false")
         if self.rtp_port_end <= self.rtp_port_start:

@@ -178,6 +178,11 @@ class Repos:
                     if raw < 0:  # wall clock stepped backwards between events: never store a negative duration
                         sets["clock_anomaly"] = True
                     sets["connected_duration_s"] = max(0.0, raw)
+                    sets["duration_source"] = "controller_clock"
+                    fa, fe = aware(call.get("fs_answered_ts")), aware((fields or {}).get("fs_ended_ts"))
+                    if fa and fe and 0 <= (fe - fa).total_seconds() <= 172800:  # same-domain FreeSWITCH delta is more exact
+                        sets["connected_duration_s"] = (fe - fa).total_seconds()
+                        sets["duration_source"] = "freeswitch_clock"
                 rng = aware(call.get("ringing_at") or call.get("initiated_at"))
                 if rng:
                     sets["ring_duration_s"] = max(0.0, ((ans or ts) - rng).total_seconds())

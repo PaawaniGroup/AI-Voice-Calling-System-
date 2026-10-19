@@ -13,9 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 
-from app.api import routes
+from app.api import routes, routes_platform
+from app.ai.media import UnavailableBridge, WsForkBridge
+from app.ai.service import AiService
+from app.services.sessions import SessionService
 from app.core.errors import ApiError
-from app.core.logging import correlation_id_var, request_id_var, setup_logging
+from app.core.logging import RingHandler, correlation_id_var, request_id_var, setup_logging
 from app.events.webhooks import WebhookEmitter, WebhookWorker
 from app.observability import metrics as m
 from app.persistence.db import Database
@@ -39,9 +42,11 @@ def build_provider(s: Settings, esl_cmd):
     return FreeSwitchGatewayProvider(esl_cmd, s)
 
 
-def create_app(settings: Settings | None = None, *, db: Database | None = None, provider=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, db: Database | None = None, provider=None, ai_transport=None) -> FastAPI:
     s = settings or get_settings()
     setup_logging(s.log_level, s.log_format, s.app_name, s.env)
+    errlog = RingHandler(s.error_log_buffer)
+    logging.getLogger().addHandler(errlog)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -65,6 +70,11 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
                                         idle_timeout=s.esl_idle_timeout_s, **common)
             ctrl.esl_events = esl_events
         wworker = WebhookWorker(database, s)
+        sessions = SessionService(database, s, emitter)
+        bridge = WsForkBridge(esl_cmd) if s.ai_media_bridge == "ws_fork" else UnavailableBridge()
+        ai = AiService(database, repos, s, sessions, emitter, bridge, transport=ai_transport)
+        ctrl.sessions, ctrl.ai = sessions, ai
+        app.state.sessions, app.state.ai = sessions, ai
         storage = rec_svc.make_storage(s)
         app.state.repos, app.state.controller, app.state.webhook_worker = repos, ctrl, wworker
         app.state.storage, app.state.db = storage, database
@@ -82,6 +92,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
             housekeeping.cancel()
             await asyncio.gather(housekeeping, return_exceptions=True)
             await wworker.stop()
+            await ai.shutdown()
             await ctrl.stop()
             if esl_events:
                 await esl_events.stop()
@@ -96,6 +107,8 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
                   openapi_url="/openapi.json" if s.docs_enabled else None)
     app.state.settings = s
     app.state.limiter = RateLimiter()
+    app.state.errlog = errlog
+    app.state.last_ok = {}
     if s.csv(s.cors_origins):
         app.add_middleware(CORSMiddleware, allow_origins=s.csv(s.cors_origins), allow_methods=["GET", "POST", "PUT", "DELETE"],
                            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"], allow_credentials=False)
@@ -119,6 +132,11 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         m.API_LATENCY.labels(group[:20], f"{resp.status_code // 100}xx").observe(time.perf_counter() - t0)
         resp.headers["X-Request-Id"] = rid
         resp.headers["Cache-Control"] = "no-store"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        if request.url.path.startswith("/dashboard"):
+            resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+            resp.headers["X-Frame-Options"] = "DENY"
+            resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
     @app.exception_handler(ApiError)
@@ -140,6 +158,12 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
 
     app.include_router(routes.health)
     app.include_router(routes.v1)
+    app.include_router(routes_platform.router)
+    app.include_router(routes_platform.ws_router)
+    if s.dashboard_enabled:
+        from pathlib import Path
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/dashboard", StaticFiles(directory=str(Path(__file__).parent / "static" / "dashboard"), html=True), name="dashboard")
     return app
 
 
