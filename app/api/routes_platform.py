@@ -403,6 +403,12 @@ async def ai_get(request: Request, session_id: str, p: Principal = Depends(requi
     return await request.app.state.ai.get(p.tenant_id, session_id, detail)
 
 
+@ws_router.websocket("/v1/ai/media/fs")
+async def ai_media_fs(ws: WebSocket):
+    from app.ai.ws import handle_fs_media
+    await handle_fs_media(ws, ws.app)
+
+
 @ws_router.websocket("/v1/ai/sessions/{session_id}/media")
 async def ai_media(ws: WebSocket, session_id: str):
     await handle_media(ws, ws.app, session_id)

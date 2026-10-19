@@ -1,15 +1,33 @@
 # AI media adapter and model configuration
 
-**Honest status:** the AI pipeline code, contracts and a WebSocket media protocol exist and are tested with **mock model servers and a synthetic audio client**. There is **no working audio bridge to FreeSWITCH** and the three real models were **never reached**. `AI_MEDIA_BRIDGE=none` is the default and AI sessions refuse to start (`409 media_bridge_unavailable`) until a bridge is verified.
+**Honest status (2026-10-19, updated):**
+* **Media transport: built and verified on your real FreeSWITCH, with mock models and tone "speech".** `mod_audio_stream` (amigniter, AGPL-3.0 + FreeSWITCH exception, commit `ff9cbdc`) was reviewed, built, installed and loaded (`scripts/build_mod_audio_stream.sh`; `load mod_audio_stream` registers `uuid_audio_stream`; `<load module="mod_audio_stream"/>` was added to `modules.conf.xml`, backup `modules.conf.xml.bak-before-audio-stream-*`, **not yet exercised by a FreeSWITCH restart**).
+* With `AI_MEDIA_BRIDGE=ws_fork`, `GET /v1/ai/health` reports the bridge ready **only because** `module_exists mod_audio_stream` is true. Tested through the real module (`tests/integration/test_ai_freeswitch.py`): AI session becomes `active` only when FreeSWITCH's socket connects; caller audio -> VAD -> mock STT/Brain/TTS -> `streamAudio` -> module temp file -> `uuid_broadcast` -> **audible on the caller leg** (recorded, 0.28-0.30 s of a 0.30 s reply); barge-in via `uuid_break` cut a 6 s reply to ~2.1-2.3 s; hangup stops the AI session and the stream; sockets without a valid token are refused.
+* **Still NOT verified:** the three real models (no server reachable), real human speech, 8 kHz telephone codecs/echo on a real PSTN call, any carrier leg, real end-to-end latency. Transport numbers below are with mock models (~0 ms inference) and loopback legs, so they are a **floor**, not a prediction.
+* AI stays off by default (`AI_ENABLED=false`, `AI_MEDIA_BRIDGE=none`).
 
-## Why there is no live audio yet (blockers, measured)
+## Measured transport overhead (real FreeSWITCH + real module, mock models, loopback leg)
+Runs of `test_real_audio_roundtrip_through_freeswitch_module` (7 consecutive passing runs, 1 intermittent failure in ~14 runs, see below):
+| Metric | Observed |
+|---|---|
+| `start` -> AI session `active` (module connects) | 0.14-0.15 s |
+| utterance end (VAD) -> reply ready (mock models) `turn_ms` | 4-11 ms |
+| reply handed to module -> `mod_audio_stream::play` event back in controller `module_return_ms` | 8-26 ms |
+| `uuid_broadcast` command `broadcast_cmd_ms` | 1-4 ms |
+| VAD end-of-speech wait (configured) | 700 ms of trailing silence is the dominant fixed cost |
+| barge-in: caller talks over a 6 s reply | reply truncated; caller heard 2.1-2.3 s total |
+Real latency = these ~25-45 ms of transport + 700 ms endpointing + the **real** STT + LLM + TTS times, which are unknown.
+
+**Intermittent failure:** one run in ~14 heard silence on the caller leg (no diagnostics at the time; the assertion now dumps recordings and events). A neighbouring run took 54-58 s, matching the WSL VM stalls seen elsewhere, so a stall is suspected but **not proven**. Treat the transport as "working, with one unexplained failure to watch".
+
+## Remaining blockers
 | Blocker | Evidence | What unblocks it |
 |---|---|---|
-| ESL carries no audio | protocol fact | a media-fork module |
-| No media-fork module in FreeSWITCH | `mod_audio_fork`, `mod_audio_stream` absent from `lib/freeswitch/mod` (`mod_av`, `mod_opus`, `mod_tone_stream`, `mod_local_stream` only) | build/install one (e.g. `mod_audio_fork` from the drachtio/FreeSWITCH-modules project or `mod_audio_stream`) against this FreeSWITCH, load it, set `MME_TEL_AI_MEDIA_BRIDGE=ws_fork`; **its WebSocket framing must then be adapted or verified against `app/ai/media.py`** — not done |
-| No model servers reachable | no listener on the usual model ports; no GPU (`nvidia-smi` absent), 6 GB RAM, no Hugging Face cache | run STT/Brain/TTS on GPU hosts (your RunPod setup is referenced by the `mme_runpod_test` ACL but was not inspected) and give their URLs |
-| `Qwen3-30B-A3B-Instruct-2507` cannot run on this machine | memory/GPU | remote inference server |
-| Real model API shapes unknown | servers unreachable | the adapters default to OpenAI-compatible routes (`/v1/audio/transcriptions`, `/v1/chat/completions`, `/v1/audio/speech`, `/search`); per-service `paths` override in AI config. **Unverified against the real servers** |
+| No model servers reachable | no listener on common model ports; no GPU (`nvidia-smi` absent), 6 GB RAM | run STT/Brain/TTS on GPU hosts (`mme_runpod_test` in the SIP ACL suggests RunPod, not inspected) and give their URLs |
+| `Qwen3-30B-A3B-Instruct-2507` cannot run here | memory/GPU | remote inference server |
+| Real model API shapes unknown | servers unreachable | adapters default to OpenAI-compatible routes (`/v1/audio/transcriptions`, `/v1/chat/completions`, `/v1/audio/speech`, `/search`); per-service `paths` override. **Unverified against the real servers** |
+| `mod_audio_stream` limits | upstream README: no automatic reconnect; bidirectional streaming/mixing are commercial-edition features; playback is file-based (whole utterance, not streamed) | acceptable for turn-based replies; streaming TTS needs the commercial edition or another module |
+| AGPL-3.0 module | licence | review with whoever owns your licensing; it is loaded as a separate module (linking exception applies to FreeSWITCH) |
 
 ## Components (`app/ai/`)
 * `clients.py` – `ModelClients`: bounded concurrency (`AI_MAX_CONCURRENCY`), per-service timeout, error classes (`AiTimeout`, `AiUnavailable`), URL allow-list (`AI_ALLOWED_HOSTS`, no credentials/queries, metadata blocked, plain http only to loopback in production), optional bearer key from `MME_TEL_AI_API_KEY` (env only, never returned or shown).

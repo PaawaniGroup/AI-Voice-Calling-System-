@@ -23,12 +23,12 @@ Labels — **Mock**: mock model servers / mock carrier adapter / synthetic clien
 | 16 | Call-control authorization | PASS | viewer 403 on `POST /v1/calls`, operator vs admin routes, browser viewer test | — |
 | 17 | AI adapter timeouts | PASS | `test_adapter_timeout_and_unreachable_are_classified`, `test_model_timeout_is_nonfatal_error_event` | **Mock models** |
 | 18 | AI session cancellation on hangup | PASS | `test_hangup_cancels_ai_and_closes_media_no_stale_audio` | **Mock models, synthetic client** |
-| 19 | Real audio transport | **NOT DONE (blocked)** | no media-fork module installed; protocol + server side tested with a synthetic client only (`test_full_turn…`, `test_barge_in…`, reconnect, backpressure path) | Synthetic |
+| 19 | Real audio transport | **PARTIAL** | `mod_audio_stream` built+loaded in the real FreeSWITCH; `tests/integration/test_ai_freeswitch.py` (5 tests): real module socket -> AI `active`, audio round trip audible on the caller leg, barge-in cut, hangup stop, token refusal. **Tone stand-in for speech, mock models, loopback leg; 1 intermittent failure in ~14 runs; not a real phone call** | Real-FS + real module, mock models |
 | 20 | End-to-end lifecycle with FreeSWITCH | PARTIAL | full lifecycle on real FreeSWITCH with loopback legs (answer, bridge/transfer, hangup, busy, cancel, recording, reconnect, recovery); **no real carrier leg** | Real-FS |
 
 ## Not verified / blocked
 * **Real carrier**: no real Plivo call was made (inbound or outbound); trunk limits and callback fields unconfirmed.
-* **Real audio and models**: no media-fork module (`mod_audio_fork`/`mod_audio_stream`), no model servers reachable, no GPU; real-time latency, Hindi/Hinglish quality, interruption behaviour on a phone call are **unknown**. AI stays disabled by default and refuses to start without a ready bridge.
+* **Real models**: no model servers reachable, no GPU; real-time latency, Hindi/Hinglish quality and interruption behaviour **with real models on a phone call** are **unknown**. (The media module itself is now installed and verified on loopback; see AI_MEDIA_ADAPTER.md.) AI stays disabled by default and refuses to start without a ready bridge.
 * **Transcripts, summaries**: not stored; endpoints answer 404 (`transcript_not_available`, `summary_not_available`); `transcript.ready` / `summary.ready` webhooks are never emitted.
 * **Recording** on S3, consent announcement audio, retention enforcement on real data: untested (local storage path tested).
 * **MME identity integration**, MongoDB Atlas, production host/TLS/firewall, compliance review (DoT/TRAI, recording consent): not done.

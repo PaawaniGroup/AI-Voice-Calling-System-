@@ -160,6 +160,8 @@ class Controller:
         ts = utcnow()
         if uuid != call.get("fs_uuid"):
             return await self._on_other_leg(call, ev, key, ts)
+        if name == "CUSTOM" and (ev.get("Event-Subclass") or "").startswith("mod_audio_stream::"):
+            return await self._on_media_event(call, ev, key)
         if name == "CUSTOM" and ev.get("Event-Subclass") == "mme::transfer_failed":
             if call.get("transfer", {}).get("current"):
                 await self.repos.add_event(call, "transfer.failed", "esl", key, {"cause": ev.get("Cause", "")[:40]})
@@ -184,6 +186,32 @@ class Controller:
                 await self._finish_transfer(c, "completed")
         elif name in ("CHANNEL_HANGUP", "CHANNEL_HANGUP_COMPLETE"):
             await self.finalize_from_cause(call, ev.get("Hangup-Cause", "UNKNOWN"), source="esl", dedup_id=key, ts=ts, fs_ts=fs_ts)
+
+    async def _on_media_event(self, call: dict, ev: dict, key: str) -> None:
+        """Events from FreeSWITCH mod_audio_stream. `play` = a synthesized reply was written to a temp file: play it."""
+        import re as _re
+
+        sub = ev["Event-Subclass"].split("::", 1)[1]
+        await self.repos.add_event(call, f"media.{sub}", "esl", key, {"detail": (ev.get("_body") or "")[:200] if sub != "play" else {}})
+        if sub != "play":
+            return
+        if self.ai is None or not call.get("session_id") or call.get("session_id") not in self.ai.runtime or self.esl_cmd is None:
+            return  # no live AI session for this call: never play files for unknown sessions
+        try:
+            f = json.loads(ev.get("_body") or "{}").get("file", "")
+        except ValueError:
+            return
+        # only the file this module just wrote for THIS channel: <tmpdir>/<channel uuid>_<n>.tmp.<ext>
+        if not _re.fullmatch(r"/[A-Za-z0-9_./-]{1,200}/" + _re.escape(call["fs_uuid"]) + r"_\d{1,6}\.tmp\.(wav|r8|r16|r24|r32|r48|mp3|ogg)", f) or ".." in f:
+            log.warning("refused unexpected playback path")
+            return
+        rt = self.ai.runtime.get(call["session_id"])
+        if rt is not None and rt.sent_at is not None:  # module handoff -> event back in the controller
+            await self.ai.record_turn(rt, {"module_return_ms": round((time.monotonic() - rt.sent_at) * 1000, 1)}, count=False)
+        t = time.perf_counter()
+        await self.esl_cmd.api(f"uuid_broadcast {ds.safe_uuid(call['fs_uuid'])} {f} aleg")
+        if rt is not None:
+            await self.ai.record_turn(rt, {"broadcast_cmd_ms": round((time.perf_counter() - t) * 1000, 1)}, count=False)
 
     async def _on_other_leg(self, call: dict, ev: dict, key: str, ts) -> None:
         # B-leg events: only its hangup before A-leg hangup is recorded (A-leg hangup drives the final state).

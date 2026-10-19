@@ -17,6 +17,9 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_AI_ENABLED` | bool | no | False | no | - | yes | all | Global AI switch. Default off. Even when true, an AI session only starts when the media bridge is ready. |
 | `MME_TEL_AI_MAX_CONCURRENCY` | int | no | 4 | no | ge=1, le=64 | yes | all | Max concurrent model requests per process. |
 | `MME_TEL_AI_MEDIA_BRIDGE` | enum | no | 'none' | no | one of 'none', 'ws_fork' | yes | all | Media bridge implementation. 'none' = not available (default). 'ws_fork' needs a FreeSWITCH media-fork module that is NOT installed on the audited host. |
+| `MME_TEL_AI_MEDIA_SAMPLE_RATE` | enum | no | 16000 | no | one of 8000, 16000 | yes | all | Sample rate requested from the media module. |
+| `MME_TEL_AI_MEDIA_TOKEN_TTL_S` | int | no | 120 | no | ge=30, le=900 | yes | all | Lifetime of the one-off media token handed to FreeSWITCH. |
+| `MME_TEL_AI_MEDIA_WS_URL` | str | no | 'ws://127.0.0.1:8800/v1/ai/media/fs' | no | - | yes | all | WebSocket URL FreeSWITCH (mod_audio_stream) connects to. Must be reachable FROM FreeSWITCH; use wss:// across hosts. |
 | `MME_TEL_AI_REQUEST_TIMEOUT_S` | float | no | 15.0 | no | gt=0, le=120 | yes | all | Default timeout for model service requests. |
 | `MME_TEL_AI_STT_MODEL` | str | no | 'Oriserve/Whisper-Hindi2Hinglish-Prime' | no | - | yes | all | STT model identifier (informational; the model server owns the weights). |
 | `MME_TEL_AI_TTS_MODEL` | str | no | 'Qwen/Qwen3-TTS-12Hz-1.7B-Base' | no | - | yes | all | TTS model identifier. |

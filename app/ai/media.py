@@ -45,13 +45,43 @@ class UnavailableBridge:
 
 
 class WsForkBridge:
-    """Ready only when a FreeSWITCH media-fork module is actually loaded (checked over ESL)."""
+    """Ready only when FreeSWITCH `mod_audio_stream` is actually loaded (checked over ESL).
+
+    begin(): hands the module a short-lived token (channel var STREAM_EXTRA_HEADERS) and starts the stream, so the module
+    connects to this service's WebSocket. end(): stops the stream and any playback. No audio is faked at any point.
+    """
 
     name = "ws_fork"
-    MODULES = ("mod_audio_fork", "mod_audio_stream")
+    MODULES = ("mod_audio_stream",)
 
-    def __init__(self, esl_cmd):
-        self.esl = esl_cmd
+    def __init__(self, esl_cmd, s=None):
+        self.esl, self.s = esl_cmd, s
+
+    async def begin(self, fs_uuid: str, tenant_id: str, session_id: str, token: str) -> None:
+        import json as _json
+
+        from app.telephony import dialstrings as ds
+        u = ds.safe_uuid(fs_uuid)
+        hdr = _json.dumps({"Authorization": f"Bearer {token}"}, separators=(",", ":"))
+        if any(c in hdr for c in "\n\r"):
+            raise ValueError("unsafe header")
+        await self.esl.api(f"uuid_setvar {u} STREAM_EXTRA_HEADERS {hdr}")
+        meta = _json.dumps({"session_id": session_id, "sample_rate": self.s.ai_media_sample_rate}, separators=(",", ":"))
+        url = self.s.ai_media_ws_url
+        if not url.startswith(("ws://", "wss://")) or any(c in url for c in " \n\r'\""):
+            raise ValueError("unsafe media url")
+        out = await self.esl.api(f"uuid_audio_stream {u} start {url} mono {self.s.ai_media_sample_rate} {meta}")
+        if out.strip().startswith("-ERR"):
+            raise RuntimeError(out.strip()[:100])
+
+    async def end(self, fs_uuid: str) -> None:
+        from app.telephony import dialstrings as ds
+        u = ds.safe_uuid(fs_uuid)
+        for cmd in (f"uuid_break {u} all", f"uuid_audio_stream {u} stop"):
+            try:
+                await self.esl.api(cmd)
+            except Exception:
+                pass  # channel may already be gone
 
     async def ready(self) -> tuple[bool, str]:
         if self.esl is None:

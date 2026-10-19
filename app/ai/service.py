@@ -38,6 +38,8 @@ class Runtime:
     conversation: Conversation
     clients: ModelClients
     ws: Any = None
+    fs_uuid: str | None = None
+    sent_at: float | None = None  # monotonic time the last reply was handed to the media module
     watchdog: asyncio.Task | None = None
     tasks: list = field(default_factory=list)
 
@@ -177,10 +179,32 @@ class AiService:
                 return existing
         clients = self._clients(cfg)
         rt = Runtime(session_id, tenant_id, Conversation(clients, lang), clients)
+        rt.fs_uuid = call.get("fs_uuid")
         self.runtime[session_id] = rt
         rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.connect_s, "media_connect_timeout"))
         m.AI_SESSIONS.labels("starting").inc()
+        if hasattr(self.bridge, "begin") and rt.fs_uuid:  # real bridge: make FreeSWITCH open the media socket now
+            try:
+                await self.bridge.begin(rt.fs_uuid, tenant_id, session_id, self.mint_media_token(tenant_id, session_id))
+            except Exception as e:
+                log.warning("media bridge start failed: %s", type(e).__name__)
+                await self._finish(tenant_id, session_id, "failed", "bridge_start_failed", error=f"bridge_start_failed:{type(e).__name__}")
+                return await self._get_ai(tenant_id, session_id)
         return doc
+
+    def mint_media_token(self, tenant_id: str, session_id: str) -> str:
+        """Short-lived operator-level token for exactly one purpose: opening the media socket of this tenant."""
+        import time as _t
+
+        import jwt as _jwt
+        now = int(_t.time())
+        payload = {"sub": f"media:{session_id}", self.s.jwt_tenant_claim: tenant_id, self.s.jwt_roles_claim: [self.s.role_user],
+                   "iat": now, "exp": now + self.s.ai_media_token_ttl_s, "typ": "media"}
+        if self.s.jwt_issuer:
+            payload["iss"] = self.s.jwt_issuer
+        if self.s.jwt_audience:
+            payload["aud"] = self.s.jwt_audience
+        return _jwt.encode(payload, self.s.jwt_secret.get_secret_value(), algorithm=self.s.jwt_algorithm)
 
     async def _media_deadline(self, rt: Runtime, seconds: float, reason: str) -> None:
         try:
@@ -218,10 +242,11 @@ class AiService:
         if r.modified_count:
             rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.reconnect_s, "media_reconnect_timeout"))
 
-    async def record_turn(self, rt: Runtime, timings: dict) -> None:
-        await self.db["ai_sessions"].update_one(
-            {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
-            {"$inc": {"turns": 1}, "$set": {"last_turn_at": utcnow(), **{f"timings_ms.{k}": v for k, v in timings.items()}}})
+    async def record_turn(self, rt: Runtime, timings: dict, count: bool = True) -> None:
+        upd: dict = {"$set": {"last_turn_at": utcnow(), **{f"timings_ms.{k}": v for k, v in timings.items()}}}
+        if count:
+            upd["$inc"] = {"turns": 1}
+        await self.db["ai_sessions"].update_one({"session_id": rt.session_id, "tenant_id": rt.tenant_id}, upd)
 
     async def stop(self, tenant_id: str, session_id: str, reason: str = "requested") -> dict:
         ai = await self._get_ai(tenant_id, session_id)
@@ -239,6 +264,8 @@ class AiService:
         rt = self.runtime.pop(session_id, None)
         if rt:  # cancel inference + playback, release resources
             rt.conversation.cancel()
+            if rt.fs_uuid and hasattr(self.bridge, "end"):
+                await self.bridge.end(rt.fs_uuid)  # stop media bug + playback on FreeSWITCH
             if rt.watchdog:
                 rt.watchdog.cancel()
             for t in rt.tasks:

@@ -71,7 +71,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
             ctrl.esl_events = esl_events
         wworker = WebhookWorker(database, s)
         sessions = SessionService(database, s, emitter)
-        bridge = WsForkBridge(esl_cmd) if s.ai_media_bridge == "ws_fork" else UnavailableBridge()
+        bridge = WsForkBridge(esl_cmd, s) if s.ai_media_bridge == "ws_fork" else UnavailableBridge()
         ai = AiService(database, repos, s, sessions, emitter, bridge, transport=ai_transport)
         ctrl.sessions, ctrl.ai = sessions, ai
         app.state.sessions, app.state.ai = sessions, ai

@@ -187,6 +187,9 @@ class Settings(BaseSettings):
     # ---- AI (Phase 3) -----------------------------------------------------------------------------------
     ai_enabled: bool = F(False, "Global AI switch. Default off. Even when true, an AI session only starts when the media bridge is ready.")
     ai_media_bridge: Literal["none", "ws_fork"] = F("none", "Media bridge implementation. 'none' = not available (default). 'ws_fork' needs a FreeSWITCH media-fork module that is NOT installed on the audited host.")
+    ai_media_ws_url: str = F("ws://127.0.0.1:8800/v1/ai/media/fs", "WebSocket URL FreeSWITCH (mod_audio_stream) connects to. Must be reachable FROM FreeSWITCH; use wss:// across hosts.")
+    ai_media_token_ttl_s: int = F(120, "Lifetime of the one-off media token handed to FreeSWITCH.", ge=30, le=900)
+    ai_media_sample_rate: Literal[8000, 16000] = F(16000, "Sample rate requested from the media module.")
     ai_allowed_hosts: str = F("127.0.0.1,localhost", "Comma-separated host allowlist for model/RAG URLs set through the dashboard.")
     ai_api_key: SecretStr = F(SecretStr(""), "Bearer key sent to model servers (secret; never shown in the UI).")
     ai_request_timeout_s: float = F(15.0, "Default timeout for model service requests.", gt=0, le=120)
@@ -216,6 +219,8 @@ class Settings(BaseSettings):
         """Return (errors, warnings). Messages never contain secret values."""
         e: list[str] = []
         w: list[str] = []
+        if self.ai_media_bridge == "ws_fork" and self.is_prod_like and self.ai_media_ws_url.startswith("ws://") and "127.0.0.1" not in self.ai_media_ws_url:
+            e.append("AI_MEDIA_WS_URL must use wss:// to a non-loopback host in staging/production")
         if self.ai_enabled and self.ai_media_bridge == "none":
             w.append("AI_ENABLED=true but AI_MEDIA_BRIDGE=none: AI sessions cannot start until a media bridge is verified")
         if self.webrtc_enabled:

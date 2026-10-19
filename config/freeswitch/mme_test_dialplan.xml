@@ -33,5 +33,29 @@
         <action application="park"/>
       </condition>
     </extension>
+    <!-- AI media tests: B leg = the "caller". 9010: speaks once. 9011: speaks, then talks over the reply (barge-in).
+         Records ONLY what the caller hears (RECORD_READ_ONLY) so tests can prove the AI reply audio arrived. -->
+    <extension name="t_ai_caller_once">
+      <condition field="destination_number" expression="^9010$">
+        <action application="answer"/>
+        <action application="set" data="RECORD_READ_ONLY=true"/>
+        <action application="record_session" data="/tmp/mme_ai_heard_${uuid}.wav"/>
+        <action application="sleep" data="1500"/>
+        <action application="playback" data="/tmp/mme_ai_caller.wav"/>
+        <action application="sleep" data="25000"/>
+      </condition>
+    </extension>
+    <extension name="t_ai_caller_barge">
+      <condition field="destination_number" expression="^9011$">
+        <action application="answer"/>
+        <action application="set" data="RECORD_READ_ONLY=true"/>
+        <action application="record_session" data="/tmp/mme_ai_heard_${uuid}.wav"/>
+        <action application="sleep" data="1500"/>
+        <action application="playback" data="/tmp/mme_ai_caller.wav"/>
+        <action application="sleep" data="2200"/>
+        <action application="playback" data="/tmp/mme_ai_caller.wav"/>
+        <action application="sleep" data="20000"/>
+      </condition>
+    </extension>
   </context>
 </include>
