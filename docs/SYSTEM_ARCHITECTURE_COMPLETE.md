@@ -337,6 +337,8 @@ Roles: **viewer** (read; phone numbers masked) < **operator** (`telephony:user`)
 | `WS /v1/ai/media/fs` | Bearer header | `mod_audio_stream` flavour of the same pipeline (§13) |
 
 ### 9.9 Provider callbacks
+> **Updated 2026-10-21:** the Plivo Voice-Application path is now complete in repo B (answer → signed `<Stream>` → authenticated media WebSocket → existing AI pipeline → cleanup), **mock-verified only**. Routes now: `POST /v1/providers/plivo/{answer,status,hangup,stream-status}` and `WS /v1/providers/plivo/stream` (58 routes in total, see `ROUTES.md`). Served when `provider=plivo_api` or `MME_TEL_PLIVO_INBOUND_ENABLED=true`. Full design, files, configuration, Plivo Console settings, failure table and manual test: [PLIVO_VOICE_APPLICATION.md](PLIVO_VOICE_APPLICATION.md). The statements below describe the earlier, smaller behaviour.
+
 `POST /v1/providers/plivo/status` and `/answer`: Plivo V3 signature + nonce replay store; unknown call → 200 `ignored`; duplicate → `duplicate`; only active when `provider=plivo_api`.
 
 ### 9.10 Static

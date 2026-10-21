@@ -10,4 +10,5 @@ PyYAML==6.0.2
 plivo==4.55.0
 phonenumbers==8.13.52
 python-multipart==0.0.20
+audioop-lts>=0.2.1; python_version >= "3.13"  # mu-law/resampling (stdlib audioop was removed in 3.13); unused on 3.12
 # optional: boto3==1.35.90 (only when MME_TEL_STORAGE_BACKEND=s3)

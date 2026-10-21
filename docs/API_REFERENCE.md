@@ -54,4 +54,11 @@ Raw SIP credentials and arbitrary FreeSWITCH commands are never exposed.
 Headers: `X-MME-Event-Id`, `X-MME-Delivery-Id`, `X-MME-Timestamp`, `X-MME-Signature: v1=<hex HMAC-SHA256(secret, "<timestamp>." + body)>`, `Idempotency-Key` (= event id; consumers must dedupe on it). Retries: exponential backoff with jitter up to `WEBHOOK_MAX_ATTEMPTS`, then `dead`; replay re-sends the **same** event id. Recording URLs are never included.
 
 ## Provider callbacks
-`POST /v1/providers/plivo/answer` and `/status` (only when `provider=plivo_api`): Plivo V3 signature + nonce required (401 otherwise); replayed nonce → 200 `duplicate`; same event again → `duplicate`; unknown call → 200 `ignored`.
+Served when `provider=plivo_api` **or** `MME_TEL_PLIVO_INBOUND_ENABLED=true` (404 otherwise). Public routes, no JWT: Plivo `X-Plivo-Signature-V3` + nonce over the public URL are required (401 `invalid_signature` otherwise). Full guide: [PLIVO_VOICE_APPLICATION.md](PLIVO_VOICE_APPLICATION.md).
+
+| Route | Behaviour |
+|---|---|
+| `POST /v1/providers/plivo/answer` | returns Plivo XML: route action `ai` → bidirectional `<Stream>` (signed ticket), `park` → `<Wait>`, `bridge` → `<Dial>`, `hangup` → `<Hangup/>`; rejected/busy/AI-not-ready → `<Hangup>`. Duplicates and replays re-describe the same call (never a second call). 400 `invalid_payload` for a bad `CallUUID` |
+| `POST /v1/providers/plivo/hangup`, `/status` | call progress/completion; replayed nonce or same event again → `{"status":"duplicate"}`; unknown call → `{"status":"ignored"}` |
+| `POST /v1/providers/plivo/stream-status` | `<Stream>` lifecycle (`started`/`stopped`/`failed`); never changes call state |
+| `WS /v1/providers/plivo/stream` | Plivo media stream: handshake signature + nonce, `start` with a ticket bound to the call/tenant/session; closes `1008` (auth/ticket/duplicate), `1003` (format), `1011` (AI start failed), `1013` (capacity) |

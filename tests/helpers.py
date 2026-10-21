@@ -60,6 +60,7 @@ class MockModels:
         self.healthy = {"stt", "brain", "tts", "rag"}
         self.reply = "Namaste! BTech ke liye eligibility 12th mein 50% hai."
         self.tts_ms = 300
+        self.fail: dict[str, int] = {}  # service name -> HTTP status to answer with (failure injection)
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
         host_path = request.url.path
@@ -71,6 +72,8 @@ class MockModels:
         if request.headers.get("content-type", "").startswith("application/json"):
             body = json.loads(request.content or b"{}")
         self.calls.append((svc or host_path, {"auth": request.headers.get("authorization"), **body}))
+        if svc in self.fail:
+            return httpx.Response(self.fail[svc])
         if svc == "stt":
             await asyncio.sleep(self.stt_delay)
             return httpx.Response(200, json={"text": "mujhe BTech ke baare mein batao", "language": "hi"})

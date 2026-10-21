@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     plivo_auth_id: SecretStr = F(SecretStr(""), "Plivo Auth ID (secret).")
     plivo_auth_token: SecretStr = F(SecretStr(""), "Plivo Auth Token (secret); also verifies webhook signatures.")
     webhook_public_base_url: str = F("", "Public HTTPS base URL Plivo calls back (no trailing slash).")
+    plivo_inbound_enabled: bool = F(False, "Accept Plivo Voice-Application callbacks (answer/status/hangup/stream) for INBOUND calls even when "
+                                          "provider is not plivo_api. Does not change how outbound calls are placed. Needs PLIVO_AUTH_TOKEN, "
+                                          "WEBHOOK_PUBLIC_BASE_URL (https) and JWT_SECRET (signs the stream ticket).")
+    plivo_stream_ticket_ttl_s: int = F(120, "Lifetime of the signed ticket Plivo echoes back when it opens the media stream.", ge=30, le=900)
+    plivo_stream_connect_s: int = F(20, "After the Answer XML is returned, the media stream must connect within this time or the call is hung up.", ge=5, le=120)
+    plivo_stream_max_concurrent: int = F(10, "Maximum simultaneous Plivo media streams (AI conversations) in this process.", ge=1, le=500)
+    plivo_orphan_grace_s: int = F(60, "A Plivo call still open this long after max duration, with the provider hangup unconfirmed, is closed locally.", ge=10, le=900)
     provider_timeout_s: float = F(10.0, "Provider API timeout.", gt=0, le=120)
     provider_max_concurrent: int = F(10, "Provider concurrency ceiling. VERIFY against the Plivo account.", ge=1)
     provider_max_cps: float = F(1.0, "Provider calls-per-second ceiling. VERIFY against the account.", gt=0)
@@ -221,8 +228,19 @@ class Settings(BaseSettings):
         w: list[str] = []
         if self.ai_media_bridge == "ws_fork" and self.is_prod_like and self.ai_media_ws_url.startswith("ws://") and "127.0.0.1" not in self.ai_media_ws_url:
             e.append("AI_MEDIA_WS_URL must use wss:// to a non-loopback host in staging/production")
-        if self.ai_enabled and self.ai_media_bridge == "none":
+        if self.ai_enabled and self.ai_media_bridge == "none" and not self.plivo_inbound_enabled:
             w.append("AI_ENABLED=true but AI_MEDIA_BRIDGE=none: AI sessions cannot start until a media bridge is verified")
+        if self.plivo_inbound_enabled:
+            if not self.plivo_auth_token.get_secret_value():
+                e.append("plivo_inbound_enabled requires PLIVO_AUTH_TOKEN")
+            if not self.webhook_public_base_url.startswith("https://"):
+                e.append("plivo_inbound_enabled requires WEBHOOK_PUBLIC_BASE_URL (https)")
+            if not self.jwt_secret.get_secret_value():
+                e.append("plivo_inbound_enabled requires JWT_SECRET (the stream ticket key is derived from it)")
+            if not self.plivo_auth_id.get_secret_value():
+                w.append("PLIVO_AUTH_ID unset: the service cannot hang up Plivo calls through the REST API (hangup/timeouts stay local)")
+            if not self.ai_enabled:
+                w.append("plivo_inbound_enabled but AI_ENABLED=false: routes with action 'ai' will be rejected")
         if self.webrtc_enabled:
             e.append("MME_TEL_WEBRTC_ENABLED is not implemented in Phase 2 and must be false")
         if self.rtp_port_end <= self.rtp_port_start:

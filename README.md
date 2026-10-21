@@ -2,6 +2,7 @@
 
 Standalone service for Make My Education: FreeSWITCH control over ESL, durable call + counselling-session lifecycle, tenant-isolated REST API (54 routes, [docs/ROUTES.md](docs/ROUTES.md)), a web **management dashboard** at `/dashboard/`, Plivo/gateway provider adapters, signed webhooks, usage/analytics, and **AI session contracts** (model adapters, media WebSocket protocol). **AI is off by default and cannot start a session until a real media bridge exists (none is installed); real STT/Brain/TTS models have not been reached.**
 
+Plivo Voice Application (inbound call → AI stream, mock-verified): [docs/PLIVO_VOICE_APPLICATION.md](docs/PLIVO_VOICE_APPLICATION.md).
 Start here: [docs/SYSTEM_ARCHITECTURE_COMPLETE.md](docs/SYSTEM_ARCHITECTURE_COMPLETE.md) (both codebases, every route, every flow);  [docs/ACCEPTANCE_AI_PLATFORM.md](docs/ACCEPTANCE_AI_PLATFORM.md) (what works / what is blocked), [docs/API_INTEGRATION_GUIDE.md](docs/API_INTEGRATION_GUIDE.md), [docs/MIGRATION_FROM_PROTOTYPE.md](docs/MIGRATION_FROM_PROTOTYPE.md).
 
 Status and honest limits: `docs/PHASE_2_ACCEPTANCE.md`. Nothing has been verified against a real carrier, Plivo, Atlas or a production host.

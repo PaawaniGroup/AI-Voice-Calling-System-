@@ -135,6 +135,10 @@ class AiService:
                "services": {r["service"]: {k: v for k, v in r.items() if k != "service"} for r in res},
                "media_bridge": {"name": self.bridge.name, "ready": ready, "reason": reason},
                "models": cfg["models"]}
+        if self.s.plivo_inbound_enabled or self.s.provider == "plivo_api":
+            from app.ai.media import PlivoStreamBridge
+            p_ready, p_reason = await PlivoStreamBridge(self.s).ready()
+            out["plivo_stream"] = {"ready": p_ready, "reason": p_reason}
         self.last_health = out
         return out
 
@@ -142,7 +146,25 @@ class AiService:
     async def _get_ai(self, tenant_id: str, session_id: str) -> dict | None:
         return await self.db["ai_sessions"].find_one({"session_id": session_id, "tenant_id": tenant_id})
 
-    async def start(self, tenant_id: str, session_id: str, language: str | None = None) -> dict:
+    async def preflight(self, tenant_id: str, bridge: MediaBridge | None = None) -> tuple[bool, str]:
+        """Can an AI conversation start for this tenant right now? (reason code, never a secret). Used to decide, BEFORE a
+        call is answered into a media stream, whether to offer one. Mirrors the configuration checks in start()."""
+        if not self.s.ai_enabled:
+            return False, "ai_disabled"
+        cfg = await self.get_config(tenant_id)
+        if not cfg["enabled"]:
+            return False, "ai_disabled_for_tenant"
+        if not (cfg["stt_url"] and cfg["brain_url"] and cfg["tts_url"]):
+            return False, "ai_not_configured"
+        ready, _ = await (bridge or self.bridge).ready()
+        if not ready:
+            return False, "media_bridge_unavailable"
+        return True, "ok"
+
+    async def start(self, tenant_id: str, session_id: str, language: str | None = None, *,
+                    bridge: MediaBridge | None = None) -> dict:
+        """`bridge` overrides readiness for transports that open the media socket themselves (Plivo). The FreeSWITCH
+        `begin()` hook only runs for the service's own bridge and only when the call has a FreeSWITCH UUID."""
         sess = await self.sessions.get(tenant_id, session_id)  # 404 first: other tenants learn nothing from later checks
         if not self.s.ai_enabled:
             raise Conflict("AI is disabled globally (MME_TEL_AI_ENABLED=false)", code="ai_disabled")
@@ -156,7 +178,7 @@ class AiService:
             raise Conflict("the call is not answered", code="call_not_answered")
         if not call.get("ai_enabled"):
             raise Conflict("this call was not flagged ai_enabled", code="call_not_ai_enabled")
-        ready, reason = await self.bridge.ready()
+        ready, reason = await (bridge or self.bridge).ready()
         if not ready:
             raise Conflict(f"media bridge unavailable: {reason}", code="media_bridge_unavailable", details={"reason": reason})
         if not (cfg["stt_url"] and cfg["brain_url"] and cfg["tts_url"]):
@@ -183,7 +205,7 @@ class AiService:
         self.runtime[session_id] = rt
         rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.connect_s, "media_connect_timeout"))
         m.AI_SESSIONS.labels("starting").inc()
-        if hasattr(self.bridge, "begin") and rt.fs_uuid:  # real bridge: make FreeSWITCH open the media socket now
+        if bridge is None and hasattr(self.bridge, "begin") and rt.fs_uuid:  # real bridge: make FreeSWITCH open the media socket now
             try:
                 await self.bridge.begin(rt.fs_uuid, tenant_id, session_id, self.mint_media_token(tenant_id, session_id))
             except Exception as e:

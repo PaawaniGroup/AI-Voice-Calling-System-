@@ -155,6 +155,11 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_ESTIMATE_RATE_PER_MIN` | float | no | 0.0 | no | ge=0 | yes | all | Estimated carrier rate/minute used ONLY for estimates; 0 disables. |
 | `MME_TEL_PLIVO_AUTH_ID` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | Plivo Auth ID (secret). |
 | `MME_TEL_PLIVO_AUTH_TOKEN` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | Plivo Auth Token (secret); also verifies webhook signatures. |
+| `MME_TEL_PLIVO_INBOUND_ENABLED` | bool | no | False | no | - | yes | all | Accept Plivo Voice-Application callbacks (answer/status/hangup/stream) for INBOUND calls even when provider is not plivo_api. Does not change how outbound calls are placed. Needs PLIVO_AUTH_TOKEN, WEBHOOK_PUBLIC_BASE_URL (https) and JWT_SECRET (signs the stream ticket). |
+| `MME_TEL_PLIVO_ORPHAN_GRACE_S` | int | no | 60 | no | ge=10, le=900 | yes | all | A Plivo call still open this long after max duration, with the provider hangup unconfirmed, is closed locally. |
+| `MME_TEL_PLIVO_STREAM_CONNECT_S` | int | no | 20 | no | ge=5, le=120 | yes | all | After the Answer XML is returned, the media stream must connect within this time or the call is hung up. |
+| `MME_TEL_PLIVO_STREAM_MAX_CONCURRENT` | int | no | 10 | no | ge=1, le=500 | yes | all | Maximum simultaneous Plivo media streams (AI conversations) in this process. |
+| `MME_TEL_PLIVO_STREAM_TICKET_TTL_S` | int | no | 120 | no | ge=30, le=900 | yes | all | Lifetime of the signed ticket Plivo echoes back when it opens the media stream. |
 | `MME_TEL_PROVIDER` | enum | no | 'freeswitch_gateway' | no | one of 'freeswitch_gateway', 'plivo_api', 'mock' | yes | all | Call path. 'mock' is rejected outside development/test. |
 | `MME_TEL_PROVIDER_CALLBACK_MAX_AGE_S` | int | no | 300 | no | ge=30 | yes | all | Reject provider callbacks older than this (nonce replay window). |
 | `MME_TEL_PROVIDER_MAX_CONCURRENT` | int | no | 10 | no | ge=1 | yes | all | Provider concurrency ceiling. VERIFY against the Plivo account. |

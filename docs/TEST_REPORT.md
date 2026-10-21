@@ -39,3 +39,7 @@ bash scripts/run.sh pytest -q            # full suite
 Real Plivo (REST, callbacks from Plivo, inbound PSTN), real SIP gateway/carrier, S3 upload/presign/KMS, consent announcement audio, MongoDB Atlas, TLS/firewall/production host, WebRTC, multi-hour soak, provider limits. The opt-in real-provider suite exists (`tests/integration/test_real_provider.py`, marker `real_provider`) but has **never been run**: it skips unless `MME_TEL_REAL_PROVIDER_TESTS=1` plus Plivo credentials, a public callback URL, an approved test destination and a caller ID are set. It places one paid call.
 
 Note: the FreeSWITCH tests skip automatically when ESL is unreachable. FreeSWITCH has no supervisor on the dev host and did not survive a WSL restart on 2026-10-16 (a run then showed 117 passed, 18 skipped); after restarting it the suite gave **134 passed, 1 skipped**.
+
+## Plivo Voice Application integration (2026-10-21)
+Run: `bash scripts/run.sh pytest -q` -> **238 passed, 1 skipped** (the opt-in real-Plivo test), 0 leftover FreeSWITCH channels; `pyflakes` clean for `app/`, `config/`, `scripts/`.
+New: `tests/unit/test_plivo_stream.py` (25) and `tests/integration/test_plivo_voice.py` (44). **Mocked:** Plivo (SDK-signed requests, fake token, test WebSocket client), the STT/Brain/TTS servers, the Plivo REST client. **Real:** the service, MongoDB, HTTP/WebSocket server, conversation loop. No real Plivo call, no real model. Existing suites (169 + 1 skipped, including real-FreeSWITCH and headless-browser tests) pass unchanged. Details: `docs/PLIVO_VOICE_APPLICATION.md` §12.

@@ -44,6 +44,27 @@ class UnavailableBridge:
                        "media-fork module is installed")
 
 
+class PlivoStreamBridge:
+    """Media transport for calls that arrive through the Plivo Voice API (`<Stream bidirectional>`).
+
+    There is nothing to start on a switch: Plivo itself opens the WebSocket. "Ready" therefore means the pieces that make a
+    stream acceptable are configured; the AI session still becomes `active` only when a stream really connects.
+    """
+
+    name = "plivo_stream"
+
+    def __init__(self, s):
+        self.s = s
+
+    async def ready(self) -> tuple[bool, str]:
+        missing = [n for n, ok in (("PLIVO_AUTH_TOKEN", bool(self.s.plivo_auth_token.get_secret_value())),
+                                   ("WEBHOOK_PUBLIC_BASE_URL (https)", self.s.webhook_public_base_url.startswith("https://")),
+                                   ("JWT_SECRET", bool(self.s.jwt_secret.get_secret_value()))) if not ok]
+        if missing:
+            return False, "missing configuration: " + ", ".join(missing)
+        return True, "Plivo opens the stream; nothing to start on a switch"
+
+
 class WsForkBridge:
     """Ready only when FreeSWITCH `mod_audio_stream` is actually loaded (checked over ESL).
 

@@ -52,6 +52,9 @@ class Controller:
         self._inbound_seen: dict[str, float] = {}  # fs_uuid -> first-seen time (bounded); stops CREATE+PARK double handling
         self.sessions = None  # set by the app factory (SessionService); kept optional so the controller stays unit-testable
         self.ai = None        # set by the app factory (AiService)
+        #: extra adapters keyed by the `provider` name stored on a call (e.g. "plivo_api" for inbound Plivo calls while the
+        #: global provider is the FreeSWITCH gateway). Calls always go back through the adapter that owns them.
+        self.providers: dict[str, ProviderAdapter] = {}
         self.bucket = TokenBucket(min(s.max_initiation_rate, s.provider_max_cps))
         self.max_active = min(s.max_active_global, s.provider_max_concurrent)
         self._tasks: list[asyncio.Task] = []
@@ -398,6 +401,10 @@ class Controller:
         await self.repos.add_event(call, "origination.accepted", "controller", f"acc:{call['_id']}", {})
 
     # ------------------------------------------------------------------ control operations
+    def provider_for(self, call: dict) -> ProviderAdapter:
+        """The adapter that owns this call (falls back to the global provider)."""
+        return self.providers.get(call.get("provider") or "", self.provider)
+
     async def hangup(self, call: dict, *, source: str = "api") -> dict:
         st = S(call["state"])
         if st in sm.TERMINAL:
@@ -414,7 +421,7 @@ class Controller:
             return c
         cause = "ORIGINATOR_CANCEL" if st in sm.PRE_CONNECT else "NORMAL_CLEARING"
         try:
-            await self.provider.hangup(call, cause)
+            await self.provider_for(call).hangup(call, cause)
         except ProviderError as e:
             raise ApiError("hangup could not be executed", code="hangup_failed", status=502,
                            details={"reason": e.reason}) from e
@@ -435,7 +442,7 @@ class Controller:
         if c["state"] != S.TRANSFERRING.value:
             raise Conflict("call state changed", code="state_changed")
         try:
-            await self.provider.transfer(call, destination)
+            await self.provider_for(call).transfer(call, destination)
         except (ProviderError, EslCommandError, EslError, Unavailable, ValueError) as e:
             await self._finish_transfer(c, "rejected", revert=True)
             raise ApiError("transfer rejected", code="transfer_failed", status=502, details={"reason": type(e).__name__}) from e
@@ -467,10 +474,37 @@ class Controller:
             if c.get("origination_uncertain") or not c.get("fs_uuid"):
                 continue  # reconcile owns uncertain outcomes
             await self._kill_quietly(c, "PROGRESS_TIMEOUT")
+        # Plivo inbound: an Answer that was received but never completed (process died between insert and answer)
+        async for c in db.find({"provider": "plivo_api", "direction": "inbound", "state": "initiating",
+                                "initiated_at": {"$lt": now - timedelta(seconds=self.s.initiating_timeout_s)}}).limit(50):
+            await self.apply(c, S.FAILED, source="timeout", dedup_id=f"ans-incomplete:{c['_id']}",
+                             fields={"failure_reason": "answer_not_completed"})
+        # Plivo media stream promised in the Answer XML never connected: hang the call up instead of leaving silence on the line
+        async for c in db.find({"provider": "plivo_api", "state": "answered", "stream_expected_by": {"$lt": now},
+                                "stream_connected": {"$ne": True}, "stream_watch_done": {"$ne": True}}).limit(50):
+            claimed = await db.find_one_and_update({"_id": c["_id"], "stream_watch_done": {"$ne": True}},
+                                                   {"$set": {"stream_watch_done": True}})  # atomic: concurrent sweeps act once
+            if not claimed:
+                continue
+            await self.repos.add_event(c, "stream.not_connected", "timeout", f"stream-nc:{c['_id']}", {})
+            await self._kill_quietly(c, "NORMAL_CLEARING")
         # max duration (backup to sched_hangup)
         async for c in db.find({"state": {"$in": ["answered", "bridged", "transferring"]}}).limit(500):
             lim = c.get("max_duration_s", self.s.max_call_duration_s)
             if c.get("answered_at") and (now - aware(c["answered_at"])).total_seconds() > lim + 10:
+                if c.get("provider") == "plivo_api":
+                    # REST hangups are throttled, and an unconfirmed one must not leave the call and its AI session open forever
+                    over = (now - aware(c["answered_at"])).total_seconds() - lim
+                    if over > self.s.plivo_orphan_grace_s:
+                        await self.apply(c, S.COMPLETED, source="timeout", dedup_id=f"orphan:{c['_id']}",
+                                         fields={"hangup_cause": "TIMEOUT_UNCONFIRMED", "end_reason": "max_duration_unconfirmed", "timed_out": True})
+                        continue
+                    last = aware(c.get("timeout_hangup_at"))
+                    if last and (now - last).total_seconds() < 20:
+                        continue
+                    await self.repos.update_call(c["_id"], {"timed_out": True, "timeout_hangup_at": now})
+                    await self._kill_quietly(c, "ALLOTTED_TIMEOUT")
+                    continue
                 await self.repos.update_call(c["_id"], {"timed_out": True})
                 await self._kill_quietly(c, "ALLOTTED_TIMEOUT")
         # transfer timeout
@@ -478,11 +512,13 @@ class Controller:
             if c.get("transfer", {}).get("current"):
                 await self._finish_transfer(c, "timeout", revert=True)
 
-    async def _kill_quietly(self, c: dict, cause: str) -> None:
+    async def _kill_quietly(self, c: dict, cause: str) -> bool:
         try:
-            await self.provider.hangup(c, cause)
+            await self.provider_for(c).hangup(c, cause)
+            return True
         except Exception:
             log.warning("timeout hangup failed for %s", c["_id"])
+            return False
 
     # ------------------------------------------------------------------ reconciliation
     async def _reconcile_loop(self) -> None:

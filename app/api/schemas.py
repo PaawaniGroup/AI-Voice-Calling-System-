@@ -107,7 +107,7 @@ class PolicyIn(Strict):
 
 class RouteIn(Strict):
     number: str = Field(max_length=32)
-    action: Literal["park", "bridge", "hangup"] = "park"
+    action: Literal["park", "bridge", "hangup", "ai"] = "park"  # "ai": Plivo-delivered calls open an AI media stream
     target: str | None = Field(None, max_length=32)
 
 

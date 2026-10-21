@@ -412,3 +412,10 @@ async def ai_media_fs(ws: WebSocket):
 @ws_router.websocket("/v1/ai/sessions/{session_id}/media")
 async def ai_media(ws: WebSocket, session_id: str):
     await handle_media(ws, ws.app, session_id)
+
+
+@ws_router.websocket("/v1/providers/plivo/stream")
+async def plivo_media(ws: WebSocket):
+    """Plivo bidirectional <Stream>: authenticated by Plivo's handshake signature + the signed ticket in the start event."""
+    from app.ai.ws import handle_plivo_media
+    await handle_plivo_media(ws, ws.app)

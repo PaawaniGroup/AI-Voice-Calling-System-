@@ -1,4 +1,4 @@
-"""Media WebSockets (two wire protocols, one conversation loop).
+"""Media WebSockets (three wire protocols, one conversation loop).
 
  * `/v1/ai/sessions/{id}/media`   - the service's own protocol (documented in app/ai/media.py); synthetic-client tested.
  * `/v1/ai/media/fs`              - the protocol of FreeSWITCH `mod_audio_stream` (FreeSWITCH is the WebSocket CLIENT):
@@ -8,8 +8,13 @@
         reply    {"type":"streamAudio","data":{"audioDataType":"wav","sampleRate":R,"audioData":"<base64>"}}
                  -> the module writes a temp file and fires CUSTOM mod_audio_stream::play; the controller plays it with
                     `uuid_broadcast <uuid> <file> aleg`.  Barge-in -> `uuid_break <uuid> all`.
+ * `/v1/providers/plivo/stream`   - Plivo Voice API `<Stream bidirectional="true">` (Plivo is the WebSocket CLIENT). NOT
+   interchangeable with the two above: JSON text frames only (start/media/dtmf/playedStream/clearedAudio/stop), caller audio is
+   base64 G.711 mu-law 8 kHz, replies are `playAudio` events (mu-law 8 kHz) + `checkpoint`, barge-in is `clearAudio`.
+   `PlivoIO` below is the explicit adapter between that protocol and the shared `serve_loop` (PCM16 in, PCM16 out).
 
-Energy-based endpointing + barge-in, bounded utterance queue. Verified with mock models; see docs/AI_MEDIA_ADAPTER.md.
+Energy-based endpointing + barge-in, bounded utterance queue. Verified with mock models and mock Plivo traffic; see
+docs/AI_MEDIA_ADAPTER.md and docs/PLIVO_VOICE_APPLICATION.md.
 """
 from __future__ import annotations
 
@@ -21,8 +26,13 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.ai import codec
 from app.ai.clients import pcm16_to_wav, rms
 from app.core.errors import ApiError
+from app.core.ids import utcnow
+from app.observability import metrics as m
+from app.providers import plivo as plivo_mod
+from app.security import tickets
 from app.security.auth import decode_token
 from app.telephony import dialstrings as ds
 
@@ -33,6 +43,10 @@ SILENCE_MS = 700       # trailing silence that ends an utterance
 MIN_SPEECH_MS = 200
 BARGE_IN_MS = 120
 MAX_UTTERANCE_MS = 15000
+IDLE_POLL_S = 0.1      # when no frame arrives for this long, the gap counts as silence (a transport may stop sending when idle)
+PLIVO_PLAY_CHUNK = 8000        # mu-law bytes per playAudio (1 s => ~10.7 KB base64, under Plivo's 16 KB guidance)
+PLIVO_MAX_PLAY_S = 50          # Plivo queues ~60 s of audio; never send more than this per utterance
+PLIVO_MAX_MESSAGE = 65536      # Plivo guidance: messages up to 64 KB
 
 
 def resample(pcm: bytes, src: int, dst: int) -> bytes:
@@ -99,8 +113,101 @@ class FsIO:
         await self.ws.send_text(json.dumps(msg))
 
 
-async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad_rms: float, silence_ms: int) -> None:
-    """Shared endpointing/barge-in/turn loop. Returns when the socket ends."""
+class PlivoIO:
+    """Adapter: Plivo bidirectional-stream JSON events <-> the shared conversation loop (PCM16).
+
+    Inbound  `media` {track:"inbound", chunk, timestamp, payload: base64 mu-law 8 kHz} -> ("audio", PCM16 8 kHz)
+             duplicate / out-of-order `chunk` numbers are dropped; undecodable or oversize payloads are counted and dropped.
+    Outbound `playAudio` {media:{contentType:"audio/x-mulaw", sampleRate:8000, payload}} in <=1 s chunks, then `checkpoint`
+             {streamId, name}; barge-in sends `clearAudio` {streamId}.
+    UNVERIFIED with a real Plivo call: the exact `contentType` spelling Plivo accepts for playAudio (its reference shows
+    "audio/x-mulaw" with a separate sampleRate in the example, "audio/x-mulaw;rate=8000" in the Stream attribute).
+    """
+
+    rate = codec.MULAW_RATE
+
+    def __init__(self, ws: WebSocket, stream_id: str):
+        self.ws, self.stream_id = ws, stream_id
+        self.last_chunk = -1
+        self.counters = {"media": 0, "bytes": 0, "dup": 0, "bad": 0, "dtmf": 0, "cleared": 0, "oversize": 0}
+        self.played: list[str] = []
+        self.sent_checkpoints: list[str] = []
+
+    async def next_item(self, timeout: float):
+        try:
+            msg = await asyncio.wait_for(self.ws.receive(), timeout)
+        except asyncio.TimeoutError:
+            return ("idle", int(timeout * 1000))
+        if msg["type"] == "websocket.disconnect":
+            raise WebSocketDisconnect()
+        raw = msg.get("text")
+        if raw is None:
+            return ("skip", None)  # Plivo uses text frames only
+        if len(raw) > PLIVO_MAX_MESSAGE:
+            self.counters["oversize"] += 1
+            return ("end", "message_too_large")
+        try:
+            ev = json.loads(raw)
+        except json.JSONDecodeError:
+            self.counters["bad"] += 1
+            return ("skip", None)
+        kind = ev.get("event") if isinstance(ev, dict) else None
+        if kind == "media":
+            media = ev.get("media") if isinstance(ev.get("media"), dict) else {}
+            if media.get("track", "inbound") != "inbound":
+                return ("skip", None)
+            try:
+                chunk = int(media.get("chunk", self.last_chunk + 1))
+                mu = codec.decode_media_payload(media.get("payload"))
+            except (ValueError, TypeError, codec.CodecError):
+                self.counters["bad"] += 1
+                return ("skip", None)
+            if chunk <= self.last_chunk:  # duplicate or out-of-order media must not be fed twice
+                self.counters["dup"] += 1
+                return ("skip", None)
+            self.last_chunk = chunk
+            self.counters["media"] += 1
+            self.counters["bytes"] += len(mu)
+            return ("audio", codec.mulaw_to_pcm16(mu))
+        if kind == "dtmf":
+            self.counters["dtmf"] += 1  # digits are deliberately never logged or stored
+        elif kind == "playedStream":
+            self.played.append(str(ev.get("name", ""))[:64])
+        elif kind == "clearedAudio":
+            self.counters["cleared"] += 1
+        elif kind == "stop":
+            return ("end", "stream_stopped")
+        elif kind == "start":
+            return ("end", "duplicate_start")  # a second start on one socket is a protocol violation
+        return ("skip", None)
+
+    async def error(self, code: str, fatal: bool = False) -> None:
+        log.warning("plivo media error %s", code)  # Plivo has no error message to the caller; nothing is sent
+
+    async def interrupt(self) -> None:
+        await self.ws.send_text(json.dumps({"event": "clearAudio", "streamId": self.stream_id}))
+
+    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start) -> None:
+        mu = codec.pcm16_to_mulaw(codec.resample_pcm16(audio, src_rate, codec.MULAW_RATE))
+        limit = PLIVO_MAX_PLAY_S * codec.MULAW_RATE
+        if len(mu) > limit:
+            log.warning("reply audio truncated to %ss for Plivo's playback queue", PLIVO_MAX_PLAY_S)
+            mu = mu[:limit]
+        on_start(len(mu) / codec.MULAW_RATE)
+        for part in codec.chunks(mu, PLIVO_PLAY_CHUNK):
+            await self.ws.send_text(json.dumps({"event": "playAudio", "media": {
+                "contentType": "audio/x-mulaw", "sampleRate": codec.MULAW_RATE, "payload": base64.b64encode(part).decode()}}))
+        name = f"utt-{uid}"
+        self.sent_checkpoints.append(name)
+        await self.ws.send_text(json.dumps({"event": "checkpoint", "streamId": self.stream_id, "name": name}))
+
+
+async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad_rms: float, silence_ms: int) -> str | None:
+    """Shared endpointing/barge-in/turn loop. Returns an end reason when the transport signalled one, else None.
+
+    The item source is `io.next_item(timeout)` when the adapter has one (Plivo), otherwise the raw WebSocket. A gap with no
+    frames counts as silence, so an utterance still ends if the transport stops sending when the caller is quiet.
+    """
     local: list[asyncio.Task] = []
     utterances: asyncio.Queue[bytes] = asyncio.Queue(maxsize=2)
     st = {"playing": False, "uid": 0, "speech_ms": 0, "silence_ms": 0, "buf": bytearray(), "in_speech": False}
@@ -134,26 +241,55 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 play_task["t"] = asyncio.create_task(play(res.audio, res.sample_rate, res.language, st["uid"]))
                 local.append(play_task["t"])
 
+    async def flush_if_due() -> None:
+        if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000):
+            utt = bytes(st["buf"])
+            st.update(buf=bytearray(), in_speech=False, speech_ms=0, silence_ms=0)
+            if utterances.full():  # backpressure: drop the oldest queued utterance
+                utterances.get_nowait()
+                await io.error("inbound_overflow")
+            utterances.put_nowait(utt)
+
+    async def next_item():
+        if hasattr(io, "next_item"):
+            return await io.next_item(IDLE_POLL_S)
+        try:
+            msg = await asyncio.wait_for(ws.receive(), IDLE_POLL_S)
+        except asyncio.TimeoutError:
+            return ("idle", int(IDLE_POLL_S * 1000))
+        if msg["type"] == "websocket.disconnect":
+            raise WebSocketDisconnect()
+        if msg.get("text") is not None:
+            return ("text", msg["text"])
+        data = msg.get("bytes")
+        return ("audio", data) if data else ("skip", None)
+
     local.append(asyncio.create_task(worker()))
     try:
         while True:
-            msg = await ws.receive()
-            if msg["type"] == "websocket.disconnect":
-                raise WebSocketDisconnect()
-            if msg.get("text") is not None:
+            kind, val = await next_item()
+            if kind == "end":
+                return val
+            if kind == "text":
                 try:
-                    if json.loads(msg["text"]).get("type") == "bye":
+                    if json.loads(val).get("type") == "bye":
                         await ai.stop(rt.tenant_id, rt.session_id, "client_bye")
-                        return
+                        return "client_bye"
                 except ValueError:
                     pass
                 continue
-            frame = msg.get("bytes")
-            if not frame:
+            if kind == "idle":
+                if st["in_speech"]:
+                    st["silence_ms"] += val
+                    await flush_if_due()
                 continue
+            if kind != "audio":
+                continue
+            frame = val
+            fm = max(1, len(frame) * 500 // rate)  # real duration of this frame at `rate` (16-bit mono)
             loud = rms(frame) >= vad_rms
             if loud:
-                st["speech_ms"] += frame_ms
+                st["speech_ms"] += fm
                 st["silence_ms"] = 0
                 if st["playing"] and st["speech_ms"] >= BARGE_IN_MS:  # caller talks over the assistant
                     rt.conversation.cancel()
@@ -164,18 +300,12 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:
                     st["in_speech"] = True
             else:
-                st["silence_ms"] += frame_ms
+                st["silence_ms"] += fm
                 if not st["in_speech"]:
                     st["speech_ms"] = 0
             if st["in_speech"]:
                 st["buf"] += frame
-                if st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000:
-                    utt = bytes(st["buf"])
-                    st.update(buf=bytearray(), in_speech=False, speech_ms=0, silence_ms=0)
-                    if utterances.full():  # backpressure: drop the oldest queued utterance
-                        utterances.get_nowait()
-                        await io.error("inbound_overflow")
-                    utterances.put_nowait(utt)
+                await flush_if_due()
     finally:
         for tk in local:
             tk.cancel()
@@ -276,3 +406,128 @@ async def handle_fs_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, silen
             await ai.media_disconnected(rt)
     except RuntimeError:
         pass
+
+
+# ---------------------------------------------------------------------------------- Plivo bidirectional stream
+_plivo_streaming: set[str] = set()  # session ids with an open Plivo stream (single worker process, enforced by settings)
+
+
+async def _hangup_best_effort(ctrl, call: dict) -> None:
+    try:
+        await ctrl.hangup(call, source="media")
+    except Exception as e:
+        log.warning("could not hang up call after stream failure: %s", type(e).__name__)
+
+
+async def handle_plivo_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, silence_ms: int = SILENCE_MS) -> None:
+    """Plivo `<Stream bidirectional>` endpoint.
+
+    Order: (1) handshake signature + nonce replay, before accept; (2) `start` within 5 s; (3) signed ticket must name this
+    call, tenant and session, and the call must be answered and AI-flagged; (4) AiService.start / attach_media / media_connected
+    (the existing lifecycle); (5) the shared serve_loop through PlivoIO; (6) cleanup that always stops the AI session.
+    """
+    s, ai, repos, ctrl = app.state.settings, app.state.ai, app.state.repos, app.state.controller
+    nonce = ws.headers.get("x-plivo-signature-v3-nonce", "")
+    sig = ws.headers.get("x-plivo-signature-v3", "")
+    if not plivo_mod.plivo_enabled(s) or not plivo_mod.verify_ws_signature(s, nonce=nonce, signature=sig, query=ws.url.query):
+        m.PLIVO_STREAMS.labels("rejected_signature").inc()
+        log.warning("rejected plivo stream handshake: invalid or missing signature")
+        return await ws.close(code=1008)
+    if await repos.seen_provider_key(f"plivo:ws-nonce:{nonce}"):
+        m.PLIVO_STREAMS.labels("rejected_replay").inc()
+        log.warning("rejected plivo stream handshake: replayed nonce")
+        return await ws.close(code=1008)
+    await ws.accept()
+    if len(_plivo_streaming) >= s.plivo_stream_max_concurrent:  # authenticated, so a meaningful close code can be sent
+        m.PLIVO_STREAMS.labels("rejected_capacity").inc()
+        return await ws.close(code=1013)
+
+    sid = None
+    tenant = None
+    call: dict | None = None
+    rt = None
+    reason = "ws_disconnected"
+    counted = False
+    io: PlivoIO | None = None
+    try:
+        ev = json.loads(await asyncio.wait_for(ws.receive_text(), 5))
+        if not isinstance(ev, dict) or ev.get("event") != "start" or not isinstance(ev.get("start"), dict):
+            reason = "no_start"
+            return await ws.close(code=1008)
+        start = ev["start"]
+        try:
+            t = tickets.verify(s, tickets.from_extra_headers(ev.get("extra_headers") or start.get("extra_headers")))
+        except tickets.TicketError as e:
+            reason = "bad_ticket"
+            log.warning("plivo stream start rejected: %s", e)
+            return await ws.close(code=1008)
+        if start.get("callId") != t.call_id:
+            reason = "call_mismatch"
+            return await ws.close(code=1008)
+        mf = start.get("mediaFormat") if isinstance(start.get("mediaFormat"), dict) else {}
+        if mf.get("encoding") != "audio/x-mulaw" or mf.get("sampleRate") != codec.MULAW_RATE:
+            reason = "unsupported_format"
+            return await ws.close(code=1003)
+        call = await repos.find_call_by_provider_id("plivo_api", t.call_id)
+        if not call or call["tenant_id"] != t.tenant_id or call.get("session_id") != t.session_id or call["state"] != "answered":
+            reason = "session_mismatch"
+            log.warning("plivo stream start rejected: ticket does not match an answered call")
+            return await ws.close(code=1008)
+        sid, tenant = t.session_id, t.tenant_id
+        if sid in _plivo_streaming:  # check-and-add with no await in between: a ticket opens ONE stream
+            reason = "already_streaming"
+            sid = None
+            return await ws.close(code=1008)
+        _plivo_streaming.add(sid)
+        counted = True
+        m.PLIVO_STREAMS_ACTIVE.inc()
+        stream_id = str(start.get("streamId", ""))[:64]
+
+        from app.ai.media import PlivoStreamBridge
+        try:
+            await ai.start(tenant, sid, bridge=PlivoStreamBridge(s))
+            rt = await ai.attach_media(tenant, sid)
+        except ApiError as e:
+            reason = f"ai_start_{e.code}"
+            m.PLIVO_STREAMS.labels("ai_start_failed").inc()
+            await repos.add_event(call, "ai.start_failed", "plivo", f"aistart:{stream_id}", {"code": e.code})
+            await _hangup_best_effort(ctrl, call)
+            return await ws.close(code=1011)
+        rt.ws = ws
+        await ai.media_connected(rt, {"sample_rate": codec.MULAW_RATE, "frame_ms": 20, "flavor": "plivo_stream", "stream_id": stream_id})
+        await repos.update_call(call["_id"], {"stream_connected": True, "stream_id": stream_id, "stream_connected_at": utcnow()})
+        await repos.add_event(call, "stream.connected", "plivo", f"stream:{stream_id}:connected", {})
+        m.PLIVO_STREAMS.labels("connected").inc()
+        io = PlivoIO(ws, stream_id)
+        end = await serve_loop(ws, ai, rt, io, codec.MULAW_RATE, 20, vad_rms=vad_rms, silence_ms=silence_ms)
+        reason = end or "stream_ended"
+    except WebSocketDisconnect:
+        reason = "ws_disconnected"
+    except (asyncio.TimeoutError, json.JSONDecodeError):
+        reason = "protocol_error"
+        try:
+            await ws.close(code=1008)
+        except Exception:
+            pass
+    except RuntimeError:
+        reason = "socket_closed"
+    except Exception as e:  # never leave the call/AI session dangling on an unexpected error
+        reason = f"error_{type(e).__name__}"
+        log.exception("plivo stream error")
+        if call is not None:
+            await _hangup_best_effort(ctrl, call)
+    finally:
+        if counted:
+            _plivo_streaming.discard(sid)
+            m.PLIVO_STREAMS_ACTIVE.dec()
+        if sid and tenant:
+            try:
+                await ai.stop(tenant, sid, reason)  # idempotent: cancels inference/playback, closes the socket, releases resources
+            except ApiError:
+                pass  # no AI session was created
+            except Exception:
+                log.exception("AI cleanup after plivo stream failed")
+            if call is not None:
+                await repos.add_event(call, "stream.ended", "plivo", f"stream:{sid}:ended", {"reason": reason, **(io.counters if io else {})})
+        m.PLIVO_STREAMS.labels("ended").inc()
+        log.info("plivo stream closed reason=%s", reason)

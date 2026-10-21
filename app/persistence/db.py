@@ -13,7 +13,7 @@ from config.settings import Settings
 
 log = logging.getLogger("mme_telephony.db")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 COLLECTIONS = [
     "calls", "call_events", "idempotency", "recordings", "audit", "tenant_policies",
@@ -89,6 +89,11 @@ class Database:
                                  partialFilterExpression={"direction": "inbound", "fs_uuid": {"$type": "string"}})
         await calls.create_index([("provider", ASCENDING), ("provider_call_id", ASCENDING)],
                                  name="provider_call", sparse=True)
+        # backstop: duplicate Plivo Answer callbacks (retries, races) can never create a second inbound call
+        await calls.create_index([("provider", ASCENDING), ("provider_call_id", ASCENDING)], name="uniq_inbound_provider_call",
+                                 unique=True, partialFilterExpression={"direction": "inbound", "provider_call_id": {"$type": "string"}})
+        await calls.create_index([("provider", ASCENDING), ("state", ASCENDING), ("stream_expected_by", ASCENDING)],
+                                 name="plivo_stream_watch", sparse=True)
         await calls.create_index([("created_at", ASCENDING), ("tenant_id", ASCENDING), ("state", ASCENDING)],
                                  name="reporting")
         await calls.create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)

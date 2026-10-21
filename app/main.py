@@ -63,6 +63,10 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         prov = provider or build_provider(s, esl_cmd)
         emitter = WebhookEmitter(database, s)
         ctrl = Controller(s, repos, prov, emitter, esl_cmd, None)
+        if s.plivo_inbound_enabled and prov.name != "plivo_api":
+            # Calls delivered by Plivo are controlled through Plivo (REST hangup), never through the FreeSWITCH gateway,
+            # while outbound calling keeps using the configured provider.
+            ctrl.providers["plivo_api"] = PlivoApiProvider(s)
         if s.fs_enabled:
             esl_events = EslEventClient(s.esl_host, s.esl_port, s.esl_password.get_secret_value(),
                                         handler=ctrl.on_esl_event, on_connect=ctrl.on_esl_connected,

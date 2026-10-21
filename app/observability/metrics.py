@@ -37,6 +37,9 @@ AI_LATENCY = Histogram("mme_tel_ai_seconds", "Model service latency", ["service"
                        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30))
 AI_SESSIONS = Counter("mme_tel_ai_sessions_total", "AI session lifecycle", ["state"], registry=REGISTRY)
 LOGINS = Counter("mme_tel_logins_total", "Dashboard logins", ["outcome"], registry=REGISTRY)
+PLIVO_CALLBACKS = Counter("mme_tel_plivo_callbacks_total", "Plivo callbacks by route and outcome", ["route", "outcome"], registry=REGISTRY)
+PLIVO_STREAMS = Counter("mme_tel_plivo_streams_total", "Plivo media streams by outcome", ["outcome"], registry=REGISTRY)
+PLIVO_STREAMS_ACTIVE = Gauge("mme_tel_plivo_streams_active", "Open Plivo media streams", registry=REGISTRY)
 RATE_LIMITED = Counter("mme_tel_rate_limited_total", "Requests rejected by rate limiting", registry=REGISTRY)
 
 

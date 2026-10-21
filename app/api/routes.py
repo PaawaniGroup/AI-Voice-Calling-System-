@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.api.schemas import CallCreate, PolicyIn, RouteIn, TransferRequest, WebhookEndpointIn, call_out
 from app.core import phone
-from app.core.errors import ApiError, Conflict, Forbidden, NotFound, Unauthorized, Unprocessable
+from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized, Unprocessable
 from app.core.ids import new_id, utcnow
 from app.events import webhooks as wh
 from app.observability import metrics as m
@@ -19,6 +19,7 @@ from app.persistence.repos import Repos
 from app.providers import plivo as plivo_mod
 from app.security.auth import Principal, require_admin, require_platform, require_user, require_viewer
 from app.services import calls as call_svc
+from app.services import plivo_calls
 from app.services import recordings as rec_svc
 from app.telephony.state_machine import CONNECTED, TERMINAL, S
 
@@ -415,96 +416,61 @@ async def replay_delivery(request: Request, delivery_id: str, p: Principal = Dep
 
 
 # ------------------------------------------------------------------ Plivo provider callbacks
-async def _verified_form(request: Request) -> tuple[dict[str, str], str]:
+# Public routes: they carry no JWT. Plivo's X-Plivo-Signature-V3 (+ nonce) over the PUBLIC url and the form fields is the
+# credential. The call logic lives in app/services/plivo_calls.py; media is app/ai/ws.py::handle_plivo_media.
+async def _verified_form(request: Request, route: str) -> tuple[dict[str, str], bool]:
+    """Verify the signature, then return (form params, replayed). `replayed` means this exact signed request was seen before."""
     s, repos, _ = _ctx(request)
+    if not plivo_mod.plivo_enabled(s):
+        raise NotFound("provider not enabled")
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
-    base = s.webhook_public_base_url.rstrip("/")
-    url = base + request.url.path  # signature is computed over the public URL Plivo called
     nonce = request.headers.get("x-plivo-signature-v3-nonce", "")
     sig = request.headers.get("x-plivo-signature-v3", "")
+    url = plivo_mod.callback_url(s, request.url.path, request.url.query)  # public URL from config, never from forwarded headers
     if not plivo_mod.verify_signature(s, method="POST", url=url, params=params, nonce=nonce, signature=sig):
+        m.PLIVO_CALLBACKS.labels(route, "bad_signature").inc()
         raise Unauthorized("invalid provider signature", code="invalid_signature")
-    ts = params.get("Timestamp")  # not always sent; replay defence is the nonce store
-    _ = ts
-    if await repos.seen_provider_key(f"plivo:nonce:{nonce}"):
-        raise ApiError("replayed callback", code="replay", status=200)
-    return params, nonce
+    return params, await repos.seen_provider_key(f"plivo:nonce:{nonce}")
+
+
+async def _status_route(request: Request, route: str):
+    params, replayed = await _verified_form(request, route)
+    if replayed:
+        m.PLIVO_CALLBACKS.labels(route, "duplicate").inc()
+        return {"status": "duplicate"}
+    out = await plivo_calls.handle_status(request.app, params)
+    m.PLIVO_CALLBACKS.labels(route, out["status"]).inc()
+    return out
 
 
 @v1.post("/providers/plivo/status")
 async def plivo_status(request: Request):
-    s, repos, ctrl = _ctx(request)
-    if s.provider != "plivo_api":
-        raise NotFound("provider not enabled")
-    try:
-        params, _ = await _verified_form(request)
-    except ApiError as e:
-        if e.code == "replay":
-            return {"status": "duplicate"}
-        raise
-    uuid_ = params.get("CallUUID", "")
-    call = await repos.find_call_by_provider_id("plivo_api", uuid_)
-    if not call and params.get("RequestUUID"):
-        call = await repos.find_call_by_provider_id("plivo_api", params["RequestUUID"])
-        if call:
-            await repos.update_call(call["_id"], {"provider_call_id": uuid_})
-    if not call:
-        return {"status": "ignored"}  # unknown call: acknowledge so Plivo does not retry forever
-    mapped = plivo_mod.map_status(params, bool(call.get("answered_at")))
-    if not mapped:
-        return {"status": "ignored"}
-    target, reason = mapped
-    key = f"plivo:{uuid_}:{params.get('CallStatus','')}:{params.get('Event','')}"
-    fields = {}
-    if target in TERMINAL:
-        fields = {"hangup_cause": params.get("HangupCause", "")[:60], "failure_reason": reason if target != S.COMPLETED else None}
-    outcome, _c = await ctrl.apply(call, target, source="plivo", dedup_id=key, fields=fields, payload={"status": params.get("CallStatus")})
-    return {"status": outcome}
+    """Ring / answer-progress / hangup callbacks for calls Plivo originated or delivered."""
+    return await _status_route(request, "status")
+
+
+@v1.post("/providers/plivo/hangup")
+async def plivo_hangup(request: Request):
+    """Hangup URL of the Plivo Application: the call-completion callback (same handler as /status)."""
+    return await _status_route(request, "hangup")
+
+
+@v1.post("/providers/plivo/stream-status")
+async def plivo_stream_status(request: Request):
+    """statusCallbackUrl of the <Stream> element: started | stopped | failed. Never changes the call state by itself."""
+    params, replayed = await _verified_form(request, "stream_status")
+    if replayed:
+        m.PLIVO_CALLBACKS.labels("stream_status", "duplicate").inc()
+        return {"status": "duplicate"}
+    out = await plivo_calls.handle_stream_status(request.app, params)
+    m.PLIVO_CALLBACKS.labels("stream_status", out["status"]).inc()
+    return out
 
 
 @v1.post("/providers/plivo/answer")
 async def plivo_answer(request: Request):
-    s, repos, ctrl = _ctx(request)
-    if s.provider != "plivo_api":
-        raise NotFound("provider not enabled")
-    try:
-        params, _ = await _verified_form(request)
-    except ApiError as e:
-        if e.code == "replay":
-            return Response('<Response><Hangup reason="rejected"/></Response>', media_type="application/xml")
-        raise
-    xml = lambda b: Response(f"<Response>{b}</Response>", media_type="application/xml")  # noqa: E731
-    uuid_ = params.get("CallUUID", "")
-    call = await repos.find_call_by_provider_id("plivo_api", uuid_)
-    if call is None and params.get("RequestUUID"):
-        call = await repos.find_call_by_provider_id("plivo_api", params["RequestUUID"])
-        if call:
-            await repos.update_call(call["_id"], {"provider_call_id": uuid_})
-    if call is None and params.get("Direction", "").lower() == "inbound":
-        try:
-            to = phone.normalize("+" + params.get("To", "").lstrip("+"))
-        except ApiError:
-            return xml('<Hangup reason="rejected"/>')
-        route = await repos.get_route(to)
-        pol = await repos.get_policy(route["tenant_id"]) if route else None
-        if not route or (pol or {}).get("enabled") is not True:
-            return xml('<Hangup reason="rejected"/>')
-        if await repos.count_active() >= ctrl.max_active or await repos.count_active(route["tenant_id"]) >= (pol or {}).get("max_active_calls", s.max_active_per_tenant):
-            return xml('<Hangup reason="busy"/>')
-        call = {"_id": new_id("call"), "tenant_id": route["tenant_id"], "direction": "inbound", "provider": "plivo_api",
-                "provider_call_id": uuid_, "from_number": params.get("From", "")[:20], "to_number": to, "state": S.INITIATING.value,
-                "initiated_at": utcnow(), "correlation_id": new_id("cor"), "max_duration_s": s.max_call_duration_s}
-        await repos.insert_call(call)
-        m.CALLS_CREATED.labels("inbound").inc()
-        action, target = route.get("action", "park"), route.get("target")
-    elif call is None:
-        return xml('<Hangup reason="rejected"/>')
-    else:
-        action, target = ("bridge", call.get("bridge_to")) if call.get("bridge_to") else ("park", None)
-    await ctrl.apply(call, S.ANSWERED, source="plivo", dedup_id=f"plivo:{uuid_}:answer")
-    if action == "hangup":
-        return xml('<Hangup/>')
-    if action == "bridge" and target:
-        return xml(f'<Dial timeLimit="{call.get("max_duration_s", s.max_call_duration_s)}"><Number>{target.lstrip("+")}</Number></Dial>')
-    return xml(f'<Wait length="{min(call.get("max_duration_s", s.max_call_duration_s), 3600)}"/>')
+    """Plivo Answer URL: returns Plivo XML (park -> Wait, bridge -> Dial, hangup -> Hangup, ai -> bidirectional Stream)."""
+    params, replayed = await _verified_form(request, "answer")
+    xml = await plivo_calls.handle_answer(request.app, params, replayed=replayed)
+    return Response(content=xml, media_type="application/xml")
