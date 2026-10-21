@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import uuid
 
 from app.core.ids import utcnow
@@ -148,7 +148,7 @@ async def test_cross_tenant_access_denied(env):
         assert r.status_code == 404, (method, path, r.status_code)
     assert (await env.client.get("/v1/calls", headers=other)).json()["items"] == []
     # client-supplied tenant in token claims of another user cannot be forged without the secret; query param ignored
-    assert (await env.client.get(f"/v1/calls?tenant_id=t1", headers=other)).json()["items"] == []
+    assert (await env.client.get("/v1/calls?tenant_id=t1", headers=other)).json()["items"] == []
     # usage cross-tenant
     assert (await env.client.get("/v1/usage?tenant_id=t1", headers=other)).status_code == 403
     assert (await env.client.get("/v1/usage?tenant_id=t1", headers=PLATFORM())).status_code == 200
@@ -375,7 +375,7 @@ async def test_webhook_delivery_signing_retry_and_replay(env):
     await enable_tenant(env)
     r = await env.client.post("/v1/webhooks/endpoints", json={"url": "http://receiver.test/hook", "events": ["call.answered", "call.completed"]},
                               headers=HDR_ADMIN())
-    eid, secret = r.json()["id"], r.json()["signing_secret"]
+    secret = r.json()["signing_secret"]
     c = await make_call(env)
     c = await wait_state(env, c["id"], "initiating")
     await env.ctrl.on_esl_event(esl("CHANNEL_ANSWER", c["fs_uuid"]))

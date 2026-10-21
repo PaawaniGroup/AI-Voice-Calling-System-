@@ -229,11 +229,21 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         while True:
             pcm = await utterances.get()
             t_turn = time.perf_counter()
-            res = await rt.conversation.turn(pcm, rate)
+            try:
+                res = await rt.conversation.turn(pcm, rate)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # defence in depth: the worker must outlive any single failed turn
+                log.exception("conversation worker error")
+                m.AI_TURN_ERRORS.labels("worker_exception").inc()
+                continue
             if res.timings_ms:
                 res.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)  # utterance end -> reply ready
+                if not res.error:
+                    m.AI_TURN_SECONDS.observe(res.timings_ms["turn_ms"] / 1000)
                 await ai.record_turn(rt, res.timings_ms)
             if res.error and res.error != "cancelled":
+                m.AI_TURN_ERRORS.labels(res.error[:40]).inc()
                 await io.error(res.error)
                 continue
             if res.audio and not rt.conversation.cancelled:

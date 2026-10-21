@@ -25,7 +25,7 @@ def make_settings(**kw) -> Settings:
     base = dict(env="test", provider="mock", fs_enabled=False, mongo_uri=MONGO, jwt_secret=JWT_SECRET,
                 webhook_signing_master=MASTER, log_level="WARNING", webhook_allow_private=True, webhook_allow_http=True,
                 dispatch_poll_s=0.05, max_initiation_rate=1000.0, provider_max_cps=1000.0, reconcile_grace_s=0.0,
-                mongo_server_selection_timeout_ms=1500, default_allowed_countries="IN,US")
+                mongo_server_selection_timeout_ms=1500, default_allowed_countries="IN,US", drain_timeout_s=0)
     base.update(kw)
     return Settings(_env_file=None, **base)
 

@@ -42,7 +42,9 @@ def build_provider(s: Settings, esl_cmd):
     return FreeSwitchGatewayProvider(esl_cmd, s)
 
 
-def create_app(settings: Settings | None = None, *, db: Database | None = None, provider=None, ai_transport=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, db: Database | None = None, provider=None, ai_transport=None,
+               providers: dict | None = None) -> FastAPI:
+    """`providers`: extra provider adapters keyed by call.provider (dependency injection for tests / future providers)."""
     s = settings or get_settings()
     setup_logging(s.log_level, s.log_format, s.app_name, s.env)
     errlog = RingHandler(s.error_log_buffer)
@@ -67,6 +69,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
             # Calls delivered by Plivo are controlled through Plivo (REST hangup), never through the FreeSWITCH gateway,
             # while outbound calling keeps using the configured provider.
             ctrl.providers["plivo_api"] = PlivoApiProvider(s)
+        ctrl.providers.update(providers or {})
         if s.fs_enabled:
             esl_events = EslEventClient(s.esl_host, s.esl_port, s.esl_password.get_secret_value(),
                                         handler=ctrl.on_esl_event, on_connect=ctrl.on_esl_connected,
@@ -82,6 +85,38 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         storage = rec_svc.make_storage(s)
         app.state.repos, app.state.controller, app.state.webhook_worker = repos, ctrl, wworker
         app.state.storage, app.state.db = storage, database
+        app.state.draining = False
+        m.DRAINING.set(0)
+
+        async def drain(timeout: float | None = None) -> dict:
+            """Stop accepting new inbound calls (readiness 503, Plivo answers get <Hangup busy>), give live AI conversations
+            `drain_timeout_s` to end on their own, then close the rest and ask the provider to hang those callers up so
+            nobody is left in silence. Idempotent; also runs on shutdown."""
+            if not app.state.draining:
+                app.state.draining = True
+                m.DRAINING.set(1)
+                log.info("draining: no new calls will be accepted")
+            end = asyncio.get_running_loop().time() + (s.drain_timeout_s if timeout is None else timeout)
+            while ai.runtime and asyncio.get_running_loop().time() < end:
+                await asyncio.sleep(0.25)
+            stopped = await ai.stop_all("service_shutdown")
+            hung = 0
+            for tenant, sid in stopped:
+                call = await database["calls"].find_one({"tenant_id": tenant, "session_id": sid})
+                if call and call["state"] not in ("completed", "failed", "cancelled", "busy", "no_answer"):
+                    hung += 1 if await ctrl._kill_quietly(call, "NORMAL_CLEARING") else 0
+            if stopped:
+                log.warning("drain closed %d AI conversation(s); %d provider hangup(s) requested", len(stopped), hung)
+            return {"stopped": len(stopped), "hangups_requested": hung}
+
+        app.state.drain = drain
+        try:  # a restart leaves AI sessions / streams of the previous process behind: resolve them explicitly
+            rec = await ai.recover_on_startup()
+            rec.update(await ctrl.recover_provider_streams())
+            if any(rec.values()):
+                log.warning("startup recovery: %s", rec)
+        except Exception:
+            log.exception("startup recovery failed (service continues; sweepers cover the remainder)")
         if esl_cmd:
             await esl_cmd.start()
         if esl_events:
@@ -93,6 +128,10 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         try:
             yield
         finally:
+            try:
+                await drain()
+            except Exception:
+                log.exception("drain failed")
             housekeeping.cancel()
             await asyncio.gather(housekeeping, return_exceptions=True)
             await wworker.stop()

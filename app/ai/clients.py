@@ -66,11 +66,28 @@ def pcm16_to_wav(pcm: bytes, rate: int) -> bytes:
     return buf.getvalue()
 
 
+TTS_RATES = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000}
+TTS_MAX_SECONDS = 120
+
+
 def wav_to_pcm16(data: bytes) -> tuple[bytes, int]:
-    with wave.open(io.BytesIO(data), "rb") as w:
-        if w.getsampwidth() != 2 or w.getnchannels() != 1:
-            raise AiError("tts", "unsupported_audio", "expected mono 16-bit WAV")
-        return w.readframes(w.getnframes()), w.getframerate()
+    """Validate TTS output BEFORE it is played: mono 16-bit PCM WAV, plausible rate, non-empty, bounded length.
+    Anything else is a `bad_audio` error, never garbage played to a caller."""
+    try:
+        with wave.open(io.BytesIO(data), "rb") as w:
+            ch, width, rate, frames = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+            if ch != 1 or width != 2:
+                raise AiError("tts", "bad_audio", "expected mono 16-bit WAV")
+            if rate not in TTS_RATES:
+                raise AiError("tts", "bad_audio", f"unsupported sample rate {rate}")
+            if frames <= 0 or frames / rate > TTS_MAX_SECONDS:
+                raise AiError("tts", "bad_audio", "empty or too long")
+            pcm = w.readframes(frames)
+    except (wave.Error, EOFError, struct.error) as e:
+        raise AiError("tts", "bad_audio", type(e).__name__) from None
+    if len(pcm) != frames * 2:
+        raise AiError("tts", "bad_audio", "truncated data")
+    return pcm, rate
 
 
 def rms(pcm: bytes) -> float:
@@ -123,6 +140,9 @@ class ModelClients:
         except asyncio.TimeoutError:
             m.AI_REQUESTS.labels(service, "timeout").inc()
             raise AiTimeout(service, "timeout") from None
+        except AiError:
+            m.AI_REQUESTS.labels(service, "error").inc()
+            raise
         except (httpx.HTTPError, OSError) as e:
             m.AI_REQUESTS.labels(service, "error").inc()
             raise AiUnavailable(service, "unreachable", type(e).__name__) from e
@@ -157,8 +177,13 @@ class ModelClients:
             r = await self._http.post(ep.url + ep.path, files=files, data=data)
             if r.status_code >= 400:
                 raise AiError("stt", "http_error", str(r.status_code))
-            j = r.json()
-            return {"text": (j.get("text") or "").strip(), "language": j.get("language") or language}
+            try:
+                j = r.json()
+                text = j.get("text")
+                lang = j.get("language")
+            except (ValueError, AttributeError):
+                raise AiError("stt", "bad_response", "not a JSON object") from None
+            return {"text": text.strip() if isinstance(text, str) else "", "language": lang if isinstance(lang, str) and lang else language}
         return await self._call("stt", go)
 
     # ------------------------------------------------------------------ Brain
@@ -171,8 +196,12 @@ class ModelClients:
             r = await self._http.post(ep.url + ep.path, json=body)
             if r.status_code >= 400:
                 raise AiError("brain", "http_error", str(r.status_code))
-            msg = r.json()["choices"][0]["message"]
-            return {"text": (msg.get("content") or "").strip(), "tool_calls": msg.get("tool_calls") or []}
+            try:
+                msg = r.json()["choices"][0]["message"]
+                content, calls = msg.get("content"), msg.get("tool_calls")
+            except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+                raise AiError("brain", "bad_response", "unexpected response shape") from None
+            return {"text": content.strip() if isinstance(content, str) else "", "tool_calls": calls if isinstance(calls, list) else []}
         return await self._call("brain", go)
 
     # ------------------------------------------------------------------ TTS
@@ -192,5 +221,8 @@ class ModelClients:
             r = await self._http.post(ep.url + ep.path, json={"query": query, "top_k": k})
             if r.status_code >= 400:
                 raise AiError("rag", "http_error", str(r.status_code))
-            return [str(x.get("text", ""))[:1200] for x in r.json().get("results", [])][:k]
+            try:
+                return [str(x.get("text", ""))[:1200] for x in r.json().get("results", [])][:k]
+            except (ValueError, AttributeError, TypeError):
+                raise AiError("rag", "bad_response", "unexpected response shape") from None
         return await self._call("rag", go)

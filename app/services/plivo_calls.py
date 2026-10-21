@@ -122,6 +122,10 @@ async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) 
         m.PLIVO_CALLBACKS.labels("answer", "ignored").inc()
         return REJECT  # unknown outbound call, or a replay with nothing to describe
 
+    if getattr(app.state, "draining", False):  # shutting down: do not take a call we cannot serve
+        m.PLIVO_CALLBACKS.labels("answer", "draining").inc()
+        return BUSY
+
     # ---- inbound: tenant routing and policy (existing rules, unchanged)
     try:
         to = phone.normalize("+" + params.get("To", "").lstrip("+"))

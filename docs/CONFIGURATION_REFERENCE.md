@@ -130,6 +130,7 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | Variable | Type | Required | Default | Secret | Valid range / values | Restart | Env | Purpose |
 |---|---|---|---|---|---|---|---|---|
 | `MME_TEL_DASHBOARD_ENABLED` | bool | no | True | no | - | yes | all | Serve the management dashboard at /dashboard. |
+| `MME_TEL_DRAIN_TIMEOUT_S` | int | no | 15 | no | ge=0, le=300 | yes | all | On shutdown: stop accepting new calls, wait this long for AI conversations to end, then close them. Keep below the supervisor's stop timeout. |
 | `MME_TEL_ERROR_LOG_BUFFER` | int | no | 500 | no | ge=10, le=10000 | yes | all | Recent warning/error log records kept in memory for the dashboard. |
 | `MME_TEL_LOGIN_ENABLED` | bool | no | True | no | - | yes | all | Enable POST /v1/auth/login (local users in MongoDB, scrypt hashes). |
 | `MME_TEL_LOGIN_RATE_LIMIT_PER_MIN` | int | no | 10 | no | ge=1 | yes | all | Failed+successful login attempts per client IP per minute. |

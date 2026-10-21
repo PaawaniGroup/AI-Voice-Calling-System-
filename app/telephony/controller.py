@@ -622,6 +622,23 @@ class Controller:
             m.RECORDING_FAILURES.inc()
             log.exception("recording start failed")
 
+    async def recover_provider_streams(self) -> dict:
+        """Startup: Plivo calls whose media stream lived in the previous process lost their AI conversation (the socket died
+        with it). Ask Plivo to hang them up so callers are not left in silence, and mark the stream lost once. If Plivo cannot be
+        reached the call is closed by the max-duration backstop. Idempotent."""
+        n = 0
+        async for c in self.repos.db["calls"].find({"provider": "plivo_api", "state": {"$in": ["answered", "bridged"]},
+                                                    "stream_connected": True, "ai_enabled": True}):
+            claimed = await self.repos.db["calls"].find_one_and_update(
+                {"_id": c["_id"], "stream_connected": True}, {"$set": {"stream_connected": False, "stream_lost_at": utcnow()}})
+            if not claimed:
+                continue
+            await self.repos.add_event(c, "stream.lost_on_restart", "recovery", f"stream-lost:{c['_id']}", {})
+            await self._kill_quietly(c, "NORMAL_CLEARING")
+            m.RECOVERY.labels("plivo_stream_lost").inc()
+            n += 1
+        return {"plivo_streams_lost": n}
+
 
 def _event_ts(ev: dict[str, str]):
     from datetime import datetime, timezone

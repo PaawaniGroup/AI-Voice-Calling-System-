@@ -40,6 +40,12 @@ LOGINS = Counter("mme_tel_logins_total", "Dashboard logins", ["outcome"], regist
 PLIVO_CALLBACKS = Counter("mme_tel_plivo_callbacks_total", "Plivo callbacks by route and outcome", ["route", "outcome"], registry=REGISTRY)
 PLIVO_STREAMS = Counter("mme_tel_plivo_streams_total", "Plivo media streams by outcome", ["outcome"], registry=REGISTRY)
 PLIVO_STREAMS_ACTIVE = Gauge("mme_tel_plivo_streams_active", "Open Plivo media streams", registry=REGISTRY)
+AI_TURN_SECONDS = Histogram("mme_tel_ai_turn_seconds", "End of caller speech -> reply audio ready (STT+RAG+Brain+TTS)", registry=REGISTRY,
+                            buckets=(0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 13, 20, 30))
+AI_TURN_ERRORS = Counter("mme_tel_ai_turn_errors_total", "AI turns that produced no audio", ["code"], registry=REGISTRY)
+AI_RUNTIMES = Gauge("mme_tel_ai_runtimes", "AI conversations holding resources in this process", registry=REGISTRY)
+DRAINING = Gauge("mme_tel_draining", "1 while the service is draining for shutdown", registry=REGISTRY)
+RECOVERY = Counter("mme_tel_recovery_total", "Startup recovery actions", ["action"], registry=REGISTRY)
 RATE_LIMITED = Counter("mme_tel_rate_limited_total", "Requests rejected by rate limiting", registry=REGISTRY)
 
 

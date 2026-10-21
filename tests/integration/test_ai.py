@@ -1,4 +1,4 @@
-"""AI contracts. Model services are MOCKS (tests/helpers.MockModels); the media client is SYNTHETIC.
+﻿"""AI contracts. Model services are MOCKS (tests/helpers.MockModels); the media client is SYNTHETIC.
 Nothing here proves real-model behaviour, FreeSWITCH audio, or latency on a real call."""
 import asyncio
 import json
@@ -12,7 +12,7 @@ from app.ai.clients import AiTimeout, AiUnavailable, ModelClients, validate_serv
 from app.core.errors import Unprocessable
 from app.main import create_app
 from app.providers.base import MockProvider
-from tests.conftest import JWT_SECRET, auth, call_body, enable_tenant, idem, make_settings, token
+from tests.conftest import auth, call_body, enable_tenant, idem, make_settings, token
 from tests.helpers import MockModels, live_server, pcm_silence, pcm_tone
 from tests.integration.test_api_calls import esl, make_call, wait_state
 

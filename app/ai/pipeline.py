@@ -72,6 +72,7 @@ class Conversation:
 
     async def _turn(self, pcm: bytes, rate: int) -> TurnResult:
         res = TurnResult(language=self.language)
+        mark = len(self.messages)  # history length before this turn: a failed turn must leave no dangling messages
         try:
             t = time.perf_counter()
             stt = await self.clients.transcribe(pcm, rate, self.language)
@@ -113,6 +114,7 @@ class Conversation:
             res.reply = out["text"]
             if not res.reply:
                 res.error = "empty_reply"
+                del self.messages[mark:]
                 return res
             self.messages.append({"role": "assistant", "content": res.reply})
             self._trim()
@@ -126,7 +128,14 @@ class Conversation:
             return res
         except asyncio.CancelledError:
             res.audio, res.error = None, "cancelled"
+            del self.messages[mark:]  # the caller never heard this reply
             return res
         except AiError as e:
             res.audio, res.error = None, f"{e.service}_{e.kind}"
+            del self.messages[mark:]
+            return res
+        except Exception as e:  # a surprise in a model reply must never kill the call's worker
+            log.exception("unexpected error in AI turn")
+            res.audio, res.error = None, f"internal_{type(e).__name__}"
+            del self.messages[mark:]
             return res

@@ -65,11 +65,12 @@ async def test_state_survives_service_restart_and_idempotency_persists(db):
             r2 = await c.post("/v1/calls", json=call_body(), headers={**auth(), "Idempotency-Key": key})
             assert r2.status_code == 200 and r2.json()["id"] == cid
             assert await db["calls"].count_documents({}) == 1
-            for _ in range(60):
-                got = (await c.get(f"/v1/calls/{cid}", headers=auth())).json()
-                if got["fs_uuid"]:
+            # fs_uuid is persisted BEFORE the provider call, so wait for the origination itself (not just the uuid)
+            for _ in range(100):
+                if len(prov1.originated) + len(prov2.originated) >= 1:
                     break
                 await asyncio.sleep(0.05)
+            await asyncio.sleep(0.5)  # a duplicate origination, if there were one, would show up in this window
     total_originations = len(prov1.originated) + len(prov2.originated)
     assert total_originations == 1  # exactly one origination across the restart
 

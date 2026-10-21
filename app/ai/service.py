@@ -203,6 +203,7 @@ class AiService:
         rt = Runtime(session_id, tenant_id, Conversation(clients, lang), clients)
         rt.fs_uuid = call.get("fs_uuid")
         self.runtime[session_id] = rt
+        m.AI_RUNTIMES.set(len(self.runtime))
         rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.connect_s, "media_connect_timeout"))
         m.AI_SESSIONS.labels("starting").inc()
         if bridge is None and hasattr(self.bridge, "begin") and rt.fs_uuid:  # real bridge: make FreeSWITCH open the media socket now
@@ -284,6 +285,7 @@ class AiService:
             {"$set": {"state": state, "stopped_at": utcnow(), "stop_reason": reason, "error": error, "media.connected": False}},
             return_document=ReturnDocument.AFTER)
         rt = self.runtime.pop(session_id, None)
+        m.AI_RUNTIMES.set(len(self.runtime))
         if rt:  # cancel inference + playback, release resources
             rt.conversation.cancel()
             if rt.fs_uuid and hasattr(self.bridge, "end"):
@@ -339,6 +341,33 @@ class AiService:
         if self.emitter:
             await self.emitter.emit_generic(tenant_id, etype, f"{session_id}:{etype}:{hashlib.sha1(str(utcnow()).encode()).hexdigest()[:8]}",
                                             {"session_id": session_id, "reason": reason})
+
+    async def recover_on_startup(self) -> dict:
+        """After a restart no media socket or inference task exists, so every non-terminal AI session is stale. Fail them
+        explicitly (visible reason, webhook) and put their sessions back to `answered`. Idempotent."""
+        n = 0
+        async for d in self.db["ai_sessions"].find({"state": {"$nin": list(AI_TERMINAL)}}):
+            upd = await self.db["ai_sessions"].find_one_and_update(
+                {"_id": d["_id"], "state": {"$nin": list(AI_TERMINAL)}},
+                {"$set": {"state": "failed", "stopped_at": utcnow(), "stop_reason": "service_restarted", "error": "service_restarted",
+                          "media.connected": False}})
+            if not upd:
+                continue
+            sess = await self.db["sessions"].find_one({"_id": d["session_id"]})
+            if sess and sess["status"] == "active":
+                await self.sessions.transition(sess, "answered", source="recovery")
+            await self._emit(d["tenant_id"], "ai.session.failed", d["session_id"], "service_restarted")
+            m.RECOVERY.labels("ai_session_failed").inc()
+            n += 1
+        return {"ai_sessions_failed": n}
+
+    async def stop_all(self, reason: str) -> list[tuple[str, str]]:
+        """Close every live AI conversation (drain/shutdown). Returns [(tenant_id, session_id)] that were stopped."""
+        out = []
+        for sid, rt in list(self.runtime.items()):
+            await self._finish(rt.tenant_id, sid, "stopped", reason)
+            out.append((rt.tenant_id, sid))
+        return out
 
     async def shutdown(self) -> None:
         for sid, rt in list(self.runtime.items()):

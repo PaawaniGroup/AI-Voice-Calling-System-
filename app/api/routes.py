@@ -59,6 +59,8 @@ async def ready(request: Request):
         ev = ctrl.esl_events
         fresh = bool(ev and ev.connected and ev.last_event_at and time.time() - ev.last_event_at <= s.ready_max_event_age_s)
         checks["freeswitch"] = "ok" if fresh else "unavailable"
+    if getattr(request.app.state, "draining", False):
+        checks["draining"] = "yes"  # taken out of rotation while shutting down
     ok = all(v == "ok" for v in checks.values())
     return JSONResponse({"status": "ready" if ok else "not_ready", "checks": checks}, status_code=200 if ok else 503)
 

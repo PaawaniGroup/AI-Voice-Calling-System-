@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     plivo_stream_connect_s: int = F(20, "After the Answer XML is returned, the media stream must connect within this time or the call is hung up.", ge=5, le=120)
     plivo_stream_max_concurrent: int = F(10, "Maximum simultaneous Plivo media streams (AI conversations) in this process.", ge=1, le=500)
     plivo_orphan_grace_s: int = F(60, "A Plivo call still open this long after max duration, with the provider hangup unconfirmed, is closed locally.", ge=10, le=900)
+    drain_timeout_s: int = F(15, "On shutdown: stop accepting new calls, wait this long for AI conversations to end, then close them. Keep below the supervisor's stop timeout.", ge=0, le=300)
     provider_timeout_s: float = F(10.0, "Provider API timeout.", gt=0, le=120)
     provider_max_concurrent: int = F(10, "Provider concurrency ceiling. VERIFY against the Plivo account.", ge=1)
     provider_max_cps: float = F(1.0, "Provider calls-per-second ceiling. VERIFY against the account.", gt=0)

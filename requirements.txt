@@ -1,14 +1,16 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
-pydantic-settings==2.7.0
-pymongo==4.10.1
+# Runtime dependencies, pinned to the set audited on 2026-10-21 (pip-audit: "No known vulnerabilities found" for these packages).
+# Full transitive lock: requirements.lock.txt. Re-audit before every release: see docs/PRODUCTION_RUNBOOK.md.
+fastapi==0.157.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+pymongo==4.19.0
 httpx==0.28.1
-PyJWT==2.10.1
-prometheus-client==0.21.1
-PyYAML==6.0.2
-plivo==4.55.0
-phonenumbers==8.13.52
-python-multipart==0.0.20
+PyJWT==2.15.1
+prometheus-client==0.26.0
+PyYAML==6.0.3
+plivo==4.63.0
+phonenumbers==9.0.41
+python-multipart==0.0.32
 audioop-lts>=0.2.1; python_version >= "3.13"  # mu-law/resampling (stdlib audioop was removed in 3.13); unused on 3.12
-# optional: boto3==1.35.90 (only when MME_TEL_STORAGE_BACKEND=s3)
+# optional: boto3 (only when MME_TEL_STORAGE_BACKEND=s3); pin and audit it when you enable S3
