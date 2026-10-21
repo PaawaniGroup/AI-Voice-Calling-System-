@@ -121,7 +121,10 @@ async def wait_ai(e, sid, states, timeout=10):
         if a and a["state"] in states:
             return a
         await asyncio.sleep(0.1)
-    raise AssertionError(f"AI session never reached {states}: {a and a['state']} {a and a.get('error')}")
+    call = await e.db["calls"].find_one({"session_id": sid}) or {}
+    trail = [(x["type"], x["source"], str(x.get("payload"))[:80]) for x in
+             await e.db["call_events"].find({"call_id": call.get("_id")}).sort("ts", 1).to_list(30)]
+    raise AssertionError(f"AI session never reached {states}: {a and a['state']} {a and a.get('error')}; call={call.get('state')}; events={trail}")
 
 
 async def test_bridge_reports_ready_only_because_module_is_really_loaded(rig):
