@@ -15,6 +15,7 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_AI_API_KEY` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | Bearer key sent to model servers (secret; never shown in the UI). |
 | `MME_TEL_AI_BRAIN_MODEL` | str | no | 'Qwen3-30B-A3B-Instruct-2507' | no | - | yes | all | Brain/LLM model identifier. |
 | `MME_TEL_AI_ENABLED` | bool | no | False | no | - | yes | all | Global AI switch. Default off. Even when true, an AI session only starts when the media bridge is ready. |
+| `MME_TEL_AI_FS_AUTOSTART` | bool | no | False | no | - | yes | all | Start the AI conversation automatically when a FreeSWITCH-delivered INBOUND call whose route action is 'ai' is answered. Requires AI_ENABLED and AI_MEDIA_BRIDGE=ws_fork. Replaces the prototype's MME_FS_MEDIA_ENABLED media service: never run both against the same FreeSWITCH. |
 | `MME_TEL_AI_MAX_CONCURRENCY` | int | no | 4 | no | ge=1, le=64 | yes | all | Max concurrent model requests per process. |
 | `MME_TEL_AI_MEDIA_BRIDGE` | enum | no | 'none' | no | one of 'none', 'ws_fork' | yes | all | Media bridge implementation. 'none' = not available (default). 'ws_fork' needs a FreeSWITCH media-fork module that is NOT installed on the audited host. |
 | `MME_TEL_AI_MEDIA_SAMPLE_RATE` | enum | no | 16000 | no | one of 8000, 16000 | yes | all | Sample rate requested from the media module. |

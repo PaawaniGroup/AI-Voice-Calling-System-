@@ -24,6 +24,7 @@ As of 2026-10-21: suite 269 passed / 1 skipped. **No row below has REAL-SVC or R
 | Barge-in, endpointing, bounded queue | IMPL+LOCAL | synthetic tones; tuning against real speech: UNVERIFIED |
 | Startup recovery | IMPL+LOCAL | tests; real crash on production host: UNVERIFIED |
 | Graceful drain on SIGTERM | IMPL+LOCAL | app-level drain tested; a real `systemctl stop` with live calls: UNVERIFIED |
+| FreeSWITCH inbound AI auto-start (`AI_FS_AUTOSTART`, route action `ai`; replaces prototype `maybe_start`) | IMPL+LOCAL | decisions tested with a fake bridge/ESL (9 tests); `uuid_getvar` guard format checked against the real local FreeSWITCH (loopback). Not exercised end to end with a real inbound DID: BLOCKED (needs dialplan change + approved call). See `REPO_A_B_INTEGRATION.md` |
 | Sweepers / reconciliation / orphan backstops | IMPL+LOCAL | real mongod + FreeSWITCH loopback |
 | MongoDB indexes, TTL retention, schema v4 | IMPL+LOCAL | |
 | Backup + restore | IMPL+LOCAL | `verify_backup_restore.sh`: counts and index names equal for 4 collections on local mongod. Atlas: BLOCKED. RPO/RTO measured: UNVERIFIED |

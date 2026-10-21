@@ -46,6 +46,7 @@ AI_TURN_ERRORS = Counter("mme_tel_ai_turn_errors_total", "AI turns that produced
 AI_RUNTIMES = Gauge("mme_tel_ai_runtimes", "AI conversations holding resources in this process", registry=REGISTRY)
 DRAINING = Gauge("mme_tel_draining", "1 while the service is draining for shutdown", registry=REGISTRY)
 RECOVERY = Counter("mme_tel_recovery_total", "Startup recovery actions", ["action"], registry=REGISTRY)
+AI_AUTOSTART = Counter("mme_tel_ai_autostart_total", "AI auto-start on answered FreeSWITCH inbound calls", ["result"], registry=REGISTRY)
 RATE_LIMITED = Counter("mme_tel_rate_limited_total", "Requests rejected by rate limiting", registry=REGISTRY)
 
 

@@ -198,6 +198,8 @@ class Settings(BaseSettings):
     ai_media_ws_url: str = F("ws://127.0.0.1:8800/v1/ai/media/fs", "WebSocket URL FreeSWITCH (mod_audio_stream) connects to. Must be reachable FROM FreeSWITCH; use wss:// across hosts.")
     ai_media_token_ttl_s: int = F(120, "Lifetime of the one-off media token handed to FreeSWITCH.", ge=30, le=900)
     ai_media_sample_rate: Literal[8000, 16000] = F(16000, "Sample rate requested from the media module.")
+    ai_fs_autostart: bool = F(False, "Start the AI conversation automatically when a FreeSWITCH-delivered INBOUND call whose route action is 'ai' is answered. "
+                                     "Requires AI_ENABLED and AI_MEDIA_BRIDGE=ws_fork. Replaces the prototype's MME_FS_MEDIA_ENABLED media service: never run both against the same FreeSWITCH.")
     ai_allowed_hosts: str = F("127.0.0.1,localhost", "Comma-separated host allowlist for model/RAG URLs set through the dashboard.")
     ai_api_key: SecretStr = F(SecretStr(""), "Bearer key sent to model servers (secret; never shown in the UI).")
     ai_request_timeout_s: float = F(15.0, "Default timeout for model service requests.", gt=0, le=120)
@@ -231,6 +233,8 @@ class Settings(BaseSettings):
             e.append("AI_MEDIA_WS_URL must use wss:// to a non-loopback host in staging/production")
         if self.ai_enabled and self.ai_media_bridge == "none" and not self.plivo_inbound_enabled:
             w.append("AI_ENABLED=true but AI_MEDIA_BRIDGE=none: AI sessions cannot start until a media bridge is verified")
+        if self.ai_fs_autostart and not (self.ai_enabled and self.ai_media_bridge == "ws_fork"):
+            e.append("AI_FS_AUTOSTART requires AI_ENABLED=true and AI_MEDIA_BRIDGE=ws_fork")
         if self.plivo_inbound_enabled:
             if not self.plivo_auth_token.get_secret_value():
                 e.append("plivo_inbound_enabled requires PLIVO_AUTH_TOKEN")

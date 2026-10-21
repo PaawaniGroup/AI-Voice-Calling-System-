@@ -173,9 +173,11 @@ class Controller:
         if name in ("CHANNEL_PROGRESS", "CHANNEL_PROGRESS_MEDIA"):
             await self.apply(call, S.RINGING, source="esl", dedup_id=key, ts=ts)
         elif name == "CHANNEL_ANSWER":
-            await self.apply(call, S.ANSWERED, source="esl", dedup_id=key, ts=ts, fields={"fs_answered_ts": fs_ts})
+            outcome, _ = await self.apply(call, S.ANSWERED, source="esl", dedup_id=key, ts=ts, fields={"fs_answered_ts": fs_ts})
             if call.get("direction") == "outbound":
                 await self._maybe_start_recording(call["_id"])
+            elif outcome == "applied" and self.s.ai_fs_autostart and call.get("route_action") == "ai":
+                await self._autostart_ai(call["_id"])
         elif name == "CHANNEL_BRIDGE":
             other = ev.get("Other-Leg-Unique-ID")
             if other:
@@ -215,6 +217,42 @@ class Controller:
         await self.esl_cmd.api(f"uuid_broadcast {ds.safe_uuid(call['fs_uuid'])} {f} aleg")
         if rt is not None:
             await self.ai.record_turn(rt, {"broadcast_cmd_ms": round((time.perf_counter() - t) * 1000, 1)}, count=False)
+
+    async def _autostart_ai(self, call_id: str) -> None:
+        """Inbound FreeSWITCH call with route action 'ai' was just answered: start the AI conversation through the normal
+        AiService (same preconditions, same media bridge, same ai_sessions row as a manual start). Never raises and never
+        touches the call when AI cannot start: the call simply continues without AI and the reason is recorded.
+
+        Ownership: the prototype's media service (repo A, MME_FS_MEDIA_ENABLED) attaches the same module to a flagged
+        channel. If a media stream already carries stream headers on this channel, this service does NOT attach a second one.
+        """
+        async def skip(call: dict, reason: str) -> None:
+            m.AI_AUTOSTART.labels(reason[:30]).inc()
+            log_event(log, "ai.autostart_skipped", call_id=call["_id"], reason=reason)
+            await self.repos.add_event(call, "ai.autostart_skipped", "controller", f"aiauto:{call['_id']}", {"reason": reason})
+
+        call = await self.repos.get_call(call_id)
+        if call is None or self.ai is None or not call.get("session_id") or not call.get("fs_uuid"):
+            return
+        try:
+            ok, reason = await self.ai.preflight(call["tenant_id"])
+            if not ok:
+                return await skip(call, reason)
+            if self.esl_cmd is not None:
+                got = (await self.esl_cmd.api(f"uuid_getvar {ds.safe_uuid(call['fs_uuid'])} STREAM_EXTRA_HEADERS")).strip()
+                if got and not got.startswith("-ERR") and got != "_undef_":
+                    return await skip(call, "media_already_attached")
+            await self.repos.update_call(call_id, {"ai_enabled": True})
+            started = await self.ai.start(call["tenant_id"], call["session_id"])
+            if started.get("state") == "failed":  # e.g. the media bridge refused: the call goes on without AI
+                return await skip(call, str(started.get("stop_reason") or "failed"))
+            m.AI_AUTOSTART.labels("started").inc()
+            await self.repos.add_event(call, "ai.autostart", "controller", f"aiauto:{call_id}", {})
+        except ApiError as e:
+            await skip(call, f"refused_{e.code}")
+        except Exception as e:  # a failure here must never disturb the call itself
+            log.exception("ai autostart failed")
+            await skip(call, f"error_{type(e).__name__}")
 
     async def _on_other_leg(self, call: dict, ev: dict, key: str, ts) -> None:
         # B-leg events: only its hangup before A-leg hangup is recorded (A-leg hangup drives the final state).
@@ -315,6 +353,7 @@ class Controller:
             "_id": new_id("call"), "tenant_id": route["tenant_id"], "direction": "inbound", "provider": self.provider.name,
             "fs_uuid": uuid, "from_number": ev.get("Caller-Caller-ID-Number", "")[:20], "to_number": to,
             "state": S.INITIATING.value, "initiated_at": utcnow(), "correlation_id": new_id("cor"), "observed": True,
+            "route_action": route.get("action", "park"),
             "max_duration_s": self.s.max_call_duration_s, "ai_enabled": False, "language": "auto",
         }
         try:
