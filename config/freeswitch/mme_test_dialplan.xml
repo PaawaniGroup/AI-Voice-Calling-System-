@@ -37,6 +37,8 @@
          Records ONLY what the caller hears (RECORD_READ_ONLY) so tests can prove the AI reply audio arrived. -->
     <extension name="t_ai_caller_once">
       <condition field="destination_number" expression="^9010$">
+        <!-- loopback copies originate variables to BOTH legs; the simulated caller must not be AI-streamed itself -->
+        <action application="set" data="mme_ai=0"/>
         <action application="answer"/>
         <action application="set" data="RECORD_READ_ONLY=true"/>
         <action application="record_session" data="/tmp/mme_ai_heard_${uuid}.wav"/>
@@ -47,6 +49,7 @@
     </extension>
     <extension name="t_ai_caller_barge">
       <condition field="destination_number" expression="^9011$">
+        <action application="set" data="mme_ai=0"/>
         <action application="answer"/>
         <action application="set" data="RECORD_READ_ONLY=true"/>
         <action application="record_session" data="/tmp/mme_ai_heard_${uuid}.wav"/>
