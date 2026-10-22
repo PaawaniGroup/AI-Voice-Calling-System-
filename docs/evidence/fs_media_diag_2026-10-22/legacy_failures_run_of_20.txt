@@ -1,0 +1,10 @@
+=== run 1 ===
+E       AssertionError: reply should have been cut well short of 6 s, caller heard 0.00s
+E       assert 0.2 <= 0.0
+tests/integration/test_ai_freeswitch.py:189: AssertionError
+FAILED tests/integration/test_ai_freeswitch.py::test_barge_in_really_interrupts_playback_on_the_call
+=== run 10 ===
+>           raise AssertionError(f"caller heard {audible_s:.2f}s peak {peak}; files={files}; events={evs}; timings={a['timings_ms']}")
+E           AssertionError: caller heard 0.00s peak 0; files=[('/tmp/mme_ai_heard_f49ae1a8-bcfb-47ec-b540-979fffe07faa.wav', 364, 124.3), ('/tmp/mme_ai_heard_f6784de5-0844-46c8-903b-200f6573c89c.wav', 444204, 1611.1), ('/tmp/mme_ai_heard_f6c08860-7bb1-486c-a3e5-741e75ba3d85.wav', 77804, 50605.8), ('/tmp/mme_ai_heard_fd9f15bd-7346-4a95-b658-e838d4e20e81.wav', 364, 773.4)]; events=[('origination.accepted', 'controller'), ('state.answered', 'esl'), ('media.connect', 'esl'), ('media.play', 'esl'), ('state.completed', 'esl'), ('state.queued', 'api'), ('state.initiating', 'controller'), ('state.completed', 'esl')]; timings={'brain': 0.4, 'stt': 0.7, 'tts': 2.9, 'turn_ms': 4.1}
+tests/integration/test_ai_freeswitch.py:168: AssertionError
+FAILED tests/integration/test_ai_freeswitch.py::test_real_audio_roundtrip_through_freeswitch_module

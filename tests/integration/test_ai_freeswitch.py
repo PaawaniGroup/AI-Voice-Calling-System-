@@ -48,9 +48,19 @@ def write_caller_wav(path="/tmp/mme_ai_caller.wav", ms=1200, rate=8000):
     os.chmod(path, 0o644)
 
 
-def heard_stats(uuid_glob_after: float):
-    """Largest recent 'what the caller heard' recording -> (seconds of audible signal, peak)."""
-    files = [f for f in glob.glob("/tmp/mme_ai_heard_*.wav") if os.path.getmtime(f) >= uuid_glob_after]
+HEARD_GLOB = "/tmp/mme_ai_heard_*.wav"
+
+
+def heard_snapshot() -> set:
+    """Recordings that exist BEFORE the call. Selecting this test's recording by 'not in the snapshot' needs no clock:
+    the previous mtime filter compared a file's kernel mtime with time.time(), and on a host whose wall clock steps (this WSL
+    host flips by about 51.7 s every few seconds) it silently excluded the real recording ('caller heard 0.00 s')."""
+    return set(glob.glob(HEARD_GLOB))
+
+
+def heard_stats(before: set):
+    """Largest 'what the caller heard' recording created since `before` -> (seconds of audible signal, peak)."""
+    files = [f for f in glob.glob(HEARD_GLOB) if f not in before]
     best = (0.0, 0)
     for f in files:
         try:
@@ -108,15 +118,24 @@ async def start_ai_call(e, dial="loopback/9010/mme_test"):
             break
         await asyncio.sleep(0.1)
     assert got["state"] == "answered", got["state"]
-    t0 = time.time()
+    t0 = time.monotonic()
     r = await e.c.post(f"/v1/ai/sessions/{call['session_id']}/start", json={}, headers=auth())
     assert r.status_code == 202, r.text
     return call, got, t0
 
 
+_CLOCK0 = time.time() - time.monotonic()
+
+
+def clock_note() -> str:
+    """Failure-message context only: how far the host's wall clock has moved relative to the monotonic clock since this module
+    was imported. A non-trivial value means the host clock stepped during the run (WSL2 does this), which can disturb FreeSWITCH."""
+    return f"wall_clock_step_since_import={(time.time() - time.monotonic()) - _CLOCK0:+.1f}s"
+
+
 async def wait_ai(e, sid, states, timeout=10):
-    end = time.time() + timeout
-    while time.time() < end:
+    end = time.monotonic() + timeout  # monotonic: a wall-clock deadline fires early when the host clock steps
+    while time.monotonic() < end:
         a = await e.db["ai_sessions"].find_one({"session_id": sid})
         if a and a["state"] in states:
             return a
@@ -124,7 +143,7 @@ async def wait_ai(e, sid, states, timeout=10):
     call = await e.db["calls"].find_one({"session_id": sid}) or {}
     trail = [(x["type"], x["source"], str(x.get("payload"))[:80]) for x in
              await e.db["call_events"].find({"call_id": call.get("_id")}).sort("ts", 1).to_list(30)]
-    raise AssertionError(f"AI session never reached {states}: {a and a['state']} {a and a.get('error')}; call={call.get('state')}; events={trail}")
+    raise AssertionError(f"AI session never reached {states}: {a and a['state']} {a and a.get('error')}; call={call.get('state')}; events={trail}; {clock_note()}")
 
 
 async def test_bridge_reports_ready_only_because_module_is_really_loaded(rig):
@@ -136,11 +155,11 @@ async def test_bridge_reports_ready_only_because_module_is_really_loaded(rig):
 
 async def test_real_audio_roundtrip_through_freeswitch_module(rig):
     e = rig
-    since = time.time() - 1
+    before = heard_snapshot()
     call, fs, t0 = await start_ai_call(e)
     sid = call["session_id"]
     ai = await wait_ai(e, sid, {"active"})  # active only when the module's socket really connected
-    t_active = time.time()
+    t_active = time.monotonic()
     assert ai["media"]["connected"] is True and ai["media"]["hello"]["flavor"] == "mod_audio_stream"
     # caller audio -> VAD -> mock STT/RAG/Brain/TTS -> reply
     for _ in range(100):
@@ -148,7 +167,7 @@ async def test_real_audio_roundtrip_through_freeswitch_module(rig):
         if a["turns"] >= 1:
             break
         await asyncio.sleep(0.1)
-    assert a["turns"] == 1 and set(a["timings_ms"]) >= {"stt", "brain", "tts"}
+    assert a["turns"] == 1 and set(a["timings_ms"]) >= {"stt", "brain", "tts"}, clock_note()
     kinds = [k for k, _ in e.models.calls]
     assert kinds == ["stt", "brain", "tts"]  # no RAG configured in this rig
     # the module wrote the reply file and we played it back to the caller: event trail + audible audio on the caller leg
@@ -157,15 +176,15 @@ async def test_real_audio_roundtrip_through_freeswitch_module(rig):
         if evs:
             break
         await asyncio.sleep(0.1)
-    assert evs, "mod_audio_stream::play event never reached the controller"
+    assert evs, f"mod_audio_stream::play event never reached the controller; {clock_note()}"
     await asyncio.sleep(1.2)  # let FreeSWITCH finish playing the 300 ms reply and flush the recording
     await e.ctrl.esl_cmd.api(f"uuid_kill {fs['fs_uuid']} NORMAL_CLEARING")
     await asyncio.sleep(1.0)
-    audible_s, peak = heard_stats(since)
+    audible_s, peak = heard_stats(before)
     if not (audible_s >= 0.2 and peak > 2000):
-        files = [(f, os.path.getsize(f), round(time.time() - os.path.getmtime(f), 1)) for f in sorted(glob.glob("/tmp/mme_ai_heard_*.wav"))[-4:]]
+        files = [(f, os.path.getsize(f)) for f in sorted(set(glob.glob(HEARD_GLOB)) - before)]
         evs = [(x["type"], x["source"]) for x in await e.db["call_events"].find({"call_id": call["id"]}).sort("ts", 1).to_list(40)]
-        raise AssertionError(f"caller heard {audible_s:.2f}s peak {peak}; files={files}; events={evs}; timings={a['timings_ms']}")
+        raise AssertionError(f"caller heard {audible_s:.2f}s peak {peak}; new_recordings={files}; events={evs}; timings={a['timings_ms']}; {clock_note()}")
     a = await e.db["ai_sessions"].find_one({"session_id": sid})
     print(f"\nMEASURED active_after_start={t_active - t0:.2f}s timings_ms={a['timings_ms']} audible_s={audible_s:.2f}")
     assert "module_return_ms" in a["timings_ms"] and "broadcast_cmd_ms" in a["timings_ms"]
@@ -174,7 +193,7 @@ async def test_real_audio_roundtrip_through_freeswitch_module(rig):
 async def test_barge_in_really_interrupts_playback_on_the_call(rig):
     e = rig
     e.models.tts_ms = 6000  # long reply; the caller talks again at ~+2.2 s after the first utterance
-    since = time.time() - 1
+    before = heard_snapshot()
     call, fs, _ = await start_ai_call(e, "loopback/9011/mme_test")
     sid = call["session_id"]
     await wait_ai(e, sid, {"active"})
@@ -185,8 +204,8 @@ async def test_barge_in_really_interrupts_playback_on_the_call(rig):
     await asyncio.sleep(4.5)  # caller's second utterance happens during the reply; wait for it and for the break
     await e.ctrl.esl_cmd.api(f"uuid_kill {fs['fs_uuid']} NORMAL_CLEARING")
     await asyncio.sleep(1.0)
-    audible_s, _ = heard_stats(since)
-    assert 0.2 <= audible_s < 4.5, f"reply should have been cut well short of 6 s, caller heard {audible_s:.2f}s"
+    audible_s, _ = heard_stats(before)
+    assert 0.2 <= audible_s < 4.5, f"reply should have been cut well short of 6 s, caller heard {audible_s:.2f}s; {clock_note()}"
     print(f"\nMEASURED barge-in: reply 6.0s synthesized, caller heard {audible_s:.2f}s")
 
 

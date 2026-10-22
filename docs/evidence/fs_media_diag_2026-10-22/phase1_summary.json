@@ -1,0 +1,12 @@
+{
+ "runs": 40,
+ "ok": 39,
+ "failures": 1,
+ "failure_rate": 0.025,
+ "by_category": {
+  "ok": 39,
+  "no_turn": 1
+ },
+ "legacy_wait_would_have_failed": 1,
+ "legacy_recording_filter_would_have_missed": 2
+}

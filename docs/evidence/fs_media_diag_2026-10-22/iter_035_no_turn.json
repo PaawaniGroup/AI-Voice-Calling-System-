@@ -1,0 +1,1130 @@
+{
+ "idx": 35,
+ "variant": "orig",
+ "clock_offset_begin": 1792502714.94,
+ "bridge_ready": true,
+ "a_uuid": "4a2de751-b93d-4bda-a1af-8134b97e99da",
+ "active": true,
+ "turn": false,
+ "play_event": false,
+ "heard": {
+  "path": "/tmp/mme_ai_heard_6afa767f-63b7-467a-8c51-5885a92b37ac.wav",
+  "exists": true,
+  "rate": 8000,
+  "seconds": 2.58,
+  "audible_s": 0.0,
+  "peak": 1,
+  "segments": [],
+  "first_segment_freq_hz": null
+ },
+ "legacy_wait_active": "ok",
+ "legacy_wait_stopped": "ok",
+ "legacy_filter_includes_recording": true,
+ "mtime_minus_since_s": 13530.48,
+ "clock_offset_end": 1792516237.23,
+ "played_requested": false,
+ "audible_ok": false,
+ "outcome": "no_turn",
+ "timeline": [
+  {
+   "t": 3.7119,
+   "src": "test",
+   "ev": "begin"
+  },
+  {
+   "t": 3.7899,
+   "src": "test",
+   "ev": "post_calls_returned",
+   "status": 202
+  },
+  {
+   "t": 3.8514,
+   "src": "fs",
+   "ev": "CHANNEL_CREATE",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8516,
+   "src": "fs",
+   "ev": "CHANNEL_CREATE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8518,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "set",
+   "data": "mme_ai=0",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8521,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "set",
+   "data": "mme_ai=0",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8522,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "answer",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8524,
+   "src": "fs",
+   "ev": "CHANNEL_ANSWER",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8526,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "sched_hangup",
+   "data": "+1800 ALLOTTED_TIMEOUT",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.853,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "sched_hangup",
+   "data": "+1800 ALLOTTED_TIMEOUT",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8531,
+   "src": "fs",
+   "ev": "CHANNEL_ANSWER",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8532,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "sched_hangup",
+   "data": "+1800 ALLOTTED_TIMEOUT",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8533,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "sched_hangup",
+   "data": "+1800 ALLOTTED_TIMEOUT",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8533,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "answer",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8534,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "set",
+   "data": "RECORD_READ_ONLY=true",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8535,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "park",
+   "data": "",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8535,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "set",
+   "data": "RECORD_READ_ONLY=true",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8536,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "record_session",
+   "data": "/tmp/mme_ai_heard_6afa767f-63b7-467a-8c51-5885a92b",
+   "fsts": "1792249505124054"
+  },
+  {
+   "t": 3.8557,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_CREATE",
+   "sub": "",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 3.8565,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_CREATE",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 3.8569,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_ANSWER",
+   "sub": "",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 3.8578,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "BACKGROUND_JOB",
+   "sub": "",
+   "uuid": ""
+  },
+  {
+   "t": 3.8583,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_ANSWER",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 3.8585,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_PARK",
+   "sub": "",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 3.8587,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "RECORD_START",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 3.8609,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_CREATE",
+   "sub": ""
+  },
+  {
+   "t": 3.861,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_CREATE",
+   "sub": ""
+  },
+  {
+   "t": 3.864,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_PARK",
+   "sub": ""
+  },
+  {
+   "t": 3.8648,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_ANSWER",
+   "sub": ""
+  },
+  {
+   "t": 3.8672,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "RECORD_START",
+   "sub": ""
+  },
+  {
+   "t": 3.8676,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "BACKGROUND_JOB",
+   "sub": ""
+  },
+  {
+   "t": 3.8728,
+   "src": "fs",
+   "ev": "RECORD_START",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249505144060"
+  },
+  {
+   "t": 3.8729,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "record_session",
+   "data": "/tmp/mme_ai_heard_6afa767f-63b7-467a-8c51-5885a92b",
+   "fsts": "1792249505144060"
+  },
+  {
+   "t": 3.8729,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "sleep",
+   "data": "1500",
+   "fsts": "1792249505144060"
+  },
+  {
+   "t": 3.8857,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_ANSWER",
+   "sub": ""
+  },
+  {
+   "t": 3.8968,
+   "src": "test",
+   "ev": "answered_seen",
+   "state": "answered"
+  },
+  {
+   "t": 3.8968,
+   "src": "test",
+   "ev": "post_start"
+  },
+  {
+   "t": 3.9098,
+   "src": "ai",
+   "ev": "start:enter"
+  },
+  {
+   "t": 3.9174,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "module_exists",
+   "uuid": "mod_audi"
+  },
+  {
+   "t": 3.9187,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "module_exists",
+   "out": "true"
+  },
+  {
+   "t": 3.9249,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "uuid_setvar",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 3.9266,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "uuid_setvar",
+   "out": "+OK"
+  },
+  {
+   "t": 3.9266,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "uuid_audio_stream",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 3.9301,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "uuid_audio_stream",
+   "out": "+OK Success"
+  },
+  {
+   "t": 3.9301,
+   "src": "ai",
+   "ev": "start:exit"
+  },
+  {
+   "t": 3.9389,
+   "src": "ws",
+   "ev": "handshake_in",
+   "has_auth": true
+  },
+  {
+   "t": 3.9438,
+   "src": "ai",
+   "ev": "attach_media:enter"
+  },
+  {
+   "t": 3.9541,
+   "src": "test",
+   "ev": "start_returned",
+   "status": 202
+  },
+  {
+   "t": 3.9557,
+   "src": "fs",
+   "ev": "CUSTOM",
+   "sub": "connect",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "",
+   "data": "",
+   "fsts": "1792249505224036"
+  },
+  {
+   "t": 3.956,
+   "src": "ai",
+   "ev": "attach_media:exit"
+  },
+  {
+   "t": 3.9568,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CUSTOM",
+   "sub": "connect",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 3.9612,
+   "src": "ai",
+   "ev": "media_connected:enter"
+  },
+  {
+   "t": 3.9621,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CUSTOM",
+   "sub": "connect"
+  },
+  {
+   "t": 3.9696,
+   "src": "ai",
+   "ev": "media_connected:exit"
+  },
+  {
+   "t": 3.9834,
+   "src": "ws",
+   "ev": "first_frame",
+   "bytes": 640
+  },
+  {
+   "t": 4.0114,
+   "src": "test",
+   "ev": "active"
+  },
+  {
+   "t": 5.2265,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "show",
+   "uuid": "channels"
+  },
+  {
+   "t": 5.2281,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "show",
+   "out": "{\"row_count\":2,\"rows\":[{\"uuid\":\"4a2de751-b93d-4bda-a1af-8134"
+  },
+  {
+   "t": 5.3658,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "sleep",
+   "data": "1500",
+   "fsts": "1792249506644065"
+  },
+  {
+   "t": 5.3659,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "playback",
+   "data": "/tmp/mme_ai_caller.wav",
+   "fsts": "1792249506644065"
+  },
+  {
+   "t": 5.366,
+   "src": "fs",
+   "ev": "PLAYBACK_START",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249506644065"
+  },
+  {
+   "t": 5.3899,
+   "src": "ws",
+   "ev": "loud",
+   "rms": 6075,
+   "frame_no": 73
+  },
+  {
+   "t": 6.4716,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 1.061
+  },
+  {
+   "t": 6.6458,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.174
+  },
+  {
+   "t": 6.7555,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.11
+  },
+  {
+   "t": 6.8421,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.086
+  },
+  {
+   "t": 6.9162,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.074
+  },
+  {
+   "t": 7.0259,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.11
+  },
+  {
+   "t": 7.5614,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.535
+  },
+  {
+   "t": 7.8064,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.245
+  },
+  {
+   "t": 7.8983,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "show",
+   "uuid": "channels"
+  },
+  {
+   "t": 7.9608,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.154
+  },
+  {
+   "t": 9.319,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 1.344
+  },
+  {
+   "t": 9.7049,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.386
+  },
+  {
+   "t": 9.7051,
+   "src": "ws",
+   "ev": "quiet",
+   "rms": 1,
+   "frame_no": 109
+  },
+  {
+   "t": 9.7052,
+   "src": "ws",
+   "ev": "loud",
+   "rms": 6075,
+   "frame_no": 110
+  },
+  {
+   "t": 9.9639,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "uuid_kill",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 10.0293,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "show",
+   "out": "{\"row_count\":2,\"rows\":[{\"uuid\":\"4a2de751-b93d-4bda-a1af-8134"
+  },
+  {
+   "t": 10.031,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.326
+  },
+  {
+   "t": 10.2564,
+   "src": "fs",
+   "ev": "CHANNEL_HANGUP",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "",
+   "data": "",
+   "fsts": "1792249511350579"
+  },
+  {
+   "t": 10.2567,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_HANGUP",
+   "sub": "",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 10.4475,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "uuid_kill",
+   "out": "+OK"
+  },
+  {
+   "t": 10.4508,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "4a2de751",
+   "chan": "loopback/9010-a",
+   "app": "park",
+   "data": "",
+   "fsts": "1792249511430332"
+  },
+  {
+   "t": 10.4513,
+   "src": "ws",
+   "ev": "frame_gap",
+   "gap": 0.383
+  },
+  {
+   "t": 10.5401,
+   "src": "fs",
+   "ev": "PLAYBACK_STOP",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249511430332"
+  },
+  {
+   "t": 10.5404,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "playback",
+   "data": "/tmp/mme_ai_caller.wav",
+   "fsts": "1792249511430332"
+  },
+  {
+   "t": 10.5406,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "sleep",
+   "data": "25000",
+   "fsts": "1792249511430332"
+  },
+  {
+   "t": 10.5408,
+   "src": "fs",
+   "ev": "CHANNEL_EXECUTE_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "sleep",
+   "data": "25000",
+   "fsts": "1792249511430332"
+  },
+  {
+   "t": 10.5409,
+   "src": "fs",
+   "ev": "CHANNEL_HANGUP",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249511430332"
+  },
+  {
+   "t": 10.5411,
+   "src": "fs",
+   "ev": "RECORD_STOP",
+   "sub": "",
+   "uuid": "6afa767f",
+   "chan": "loopback/9010-b",
+   "app": "",
+   "data": "",
+   "fsts": "1792249511570713"
+  },
+  {
+   "t": 10.5838,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_HANGUP",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 10.5841,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "RECORD_STOP",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 10.5843,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_HANGUP_COMPLETE",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 10.7716,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_HANGUP_COMPLETE",
+   "sub": ""
+  },
+  {
+   "t": 10.8778,
+   "src": "ai",
+   "ev": "media_disconnected:enter"
+  },
+  {
+   "t": 10.8804,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "RECORD_STOP",
+   "sub": ""
+  },
+  {
+   "t": 10.9284,
+   "src": "ai",
+   "ev": "media_disconnected:exit"
+  },
+  {
+   "t": 10.9285,
+   "src": "ws",
+   "ev": "handler_returned"
+  },
+  {
+   "t": 10.9978,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_HANGUP_COMPLETE",
+   "sub": "",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 11.024,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_DESTROY",
+   "sub": "",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 11.0251,
+   "src": "ctrl",
+   "ev": "esl_in",
+   "name": "CHANNEL_DESTROY",
+   "sub": "",
+   "uuid": "6afa767f"
+  },
+  {
+   "t": 11.0553,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_HANGUP_COMPLETE",
+   "sub": ""
+  },
+  {
+   "t": 11.0607,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_DESTROY",
+   "sub": ""
+  },
+  {
+   "t": 11.0684,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_HANGUP",
+   "sub": ""
+  },
+  {
+   "t": 11.0695,
+   "src": "ai",
+   "ev": "_finish:enter"
+  },
+  {
+   "t": 11.0913,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "uuid_break",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 11.221,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_DESTROY",
+   "sub": ""
+  },
+  {
+   "t": 11.4337,
+   "src": "esl_cmd",
+   "ev": "error",
+   "verb": "uuid_break",
+   "err": "EslCommandError",
+   "msg": "-ERR No such channel!"
+  },
+  {
+   "t": 11.4337,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "uuid_audio_stream",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 11.4733,
+   "src": "esl_cmd",
+   "ev": "error",
+   "verb": "uuid_audio_stream",
+   "err": "EslCommandError",
+   "msg": "-ERR Operation Failed"
+  },
+  {
+   "t": 11.5732,
+   "src": "ai",
+   "ev": "_finish:exit"
+  },
+  {
+   "t": 11.6321,
+   "src": "ctrl",
+   "ev": "esl_done",
+   "name": "CHANNEL_HANGUP",
+   "sub": ""
+  },
+  {
+   "t": 12.928,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "show",
+   "uuid": "channels"
+  },
+  {
+   "t": 12.9562,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "show",
+   "out": "{\"row_count\": 0}"
+  },
+  {
+   "t": 14.037,
+   "src": "test",
+   "ev": "play_event_timeout"
+  },
+  {
+   "t": 14.9979,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "show",
+   "uuid": "channels"
+  },
+  {
+   "t": 15.0474,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "show",
+   "out": "{\"row_count\": 0}"
+  },
+  {
+   "t": 15.2407,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "uuid_kill",
+   "uuid": "4a2de751"
+  },
+  {
+   "t": 15.2539,
+   "src": "esl_cmd",
+   "ev": "error",
+   "verb": "uuid_kill",
+   "err": "EslCommandError",
+   "msg": "-ERR No such channel!"
+  },
+  {
+   "t": 15.2555,
+   "src": "test",
+   "ev": "killed"
+  },
+  {
+   "t": 16.2563,
+   "src": "esl_cmd",
+   "ev": "send",
+   "verb": "hupall",
+   "uuid": "NORMAL_C"
+  },
+  {
+   "t": 16.258,
+   "src": "esl_cmd",
+   "ev": "reply",
+   "verb": "hupall",
+   "out": "+OK hangup all channels matching [mme_leg]=[a] with cause: N"
+  }
+ ],
+ "fs_log": [
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.104053 72.33% [DEBUG] switch_core_session.c:641 loopback/9010-a set UUID=4a2de751-b93d-4bda-a1af-8134b97e99da",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-a) Running State Change CS_INIT (Cur 1 Tot 1873)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:624 (loopback/9010-a) State INIT",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [NOTICE] switch_channel.c:1143 New Channel loopback/9010-b [6afa767f-63b7-467a-8c51-5885a92b37ac]",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:166 loopback/9010-b setup codec L16/8000/20",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:288 (loopback/9010-b) State Change CS_NEW -> CS_INIT",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:356 setting other_loopback_from_uuid on b leg to (null)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:380 (loopback/9010-a) State Change CS_INIT -> CS_ROUTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-b) Running State Change CS_INIT (Cur 2 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:624 (loopback/9010-a) State INIT going to sleep",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:624 (loopback/9010-b) State INIT",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:380 (loopback/9010-b) State Change CS_INIT -> CS_ROUTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:624 (loopback/9010-b) State INIT going to sleep",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-a) Running State Change CS_ROUTING (Cur 2 Tot 1874)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-b) Running State Change CS_ROUTING (Cur 2 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:640 (loopback/9010-a) State ROUTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_channel.c:2400 (loopback/9010-b) Callstate Change DOWN -> RINGING",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:412 loopback/9010-a CHANNEL ROUTING",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_ivr_originate.c:67 (loopback/9010-a) State Change CS_ROUTING -> CS_CONSUME_MEDIA",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:640 (loopback/9010-a) State ROUTING going to sleep",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-a) Running State Change CS_CONSUME_MEDIA (Cur 2 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:659 (loopback/9010-a) State CONSUME_MEDIA",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:681 CHANNEL CONSUME_MEDIA",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:659 (loopback/9010-a) State CONSUME_MEDIA going to sleep",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:640 (loopback/9010-b) State ROUTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:412 loopback/9010-b CHANNEL ROUTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:230 loopback/9010-b Standard ROUTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [INFO] mod_dialplan_xml.c:648 Processing MME <+911140000000>->9010 in context mme_test",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b parsing [mme_test->t_answer_park] continue=false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Regex (FAIL) [t_answer_park] destination_number(9010) =~ /^9001$/ break=on-false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b parsing [mme_test->t_busy] continue=false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Regex (FAIL) [t_busy] destination_number(9010) =~ /^9002$/ break=on-false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b parsing [mme_test->t_noroute] continue=false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Regex (FAIL) [t_noroute] destination_number(9010) =~ /^9003$/ break=on-false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b parsing [mme_test->t_bridge_target] continue=false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Regex (FAIL) [t_bridge_target] destination_number(9010) =~ /^9004$/ break=on-false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b parsing [mme_test->t_ringing_long] continue=false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Regex (FAIL) [t_ringing_long] destination_number(9010) =~ /^9005$/ break=on-false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b parsing [mme_test->t_ai_caller_once] continue=false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Regex (PASS) [t_ai_caller_once] destination_number(9010) =~ /^9010$/ break=on-false",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action set(mme_ai=0)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action answer()",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action set(RECORD_READ_ONLY=true)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action record_session(/tmp/mme_ai_heard_${uuid}.wav)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action sleep(1500)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action playback(/tmp/mme_ai_caller.wav)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac Dialplan: loopback/9010-b Action sleep(25000)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:281 (loopback/9010-b) State Change CS_ROUTING -> CS_EXECUTE",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:640 (loopback/9010-b) State ROUTING going to sleep",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-b) Running State Change CS_EXECUTE (Cur 2 Tot 1874)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:647 (loopback/9010-b) State EXECUTE",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:454 loopback/9010-b CHANNEL EXECUTE",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:323 loopback/9010-b Standard EXECUTE",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b set(mme_ai=0)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_dptools.c:1671 SET loopback/9010-b [mme_ai]=[0]",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b answer()",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [NOTICE] mod_loopback.c:1021 Channel [loopback/9010-a] has been answered",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da EXECUTE [depth=0] loopback/9010-a sched_hangup(+1800 ALLOTTED_TIMEOUT)",
+  "2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_ivr_originate.c:3913 Originate Resulted in Success: [loopback/9010-a] Peer UUID: 4a2de751-b93d-4bda-a1af-8134b97e99da",
+  "2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_scheduler.c:263 Added task 1223 switch_ivr_schedule_hangup (4a2de751-b93d-4bda-a1af-8134b97e99da) to run at 1792251305",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [INFO] switch_channel.c:3291 loopback/9010-a Flipping CID from \"MME\" <+911140000000> to \"Outbound Call\" <mme_test>",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_commands.c:5191 (loopback/9010-a) State Change CS_CONSUME_MEDIA -> CS_EXECUTE",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_channel.c:3914 (loopback/9010-a) Callstate Change DOWN -> ACTIVE",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [NOTICE] mod_dptools.c:1406 Channel [loopback/9010-b] has been answered",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b sched_hangup(+1800 ALLOTTED_TIMEOUT)",
+  "2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_scheduler.c:263 Added task 1224 switch_ivr_schedule_hangup (6afa767f-63b7-467a-8c51-5885a92b37ac) to run at 1792251305",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_channel.c:3914 (loopback/9010-b) Callstate Change RINGING -> ACTIVE",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-a) Running State Change CS_EXECUTE (Cur 2 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:647 (loopback/9010-a) State EXECUTE",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_loopback.c:454 loopback/9010-a CHANNEL EXECUTE",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.124054 72.33% [DEBUG] switch_core_state_machine.c:323 loopback/9010-a Standard EXECUTE",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b set(RECORD_READ_ONLY=true)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da EXECUTE [depth=0] loopback/9010-a park()",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.124054 72.33% [DEBUG] mod_dptools.c:1671 SET loopback/9010-b [RECORD_READ_ONLY]=[true]",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b record_session(/tmp/mme_ai_heard_6afa767f-63b7-467a-8c51-5885a92b37ac.wav)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.144060 72.33% [DEBUG] switch_ivr_async.c:1505 Record session sample rate: 8000 -> 8000",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.144060 72.33% [DEBUG] switch_core_media_bug.c:976 Attaching BUG to loopback/9010-b",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b sleep(1500)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:05.144060 72.33% [DEBUG] switch_ivr_async.c:1779 No silence detection configured; assuming start of speech",
+  "2026-10-17 20:35:05.204048 72.33% [DEBUG] mod_audio_stream.c:256 mod_audio_stream cmd: 4a2de751-b93d-4bda-a1af-8134b97e99da start ws://127.0.0.1:44550/v1/ai/media/fs mono 16000 {\"session_id\":\"e4a587d5-c095-4ca1-a66c-3ab733758bb7\",\"sample_rate\":16000}",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] mod_audio_stream.c:155 calling stream_session_init.",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] audio_streamer_glue.cpp:528 (4a2de751-b93d-4bda-a1af-8134b97e99da) resampling from 8000 to 16000",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] audio_streamer_glue.cpp:539 (4a2de751-b93d-4bda-a1af-8134b97e99da) stream_data_init",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] mod_audio_stream.c:163 adding bug.",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] switch_core_media_bug.c:976 Attaching BUG to loopback/9010-a",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] mod_audio_stream.c:170 setting bug private data.",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:05.204048 72.33% [DEBUG] mod_audio_stream.c:204 exiting start_capture.",
+  "2026-10-17 20:35:05.224036 72.33% [DEBUG] audio_streamer_glue.cpp:284 sending initial metadata {\"session_id\":\"e4a587d5-c095-4ca1-a66c-3ab733758bb7\",\"sample_rate\":16000}",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b playback(/tmp/mme_ai_caller.wav)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:06.644065 70.97% [DEBUG] switch_ivr_play_say.c:1564 Codec Activated L16@8000hz 1 channels 20ms",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:06.664282 70.97% [DEBUG] switch_core_io.c:448 Setting BUG Codec L16:100",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.350579 62.60% [NOTICE] switch_ivr.c:4404 Hangup loopback/9010-a [CS_EXECUTE] [ALLOTTED_TIMEOUT]",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.350579 62.60% [DEBUG] mod_loopback.c:610 loopback/9010-a CHANNEL KILL",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_core_session.c:2984 loopback/9010-a skip receive message [APPLICATION_EXEC_COMPLETE] (channel is hungup already)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_core_state_machine.c:647 (loopback/9010-a) State EXECUTE going to sleep",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-a) Running State Change CS_HANGUP (Cur 2 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.430332 62.60% [INFO] mod_audio_stream.c:87 Got SWITCH_ABC_TYPE_CLOSE.",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:11.430332 62.60% [DEBUG] audio_streamer_glue.cpp:973 (4a2de751-b93d-4bda-a1af-8134b97e99da) stream_session_cleanup",
+  "2026-10-17 20:35:11.430332 62.60% [DEBUG] audio_streamer_glue.cpp:49 disconnecting...",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_ivr_play_say.c:2013 done playing file /tmp/mme_ai_caller.wav",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac EXECUTE [depth=0] loopback/9010-b sleep(25000)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [NOTICE] switch_core_state_machine.c:382 loopback/9010-b has executed the last dialplan instruction, hanging up.",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [NOTICE] switch_core_state_machine.c:384 Hangup loopback/9010-b [CS_EXECUTE] [NORMAL_CLEARING]",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [DEBUG] mod_loopback.c:610 loopback/9010-b CHANNEL KILL",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_core_state_machine.c:647 (loopback/9010-b) State EXECUTE going to sleep",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-b) Running State Change CS_HANGUP (Cur 2 Tot 1874)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.430332 62.60% [DEBUG] switch_ivr_async.c:1598 Stop recording file /tmp/mme_ai_heard_6afa767f-63b7-467a-8c51-5885a92b37ac.wav",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_ivr_async.c:1679 Channel is hung up",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_media_bug.c:1326 Removing BUG from loopback/9010-b",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:844 (loopback/9010-b) Callstate Change ACTIVE -> HANGUP",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:846 (loopback/9010-b) State HANGUP",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] mod_loopback.c:569 loopback/9010-b CHANNEL HANGUP",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:59 loopback/9010-b Standard HANGUP, cause: NORMAL_CLEARING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:846 (loopback/9010-b) State HANGUP going to sleep",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:616 (loopback/9010-b) State Change CS_HANGUP -> CS_REPORTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-b) Running State Change CS_REPORTING (Cur 2 Tot 1874)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:932 (loopback/9010-b) State REPORTING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:168 loopback/9010-b Standard REPORTING, cause: NORMAL_CLEARING",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:932 (loopback/9010-b) State REPORTING going to sleep",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_state_machine.c:607 (loopback/9010-b) State Change CS_REPORTING -> CS_DESTROY",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:11.570713 62.60% [DEBUG] switch_core_session.c:1748 Session 1874 (loopback/9010-b) Locked, Waiting on external entities",
+  "2026-10-17 20:35:12.225910 60.40% [INFO] audio_streamer_glue.cpp:545 4a2de751-b93d-4bda-a1af-8134b97e99da destroy_tech_pvt",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [INFO] audio_streamer_glue.cpp:1009 (4a2de751-b93d-4bda-a1af-8134b97e99da) stream_session_cleanup: connection closed",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_media_bug.c:1326 Removing BUG from loopback/9010-a",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:844 (loopback/9010-a) Callstate Change ACTIVE -> HANGUP",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:846 (loopback/9010-a) State HANGUP",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] mod_loopback.c:569 loopback/9010-a CHANNEL HANGUP",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:59 loopback/9010-a Standard HANGUP, cause: ALLOTTED_TIMEOUT",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:846 (loopback/9010-a) State HANGUP going to sleep",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:616 (loopback/9010-a) State Change CS_HANGUP -> CS_REPORTING",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:581 (loopback/9010-a) Running State Change CS_REPORTING (Cur 2 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:932 (loopback/9010-a) State REPORTING",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:168 loopback/9010-a Standard REPORTING, cause: ALLOTTED_TIMEOUT",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:932 (loopback/9010-a) State REPORTING going to sleep",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:607 (loopback/9010-a) State Change CS_REPORTING -> CS_DESTROY",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_session.c:1748 Session 1873 (loopback/9010-a) Locked, Waiting on external entities",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [NOTICE] switch_core_session.c:1766 Session 1873 (loopback/9010-a) Ended",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [NOTICE] switch_core_session.c:1770 Close Channel loopback/9010-a [CS_DESTROY]",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:735 (loopback/9010-a) Running State Change CS_DESTROY (Cur 1 Tot 1874)",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:745 (loopback/9010-a) State DESTROY",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:12.225910 60.40% [NOTICE] switch_core_session.c:1766 Session 1874 (loopback/9010-b) Ended",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:12.225910 60.40% [NOTICE] switch_core_session.c:1770 Close Channel loopback/9010-b [CS_DESTROY]",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:735 (loopback/9010-b) Running State Change CS_DESTROY (Cur 0 Tot 1874)",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:745 (loopback/9010-b) State DESTROY",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:175 loopback/9010-b Standard DESTROY",
+  "6afa767f-63b7-467a-8c51-5885a92b37ac 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:745 (loopback/9010-b) State DESTROY going to sleep",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:175 loopback/9010-a Standard DESTROY",
+  "4a2de751-b93d-4bda-a1af-8134b97e99da 2026-10-17 20:35:12.225910 60.40% [DEBUG] switch_core_state_machine.c:745 (loopback/9010-a) State DESTROY going to sleep",
+  "2026-10-17 20:35:12.384186 60.40% [DEBUG] switch_scheduler.c:147 Deleting task 1223 switch_ivr_schedule_hangup (4a2de751-b93d-4bda-a1af-8134b97e99da)",
+  "2026-10-17 20:35:12.384186 60.40% [DEBUG] switch_scheduler.c:147 Deleting task 1224 switch_ivr_schedule_hangup (6afa767f-63b7-467a-8c51-5885a92b37ac)",
+  "2026-10-17 20:35:12.722827 57.90% [DEBUG] mod_audio_stream.c:256 mod_audio_stream cmd: 4a2de751-b93d-4bda-a1af-8134b97e99da stop",
+  "2026-10-17 20:35:12.722827 57.90% [ERR] mod_audio_stream.c:338 Error locating session 4a2de751-b93d-4bda-a1af-8134b97e99da"
+ ]
+}
