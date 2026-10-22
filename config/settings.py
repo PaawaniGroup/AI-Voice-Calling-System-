@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -216,6 +216,14 @@ class Settings(BaseSettings):
         return [v.strip() for v in value.split(",") if v.strip()]
 
     # ------------------------------------------------------------------------------------------
+    @field_validator("ai_media_sample_rate", mode="before")
+    @classmethod
+    def _sample_rate_from_text(cls, v):
+        """Environment variables and `.env` values are strings; pydantic does not coerce "16000" to Literal[16000], so the
+        documented template line `MME_TEL_AI_MEDIA_SAMPLE_RATE=16000` used to stop the service at startup. Only digit strings
+        are converted; anything else still fails the Literal check with its normal message."""
+        return int(v) if isinstance(v, str) and v.strip().isdigit() else v
+
     @model_validator(mode="after")
     def _cross_validate(self) -> "Settings":
         errs, warns = self.problems()
