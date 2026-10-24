@@ -141,13 +141,16 @@ async def run(args) -> dict:
     clients = eb.BenchClients(s, cfg, ledger, start_zero=bool(args.idle_s))
     conv = Conversation(clients, cfg.get("default_language", "auto"), script_enforcement=s.ai_script_enforcement,
                         counsellor_gender=s.ai_counsellor_gender, counsellor_name=s.ai_counsellor_name)
-    rows, errors = [], {}
+    rows, errors, modes = [], {}, []
     if args.idle_s:
         print(f"idling {args.idle_s}s so serverless workers go cold ...", flush=True)
         await asyncio.sleep(args.idle_s)
     try:
         for i, pcm in enumerate(clips):
             clients.turn_idx = i
+            mode = args.runpod_mode if args.runpod_mode != "alternate" else ("run" if i % 2 == 0 else "runsync")
+            cfg["runpod_mode"] = mode          # same dict the clients read: /run (cancellable) vs /runsync (one blocking call), per turn
+            modes.append(mode)
             ms = await one_turn(conv, pcm)
             if ms.get("error"):
                 errors[ms["error"]] = errors.get(ms["error"], 0) + 1
@@ -163,7 +166,12 @@ async def run(args) -> dict:
     calls = [{k: v for k, v in c.items() if k != "t_submit"} for c in clients.calls]
     keys = sorted({k for r in rows for k in r})
     warm_calls = [c for c in calls if c["turn"] is not None and c["turn"] >= 1]
+    by_mode = {}
+    for md in sorted(set(modes)):   # turns 2+ only: turn 1 may include cold starts
+        sel = [r for r, mm in list(zip(rows, modes))[1:] if mm == md]
+        by_mode[md] = {"turns": len(sel), **{k: summary([r[k] for r in sel if k in r]) for k in ("post_endpoint_v2v", "stt", "llm_first_token", "tts_first_chunk")}}
     out = {"started_at": datetime.now(timezone.utc).isoformat(), "tag": args.tag, "path": args.path, "turns": len(rows), "errors": errors,
+           "runpod_mode": args.runpod_mode, "mode_per_turn": modes, "by_mode_turns_2plus": by_mode,
            "clip_s": args.clip_s, "idle_s": args.idle_s, "halted": clients.halted,
            "endpoints": {svc: clients.endpoint(svc).url.rsplit("/", 1)[-1] for svc in eb.SERVICES},
            "all": {k: summary([r[k] for r in rows if k in r]) for k in keys},
@@ -189,6 +197,8 @@ def main(argv=None) -> int:
     ap.add_argument("--budget", type=float, required=True, help="hard cap in USD (estimated from delayTime + executionTime + idle tails); the run stops there")
     ap.add_argument("--idle", type=lambda v: eb.kv(v), required=True, help="idle timeouts in seconds, e.g. stt=5,brain=5,tts=5")
     ap.add_argument("--price", type=lambda v: eb.kv(v), default={}, help="USD per second per service, e.g. stt=0.000192 (brain/tts default to the operator-given values)")
+    ap.add_argument("--runpod-mode", choices=("run", "runsync", "alternate"), default="run",
+                    help="RunPod transport: run (default, cancellable), runsync, or alternate per turn to compare them on the same endpoints")
     ap.add_argument("--cold-reserve-s", type=float, default=60.0, help="seconds of billing reserved before each call for an unknown cold start")
     args = ap.parse_args(argv)
     args.price = {**eb.DEFAULT_PRICES, **args.price}
