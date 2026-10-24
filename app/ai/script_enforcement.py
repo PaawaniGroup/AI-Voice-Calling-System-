@@ -269,6 +269,15 @@ def get_verified_lexicon():
     return _LEXICON_INSTANCE if _LEXICON_INSTANCE is not False else None
 
 
+def problem_kinds(problems: list[str]) -> dict[str, int]:
+    """`roman_hindi_word:<word>` -> {'roman_hindi_word': n}: what kind of problem and how many, never the words (safe to log)."""
+    kinds: dict[str, int] = {}
+    for p in problems:
+        k = str(p).split(":", 1)[0]
+        kinds[k] = kinds.get(k, 0) + 1
+    return kinds
+
+
 def enforce_clause(clause: str, mode: str, allowlist: set[str] | None = None) -> tuple[str, bool, list[str]]:
     """Streaming-aware enforcement on EACH CLAUSE before it goes to voice.
 
@@ -296,15 +305,15 @@ def enforce_clause(clause: str, mode: str, allowlist: set[str] | None = None) ->
             if res.changed:
                 conv_ok, conv_problems = check_reply(res.text, mode, allowlist=allowlist)
                 if conv_ok:
-                    log.info("clause_verified_conversion: %r -> %r", clause, res.text)
+                    log.info("clause_verified_conversion: chars %d -> %d", len(clause), len(res.text))   # lengths only: never the words
                     return res.text, False, problems
                 converted = res.text
         except Exception as e:
-            log.warning("verified conversion failed on clause: %s", e)
+            log.warning("verified conversion failed on clause: %s", type(e).__name__)
 
-    # Step (b) Still violating: speak UNCHANGED and LOG it (never block stream)
-    log.warning("clause_script_violation: mode=%s problems=%s text=%r (elapsed=%.2fms)",
-                mode, problems, clause, elapsed_ms)
+    # Step (b) Still violating: speak UNCHANGED and LOG it (never block stream). Kinds and counts only: problems carry the offending words.
+    log.warning("clause_script_violation: mode=%s problem_kinds=%s clause_chars=%d (elapsed=%.2fms)",
+                mode, problem_kinds(problems), len(clause), elapsed_ms)
     return clause, False, problems
 
 
@@ -327,7 +336,7 @@ async def enforce_non_streamed(reply: str, mode: str, chat_fn, allowlist: set[st
         "Rewrite your entire previous response completely in English without any Devanagari script."
     )
 
-    log.info("non_streamed_retry_triggered: mode=%s problems=%s", mode, problems)
+    log.info("non_streamed_retry_triggered: mode=%s problem_kinds=%s", mode, problem_kinds(problems))   # kinds/counts: problems carry words
     try:
         import asyncio
         retry_messages = [
@@ -338,12 +347,12 @@ async def enforce_non_streamed(reply: str, mode: str, chat_fn, allowlist: set[st
         candidate = out.get("text", "").strip() if isinstance(out, dict) else str(out).strip()
         cand_ok, cand_problems = check_reply(candidate, mode, allowlist=allowlist)
         if cand_ok:
-            log.info("non_streamed_retry_succeeded: %r", candidate)
+            log.info("non_streamed_retry_succeeded: chars=%d", len(candidate))
             return candidate, False, True, []
         else:
-            log.warning("non_streamed_retry_failed_checker: %r, falling back", candidate)
+            log.warning("non_streamed_retry_failed_checker: chars=%d problem_kinds=%s, falling back", len(candidate), problem_kinds(cand_problems))
     except Exception as e:
-        log.warning("non_streamed_retry_timeout_or_error: %s, falling back", e)
+        log.warning("non_streamed_retry_timeout_or_error: %s, falling back", type(e).__name__)
 
     # Fall back to original text
     return reply, False, True, problems

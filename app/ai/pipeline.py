@@ -594,8 +594,8 @@ class Conversation:
                 "roman_tokens": list(set(found_roman_tokens))
             }
             self.turns.append(turn_record)
-            log.info("turn_script_log: mode=%s first_gen_passed=%s clauses_violated=%d roman_tokens=%s",
-                     turn_mode, first_gen_passed, clauses_violated, list(set(found_roman_tokens)))
+            log.info("turn_script_log: mode=%s first_gen_passed=%s clauses_violated=%d roman_token_count=%d",
+                     turn_mode, first_gen_passed, clauses_violated, len(set(found_roman_tokens)))   # a count: the tokens are reply words
         except asyncio.CancelledError:
             del self.messages[mark:]
             raise  # task cancellation must propagate: swallowing it left the media worker alive and hung the socket handler on hangup

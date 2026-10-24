@@ -533,7 +533,7 @@ async def handle_plivo_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, si
     try:
         raw_msg = await asyncio.wait_for(ws.receive_text(), 5)
         ev = json.loads(raw_msg)
-        log.info("plivo stream start received: %s", raw_msg[:300])
+        log.info("plivo stream start received: %d bytes, event=%s", len(raw_msg), ev.get("event") if isinstance(ev, dict) else None)  # not the body: it carries the signed stream ticket
         if not isinstance(ev, dict) or ev.get("event") != "start" or not isinstance(ev.get("start"), dict):
             reason = "no_start"
             return await ws.close(code=1008)
