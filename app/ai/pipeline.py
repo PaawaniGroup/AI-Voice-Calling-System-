@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.ai import turn_trace
 from app.ai.clients import AiError, ModelClients
@@ -26,15 +27,27 @@ OLD_SYSTEM_PROMPT = (
 )
 SYSTEM_PROMPT = OLD_SYSTEM_PROMPT
 
-# Approach A of the pronunciation task (preserved for regression testing)
-SCRIPT_RULE = (
+# Approach A of the pronunciation task, first version of the rule (kept for comparison/regression)
+SCRIPT_RULE_V1 = (
     " SCRIPT RULE for Hindi and Hinglish replies: write every Hindi word in Devanagari, never in Roman letters. Keep English words, course and college names, "
     "people's names, e-mail addresses, web addresses and acronyms (IIT, NEET, B.Tech) in Latin letters, and do not respell English words in Devanagari. "
     "Use मैं for 'I' and में for 'in'. Digits may stay as digits. If the student writes only English, reply only in English. "
     "Right: 'मैं आपको course के बारे में बता सकता हूँ।'  'आपका admission process शुरू हो गया है।'  'Fees के लिए आपको दो documents चाहिए।' "
     "Wrong: 'Main aapko course ke baare mein bata sakta hoon.'"
 )
+# Current rule text (the operator's voice-counsellor prompt, kept verbatim in config/devanagari_rules.txt) + the earlier examples + the tag rule.
+# The factual guardrails (CONTEXT only, never invent fees/deadlines) come from OLD_SYSTEM_PROMPT that this text is appended to.
+DEVANAGARI_RULES_PATH = Path(__file__).resolve().parents[2] / "config" / "devanagari_rules.txt"
+SCRIPT_RULE = (
+    "\n\nThe language and script rules below override anything above about language and script: Hindi and Hinglish replies are written in Devanagari.\n\n"
+    + DEVANAGARI_RULES_PATH.read_text(encoding="utf-8").strip()
+    + "\n\nMore examples of the script rule. Right: 'मैं आपको course के बारे में बता सकता हूँ।'  'आपका admission process शुरू हो गया है।'  "
+    "'Fees के लिए आपको दो documents चाहिए।' Wrong: 'Main aapko course ke baare mein bata sakta hoon.'"
+    "\n\nA user message may end with a tag like (reply_mode: hi) or (reply_mode: en): it tells you which language to reply in. "
+    "Obey it and NEVER say, write or mention the tag."
+)
 SYSTEM_PROMPT_DEVANAGARI = OLD_SYSTEM_PROMPT + SCRIPT_RULE
+SCRIPT_RETRY_TIMEOUT_S = 1.0   # the one "rewrite in Devanagari" retry gets this long; past it the reply is spoken as it is
 
 
 def build_system_prompt(counsellor_gender: str = "masculine", counsellor_name: str = "MME AI counsellor") -> str:
@@ -128,6 +141,8 @@ from app.ai.script_enforcement import (
     inject_turn_hint,
     enforce_clause,
     enforce_non_streamed,
+    problem_kinds,
+    strip_mode_tag,
 )
 
 
@@ -264,13 +279,19 @@ class Conversation:
         self.clients, self.language = clients, language
         self.tools = tools or {}  # name -> async handler(args: dict) -> str
         self.script_enforcement = script_enforcement
+        self.devanagari_hindi = devanagari_hindi
+        # Devanagari flow (per tenant): the Devanagari prompt + the per-turn `(reply_mode: ..)` tag + the reply check/retry; it uses the same
+        # mode/clause machinery as script_enforcement, but with ITS prompt and the short tag. Both flags on = the Devanagari prompt.
+        self.enforce = script_enforcement or devanagari_hindi
+        self.hint_style = "short" if devanagari_hindi else "long"
+        self.last_script_report: dict | None = None   # what the last reply check did (kinds and counts only; never words)
         self.counsellor_gender = counsellor_gender
         self.counsellor_name = counsellor_name
         self.hint_placement = hint_placement
         self.current_mode = "en" if language == "en" else "hi"
         self.messages: list[dict] = [{"role": "system", "content": system_prompt(
             devanagari_hindi=devanagari_hindi,
-            script_enforcement=script_enforcement,
+            script_enforcement=script_enforcement and not devanagari_hindi,
             counsellor_gender=counsellor_gender,
             counsellor_name=counsellor_name
         )}]
@@ -287,6 +308,75 @@ class Conversation:
     def _trim(self) -> None:
         head, rest = self.messages[:1], self.messages[1:]
         self.messages = head + rest[-self.max_history:]
+
+    async def _retry_script(self, base_messages: list[dict], text: str, mode: str) -> str | None:
+        """ONE rewrite attempt, at most SCRIPT_RETRY_TIMEOUT_S long (the timeout also cancels the in-flight Brain job). None = no usable rewrite."""
+        instr = ("Rewrite your reply in Devanagari: every Hindi word in Devanagari script, English letters only for course names, exam names and "
+                 "technical words. Same meaning. (reply_mode: hi)" if mode == "hi" else
+                 "Rewrite your reply fully in English with no Devanagari. (reply_mode: en)")
+        msgs = [*base_messages, {"role": "assistant", "content": text}, {"role": "user", "content": instr}]
+        try:
+            out = await asyncio.wait_for(self.clients.chat(msgs), timeout=SCRIPT_RETRY_TIMEOUT_S)
+        except (asyncio.TimeoutError, AiError):
+            return None
+        return strip_mode_tag(out.get("text", "")) or None
+
+    async def _gate_reply(self, source, base_messages: list[dict], mode: str):
+        """Devanagari flow: hold the Brain's reply until it is complete (the Brain answers in one piece over RunPod anyway), check its script,
+        and if it fails retry ONCE within SCRIPT_RETRY_TIMEOUT_S. Still failing: the reply is spoken as it is. Only the kind and count of the
+        problem is logged, never a word. Tool calls pass through untouched."""
+        parts: list[str] = []
+        async for item in source:
+            if item.get("tool_calls"):
+                yield item
+                return
+            if item.get("delta"):
+                parts.append(item["delta"])
+        text = strip_mode_tag("".join(parts))
+        ok, problems = check_reply(text, mode)
+        report = {"mode": mode, "first_ok": ok, "retried": False, "retry_ok": None, "retry_ms": None, "kinds": problem_kinds(problems)}
+        if not ok:
+            report["retried"] = True
+            t0 = time.perf_counter()
+            new = await self._retry_script(base_messages, text, mode)
+            report["retry_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            if new is not None:
+                ok2, problems2 = check_reply(new, mode)
+                report["retry_ok"] = ok2
+                if ok2:
+                    text = new
+                else:
+                    report["kinds_after_retry"] = problem_kinds(problems2)
+            else:
+                report["retry_ok"] = False
+        self.last_script_report = report
+        log.info("reply_script_check: mode=%s first_ok=%s retried=%s retry_ok=%s retry_ms=%s problem_kinds=%s",
+                 mode, report["first_ok"], report["retried"], report["retry_ok"], report["retry_ms"], report["kinds"])
+        if text:
+            yield {"delta": text}
+        yield {"done": True, "text": text}
+
+    async def brain_reply(self, heard: str) -> dict:
+        """The Brain half of a turn for a caller text (no STT/TTS): the same mode, tag, prompt and reply check/retry as `stream_turn`.
+        Used by tools/measure_roman_hindi.py. Returns {text, mode, ms, report}; the history is NOT extended."""
+        if self.enforce:
+            self.current_mode = reply_mode(heard, previous_mode=self.current_mode)
+            mode = self.current_mode
+        else:
+            mode = "hi"
+        msgs = [*self.messages, {"role": "user", "content": heard}]
+        if self.enforce:
+            msgs = inject_turn_hint(msgs, mode=mode, placement=self.hint_placement, style=self.hint_style)
+        t0 = time.perf_counter()
+
+        async def raw():
+            out = await self.clients.chat(msgs)
+            if out.get("text"):
+                yield {"delta": out["text"]}
+            yield {"done": True, "text": out.get("text", "")}
+        source = self._gate_reply(raw(), msgs, mode) if self.devanagari_hindi else raw()
+        text = "".join([i["delta"] async for i in source if i.get("delta")])
+        return {"text": text, "mode": mode, "ms": round((time.perf_counter() - t0) * 1000, 1), "report": self.last_script_report if self.devanagari_hindi else None}
 
     async def turn(self, pcm: bytes, rate: int) -> TurnResult:
         """Run one full turn, aggregating streamed sentence chunks into a single result."""
@@ -349,7 +439,7 @@ class Conversation:
                 lang = stt["language"]
 
             # Decide per-turn mode
-            if self.script_enforcement:
+            if self.enforce:
                 self.current_mode = reply_mode(heard, previous_mode=self.current_mode)
                 turn_mode = self.current_mode
             else:
@@ -368,8 +458,8 @@ class Conversation:
 
             t_llm_start = time.perf_counter()
             # Inject per-turn hint ONLY for request without mutating conversation history
-            if self.script_enforcement:
-                chat_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement)
+            if self.enforce:
+                chat_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement, style=self.hint_style)
             else:
                 chat_messages = self.messages
 
@@ -403,7 +493,10 @@ class Conversation:
 
             while True:
                 tool_calls_to_run = []
-                async for item in _stream_brain(cur_messages):
+                source = _stream_brain(cur_messages)
+                if self.devanagari_hindi:   # hold the reply until complete, check its script, one bounded retry (see _gate_reply)
+                    source = self._gate_reply(source, cur_messages, turn_mode)
+                async for item in source:
                     if self.cancelled:
                         yield TurnChunk(error="cancelled", is_last=True)
                         return
@@ -431,7 +524,7 @@ class Conversation:
                                 first_clause_marked = True
 
                             # Clause script enforcement
-                            if self.script_enforcement:
+                            if self.enforce:
                                 spoken_clause, clause_passed, clause_problems = enforce_clause(sentence, mode=turn_mode)
                                 if not clause_passed:
                                     clauses_violated += 1
@@ -443,7 +536,7 @@ class Conversation:
 
                             t_sent = time.perf_counter()
                             turn_trace.mark("t_tts_sent")
-                            audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.script_enforcement else lang)
+                            audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.enforce else lang)
                             turn_trace.mark("t_tts_first_chunk")
                             sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
                             t_tts_total += sent_tts_ms
@@ -489,7 +582,7 @@ class Conversation:
                         except Exception:
                             result = "tool failed"
                         self.messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": str(result)[:1000]})
-                    cur_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement) if self.script_enforcement else self.messages
+                    cur_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement, style=self.hint_style) if self.enforce else self.messages
                     continue
                 break
 
@@ -504,7 +597,7 @@ class Conversation:
                     turn_trace.mark("t_llm_first_clause")
                     first_clause_marked = True
 
-                if self.script_enforcement:
+                if self.enforce:
                     spoken_clause, clause_passed, clause_problems = enforce_clause(sentence, mode=turn_mode)
                     if not clause_passed:
                         clauses_violated += 1
@@ -516,7 +609,7 @@ class Conversation:
 
                 t_sent = time.perf_counter()
                 turn_trace.mark("t_tts_sent")
-                audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.script_enforcement else lang)
+                audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.enforce else lang)
                 turn_trace.mark("t_tts_first_chunk")
                 sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
                 t_tts_total += sent_tts_ms

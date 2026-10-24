@@ -64,13 +64,15 @@ class AiService:
                 "models": {"stt": self.s.ai_stt_model, "brain": self.s.ai_brain_model, "tts": self.s.ai_tts_model},
                 "timeouts": {"stt": self.s.ai_request_timeout_s, "brain": self.s.ai_request_timeout_s * 2,
                              "tts": self.s.ai_request_timeout_s, "rag": 5.0},
-                "paths": {}, "keys": {}, "languages": LANGS[1:], "default_language": "auto"}
+                "paths": {}, "keys": {}, "languages": LANGS[1:], "default_language": "auto",
+                "devanagari_hindi": False, "runpod_mode": "run"}
 
     async def get_config(self, tenant_id: str) -> dict:
         doc = await self.db["ai_config"].find_one({"tenant_id": tenant_id})
         cfg = self.default_config(tenant_id)
         if doc:
-            for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by"):
+            for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
+                      "devanagari_hindi", "runpod_mode"):   # the last two: per-tenant switches (Devanagari replies; RunPod transport)
                 if k in doc:
                     cfg[k] = doc[k]
             for k in ("models", "timeouts", "paths", "keys"):
@@ -87,6 +89,12 @@ class AiService:
                 cfg[key] = validate_service_url(v, self.s) if v else ""
         if "enabled" in body:
             cfg["enabled"] = bool(body["enabled"])
+        if body.get("devanagari_hindi") is not None:
+            cfg["devanagari_hindi"] = bool(body["devanagari_hindi"])
+        if body.get("runpod_mode") is not None:
+            if body["runpod_mode"] not in ("run", "runsync"):
+                raise Unprocessable("runpod_mode must be run or runsync", code="invalid_config")
+            cfg["runpod_mode"] = body["runpod_mode"]
         if "default_language" in body:
             if body["default_language"] not in LANGS:
                 raise Unprocessable("unsupported language", code="invalid_language", details={"supported": LANGS})
@@ -246,6 +254,7 @@ class AiService:
             counsellor_gender=getattr(self.s, "ai_counsellor_gender", "masculine"),
             counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
+            devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")

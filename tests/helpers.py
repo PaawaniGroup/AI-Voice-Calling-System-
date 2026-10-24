@@ -65,9 +65,14 @@ class MockModels:
         self.cancel_calls: list[str] = []      # service of each job the client explicitly cancelled with /cancel
         self.healthy = {"stt", "brain", "tts", "rag"}
         self.reply = "Namaste! BTech ke liye eligibility 12th mein 50% hai."
+        self.reply_queue: list[str] = []   # replies handed out first (one per Brain request) before `reply` is used again
+        self.stt_text = "mujhe BTech ke baare mein batao"
         self.tts_ms = 300
         self.fail: dict[str, int] = {}  # service name -> HTTP status to answer with (failure injection)
         self.bad: dict[str, bytes] = {}  # service name -> body returned with HTTP 200 (malformed-response injection)
+
+    def _next_reply(self) -> str:
+        return self.reply_queue.pop(0) if self.reply_queue else self.reply
 
     def _runpod(self, request: httpx.Request, host_path: str) -> httpx.Response:
         svc = request.url.host.split(".")[0]          # stt.test / brain.test / tts.test
@@ -90,8 +95,8 @@ class MockModels:
             return httpx.Response(200, json={"id": jid, "status": "CANCELLED"})
         if now < job["ready_at"]:
             return httpx.Response(200, json={"id": jid, "status": "IN_PROGRESS"})
-        out = {"stt": {"transcription": "mujhe BTech ke baare mein batao", "language": "hi"},
-               "brain": [{"choices": [{"message": {"content": self.reply}}]}],
+        out = {"stt": {"transcription": self.stt_text, "language": "hi"},
+               "brain": [{"choices": [{"message": {"content": self._next_reply()}}]}],
                "tts": {"audio_base64": base64.b64encode(tone_wav(self.tts_ms)).decode(), "format": "wav"}}[job["svc"]]
         return httpx.Response(200, json={"id": jid, "status": "COMPLETED", "delayTime": 5, "executionTime": 7, "output": out})
 
@@ -118,9 +123,9 @@ class MockModels:
                 self.cancelled.append(svc)
                 raise
         if svc == "stt":
-            return httpx.Response(200, json={"text": "mujhe BTech ke baare mein batao", "language": "hi"})
+            return httpx.Response(200, json={"text": self.stt_text, "language": "hi"})
         if svc == "brain":
-            return httpx.Response(200, json={"choices": [{"message": {"content": self.reply}}]})
+            return httpx.Response(200, json={"choices": [{"message": {"content": self._next_reply()}}]})
         if svc == "tts":
             return httpx.Response(200, content=tone_wav(self.tts_ms), headers={"content-type": "audio/wav"})
         if svc == "rag":

@@ -141,11 +141,26 @@ def build_mode_hint(mode: str, placement: Literal["user_suffix", "system_message
     return hint
 
 
-def inject_turn_hint(messages: list[dict], mode: str, placement: Literal["user_suffix", "system_message"] = "user_suffix") -> list[dict]:
+_MODE_TAG_RE = re.compile(r"\(?\s*reply_mode\s*[:=]\s*\w*\s*\)?", re.IGNORECASE)
+
+
+def build_reply_mode_hint(mode: str) -> str:
+    """The short per-turn tag of the Devanagari flow: `(reply_mode: hi)` or `(reply_mode: en)`. The system prompt tells the Brain to obey
+    it and never to say it."""
+    return f"(reply_mode: {'en' if mode == 'en' else 'hi'})"
+
+
+def strip_mode_tag(text: str) -> str:
+    """Remove a `(reply_mode: ..)` tag the Brain echoed, so it can never be spoken."""
+    return re.sub(r"[ \t]{2,}", " ", _MODE_TAG_RE.sub("", text or "")).strip()
+
+
+def inject_turn_hint(messages: list[dict], mode: str, placement: Literal["user_suffix", "system_message"] = "user_suffix",
+                     style: Literal["long", "short"] = "long") -> list[dict]:
     """Injects a per-turn hint ONLY into a copy of messages for the request.
-    The original conversation history is NEVER mutated.
+    The original conversation history is NEVER mutated. style "short" = `(reply_mode: hi|en)`.
     """
-    hint = build_mode_hint(mode, placement=placement)
+    hint = build_reply_mode_hint(mode) if style == "short" else build_mode_hint(mode, placement=placement)
     copied = [dict(m) for m in messages]
     if not copied:
         return [{"role": "user", "content": hint}]

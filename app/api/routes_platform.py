@@ -356,6 +356,8 @@ class AiConfigIn(Strict):
     models: dict[str, str] | None = None
     timeouts: dict[str, float] | None = None
     paths: dict[str, str] | None = None
+    devanagari_hindi: bool | None = None   # Devanagari replies for Hindi/Hinglish callers (prompt + reply_mode tag + reply check/retry)
+    runpod_mode: Literal["run", "runsync"] | None = None
 
 
 @router.get("/ai/config")
