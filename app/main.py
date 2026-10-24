@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -17,7 +18,9 @@ from app.api import routes, routes_live, routes_platform
 from app.ai.media import UnavailableBridge, WsForkBridge
 from app.ai.service import AiService
 from app.services.sessions import SessionService
+from app.core import buildinfo
 from app.core.errors import ApiError
+from app.core.ids import utcnow
 from app.core.logging import RingHandler, correlation_id_var, request_id_var, setup_logging
 from app.events.webhooks import WebhookEmitter, WebhookWorker
 from app.observability import metrics as m
@@ -126,6 +129,11 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         ctrl.start()
         wworker.start()
         housekeeping = asyncio.create_task(_housekeeping(s, repos, storage, wworker))
+        try:  # which build is running: read back by `scripts/plivo_testcall.py status` (never blocks startup)
+            await database["service_runtime"].update_one(
+                {"_id": "api"}, {"$set": {**buildinfo.build_info(), "pid": os.getpid(), "started_at": utcnow()}}, upsert=True)
+        except Exception:
+            log.warning("could not record the running build")
         log.info("service started")
         try:
             yield
