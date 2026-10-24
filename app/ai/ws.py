@@ -281,7 +281,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 if recorded:
                     trace.mark("t_turn_end")
                     try:
-                        await ai.finalize_turn(rt, trace.trace_id, trace.to_ms())
+                        final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
+                        await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
                     except Exception:  # latency bookkeeping must never take the call down
                         log.exception("could not store turn latency trace")
 

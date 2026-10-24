@@ -201,6 +201,46 @@ def split_sentences(text: str) -> list[str]:
     return chunks
 
 
+class StreamingSentenceExtractor:
+    """Incrementally extracts completed phonetic sentence clauses from streaming tokens.
+    Preserves acronyms (B.Tech, M.B.A.), decimal numbers, and groups short prefixes (<3 words)."""
+
+    def __init__(self, min_words: int = 3):
+        self.min_words = min_words
+        self.buffer = ""
+        import re
+        self._pattern = re.compile(r'(?<=[।?!\n])\s+|(?<=[a-zA-Z0-9\u0900-\u097F]{2}\.)\s+(?=[A-Z0-9\u0900-\u097F])')
+
+    def feed(self, token: str) -> list[str]:
+        if not token:
+            return []
+        self.buffer += token
+        splits = [0] + [m.end() for m in self._pattern.finditer(self.buffer)]
+        if len(splits) > 1:
+            ready = []
+            cand = ""
+            last_cut = 0
+            for i in range(len(splits) - 1):
+                segment = self.buffer[splits[i]:splits[i + 1]].strip()
+                if not segment:
+                    continue
+                cand = (cand + " " + segment).strip() if cand else segment
+                if len(cand.split()) >= self.min_words:
+                    ready.append(clean_for_tts(cand))
+                    cand = ""
+                    last_cut = splits[i + 1]
+            if last_cut > 0:
+                self.buffer = self.buffer[last_cut:]
+            return ready
+        return []
+
+    def finish(self) -> list[str]:
+        remaining = clean_for_tts(self.buffer.strip())
+        self.buffer = ""
+        return [remaining] if remaining else []
+
+
+
 def deduplicate_repetitions(text: str) -> str:
     """Collapses repetitive phrases (e.g. Whisper hallucinations like 'haan haan haan...' x40 -> 'haan')."""
     if not text:
@@ -326,7 +366,7 @@ class Conversation:
             user = heard if not context else "CONTEXT:\n" + "\n---\n".join(context) + f"\n\nSTUDENT: {heard}"
             self.messages.append({"role": "user", "content": user})
 
-            t = time.perf_counter()
+            t_llm_start = time.perf_counter()
             # Inject per-turn hint ONLY for request without mutating conversation history
             if self.script_enforcement:
                 chat_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement)
@@ -334,52 +374,136 @@ class Conversation:
                 chat_messages = self.messages
 
             turn_trace.mark("t_llm_sent")
-            out = await self.clients.chat(chat_messages, TOOL_SCHEMAS if self.tools else None)
-            for call in out.get("tool_calls", [])[:2]:
-                name = (call.get("function") or {}).get("name")
-                if name not in self.tools:
-                    log.warning("refused unregistered tool call")
-                    continue
-                import json
-                try:
-                    args = json.loads((call["function"].get("arguments") or "{}"))
-                    result = await self.tools[name](args)
-                except Exception:
-                    result = "tool failed"
-                self.messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": str(result)[:1000]})
-                followup_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement) if self.script_enforcement else self.messages
-                out = await self.clients.chat(followup_messages)
-            res_timings["brain"] = round((time.perf_counter() - t) * 1000, 1)
-            # Legacy path is NOT streaming: the first token is only known when the whole reply has arrived.
-            turn_trace.mark("t_llm_first_token", overwrite=True)
-            reply = out.get("text", "")
-            if not reply:
-                del self.messages[mark:]
-                yield TurnChunk(heard=heard, error="empty_reply", timings_ms=res_timings, is_first=True, is_last=True)
-                return
-            self.messages.append({"role": "assistant", "content": reply})
-            self._trim()
 
-            # First generation check
-            first_gen_passed, gen_problems = check_reply(reply, mode=turn_mode)
-            found_roman_tokens = []
-            for p in gen_problems:
-                if p.startswith("roman_hindi_word:"):
-                    found_roman_tokens.append(p.split(":", 1)[1])
+            async def _stream_brain(msgs):
+                if hasattr(self.clients, "chat_stream"):
+                    async for item in self.clients.chat_stream(msgs, TOOL_SCHEMAS if self.tools else None):
+                        yield item
+                else:
+                    out_res = await self.clients.chat(msgs, TOOL_SCHEMAS if self.tools else None)
+                    if out_res.get("tool_calls"):
+                        yield {"tool_calls": out_res["tool_calls"]}
+                    txt = out_res.get("text", "")
+                    if txt:
+                        yield {"delta": txt}
+                    yield {"done": True, "text": txt}
 
-            sentences = split_sentences(reply)
-            if not sentences:
-                sentences = [reply]
-            turn_trace.mark("t_llm_first_clause")
-
-            t_tts_total = 0.0
+            extractor = StreamingSentenceExtractor(min_words=3)
+            streamed_tokens: list[str] = []
+            first_token_marked = False
+            first_clause_marked = False
+            is_first_chunk = True
             clauses_violated = 0
-            for idx, sentence in enumerate(sentences):
+            found_roman_tokens: list[str] = []
+            t_tts_total = 0.0
+
+            cur_messages = chat_messages
+            max_tool_rounds = 2
+            tool_round = 0
+
+            while True:
+                tool_calls_to_run = []
+                async for item in _stream_brain(cur_messages):
+                    if self.cancelled:
+                        yield TurnChunk(error="cancelled", is_last=True)
+                        return
+
+                    if "tool_calls" in item and item["tool_calls"]:
+                        tool_calls_to_run = item["tool_calls"]
+                        break
+
+                    delta = item.get("delta")
+                    if delta:
+                        streamed_tokens.append(delta)
+                        if not first_token_marked:
+                            turn_trace.mark("t_llm_first_token", overwrite=True)
+                            first_token_marked = True
+                            res_timings["brain"] = round((time.perf_counter() - t_llm_start) * 1000, 1)
+
+                        ready_sentences = extractor.feed(delta)
+                        for sentence in ready_sentences:
+                            if self.cancelled:
+                                yield TurnChunk(error="cancelled", is_last=True)
+                                return
+
+                            if not first_clause_marked:
+                                turn_trace.mark("t_llm_first_clause")
+                                first_clause_marked = True
+
+                            # Clause script enforcement
+                            if self.script_enforcement:
+                                spoken_clause, clause_passed, clause_problems = enforce_clause(sentence, mode=turn_mode)
+                                if not clause_passed:
+                                    clauses_violated += 1
+                                    for cp in clause_problems:
+                                        if cp.startswith("roman_hindi_word:"):
+                                            found_roman_tokens.append(cp.split(":", 1)[1])
+                            else:
+                                spoken_clause = sentence
+
+                            t_sent = time.perf_counter()
+                            turn_trace.mark("t_tts_sent")
+                            audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.script_enforcement else lang)
+                            turn_trace.mark("t_tts_first_chunk")
+                            sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
+                            t_tts_total += sent_tts_ms
+
+                            if is_first_chunk:
+                                res_timings["tts"] = sent_tts_ms
+
+                            script_check_info = {
+                                "mode": turn_mode,
+                                "first_gen_passed": (clauses_violated == 0),
+                                "clauses_violated": clauses_violated,
+                                "roman_tokens": list(set(found_roman_tokens)),
+                                "retries": 0,
+                                "fallbacks": 0,
+                            }
+                            yield TurnChunk(
+                                heard=heard if is_first_chunk else None,
+                                reply=sentence if is_first_chunk else None,
+                                audio=audio,
+                                sample_rate=srate,
+                                language=lang,
+                                timings_ms=res_timings if is_first_chunk else {},
+                                sentence=spoken_clause,
+                                is_first=is_first_chunk,
+                                is_last=False,
+                                mode=turn_mode,
+                                first_gen_passed=(clauses_violated == 0),
+                                script_check=script_check_info,
+                            )
+                            is_first_chunk = False
+
+                if tool_calls_to_run and tool_round < max_tool_rounds:
+                    tool_round += 1
+                    for call in tool_calls_to_run[:2]:
+                        name = (call.get("function") or {}).get("name")
+                        if name not in self.tools:
+                            log.warning("refused unregistered tool call")
+                            continue
+                        import json
+                        try:
+                            args = json.loads((call["function"].get("arguments") or "{}"))
+                            result = await self.tools[name](args)
+                        except Exception:
+                            result = "tool failed"
+                        self.messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": str(result)[:1000]})
+                    cur_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement) if self.script_enforcement else self.messages
+                    continue
+                break
+
+            # Stream finished: process any final sentence in extractor
+            final_sentences = extractor.finish()
+            for sentence in final_sentences:
                 if self.cancelled:
                     yield TurnChunk(error="cancelled", is_last=True)
                     return
 
-                # Streaming-aware clause enforcement
+                if not first_clause_marked:
+                    turn_trace.mark("t_llm_first_clause")
+                    first_clause_marked = True
+
                 if self.script_enforcement:
                     spoken_clause, clause_passed, clause_problems = enforce_clause(sentence, mode=turn_mode)
                     if not clause_passed:
@@ -397,35 +521,69 @@ class Conversation:
                 sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
                 t_tts_total += sent_tts_ms
 
-                is_first = (idx == 0)
-                is_last = (idx == len(sentences) - 1)
-                if is_first:
-                    res_timings["tts"] = sent_tts_ms  # time to first audio
+                if is_first_chunk:
+                    res_timings["tts"] = sent_tts_ms
 
                 script_check_info = {
                     "mode": turn_mode,
-                    "first_gen_passed": first_gen_passed,
+                    "first_gen_passed": (clauses_violated == 0),
                     "clauses_violated": clauses_violated,
                     "roman_tokens": list(set(found_roman_tokens)),
                     "retries": 0,
                     "fallbacks": 0,
                 }
                 yield TurnChunk(
-                    heard=heard if is_first else None,
-                    reply=reply if is_first else None,
+                    heard=heard if is_first_chunk else None,
+                    reply=sentence if is_first_chunk else None,
                     audio=audio,
                     sample_rate=srate,
                     language=lang,
-                    timings_ms=res_timings if is_first else {},
+                    timings_ms=res_timings if is_first_chunk else {},
                     sentence=spoken_clause,
-                    is_first=is_first,
-                    is_last=is_last,
+                    is_first=is_first_chunk,
+                    is_last=False,
                     mode=turn_mode,
-                    first_gen_passed=first_gen_passed,
+                    first_gen_passed=(clauses_violated == 0),
                     script_check=script_check_info,
                 )
+                is_first_chunk = False
 
+            reply = "".join(streamed_tokens).strip()
+            if not reply:
+                del self.messages[mark:]
+                yield TurnChunk(heard=heard, error="empty_reply", timings_ms=res_timings, is_first=True, is_last=True)
+                return
+
+            self.messages.append({"role": "assistant", "content": reply})
+            self._trim()
+
+            if "brain" not in res_timings:
+                res_timings["brain"] = round((time.perf_counter() - t_llm_start) * 1000, 1)
             res_timings["tts_total"] = round(t_tts_total, 1)
+
+            first_gen_passed, gen_problems = check_reply(reply, mode=turn_mode)
+            for p in gen_problems:
+                if p.startswith("roman_hindi_word:"):
+                    found_roman_tokens.append(p.split(":", 1)[1])
+
+            script_check_info = {
+                "mode": turn_mode,
+                "first_gen_passed": first_gen_passed,
+                "clauses_violated": clauses_violated,
+                "roman_tokens": list(set(found_roman_tokens)),
+                "retries": 0,
+                "fallbacks": 0,
+            }
+
+            yield TurnChunk(
+                reply=reply,
+                is_last=True,
+                timings_ms=res_timings,
+                mode=turn_mode,
+                first_gen_passed=first_gen_passed,
+                script_check=script_check_info,
+            )
+
             turn_record = {
                 "heard": heard,
                 "reply": reply,

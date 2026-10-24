@@ -310,20 +310,24 @@ class AiService:
         if r.modified_count:
             rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.reconnect_s, "media_reconnect_timeout"))
 
-    async def finalize_turn(self, rt: Runtime, trace_id: str, trace_ms: dict) -> None:
+    async def finalize_turn(self, rt: Runtime, trace_id: str, trace_ms: dict, reply: str | None = None) -> None:
         """Second write of a turn: the complete latency trace (known only after the audio was sent) is merged into the turn
         record created by `record_turn`, found by `trace_id`. Also refreshes the session-level `timings_ms` and the live feed."""
         nums = {k: v for k, v in trace_ms.items() if isinstance(v, (int, float))}
-        if not nums:
+        if not nums and not reply:
             return
+        set_fields = {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
+                      **{f"timings_ms.{k}": v for k, v in nums.items()}}
+        if reply:
+            set_fields["transcript.$[e].reply"] = reply
+            set_fields["last_exchange.reply"] = reply
         await self.db["ai_sessions"].update_one(
             {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
-            {"$set": {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
-                      **{f"timings_ms.{k}": v for k, v in nums.items()}}},
+            {"$set": set_fields},
             array_filters=[{"e.trace_id": trace_id}])
         if self.activity is not None:
             self.activity.publish(rt.tenant_id, "ai.turn_latency", call_id=rt.call_id, session_id=rt.session_id,
-                                  data={"trace_id": trace_id, **nums})
+                                  data={"trace_id": trace_id, "reply": reply, **nums})
 
     async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None,
                           trace_id: str | None = None) -> None:

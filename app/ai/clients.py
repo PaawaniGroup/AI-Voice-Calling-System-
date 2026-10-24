@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import logging
 import struct
 import time
 import wave
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -310,6 +312,152 @@ class ModelClients:
                 raise AiError("brain", "bad_response", f"unexpected response shape: {type(e).__name__}") from None
             return {"text": content.strip() if isinstance(content, str) else "", "tool_calls": calls if isinstance(calls, list) else []}
         return await self._call("brain", go)
+
+    async def chat_stream(self, messages: list[dict], tools: list[dict] | None = None,
+                          temperature: float | None = None) -> AsyncIterator[dict]:
+        """Stream Brain / LLM generation.
+        Yields:
+          {"delta": str}             - token delta
+          {"tool_calls": list[dict]} - tool calls emitted by LLM
+          {"done": True, "text": str}- final text when completed
+        """
+        ep = self.endpoint("brain")
+        model = self.cfg.get("models", {}).get("brain", self.s.ai_brain_model)
+        max_tok = int(self.cfg.get("max_tokens", 400))
+        temp = float(temperature if temperature is not None else self.cfg.get("temperature", getattr(self.s, "ai_temperature", 0.3)))
+        hdrs = self._auth_headers("brain")
+
+        # Fallback for RunPod /runsync or non-streaming paths:
+        if ep.path.endswith("/runsync"):
+            res = await self.chat(messages, tools=tools, temperature=temperature)
+            if res.get("tool_calls"):
+                yield {"tool_calls": res["tool_calls"]}
+            txt = res.get("text", "")
+            if txt:
+                yield {"delta": txt}
+            yield {"done": True, "text": txt}
+            return
+
+        body: dict = {
+            "model": model,
+            "messages": messages,
+            "temperature": temp,
+            "max_tokens": max_tok,
+            "stream": True,
+        }
+        if tools:
+            body["tools"] = tools
+
+        t0 = time.perf_counter()
+        accumulated_text: list[str] = []
+        accumulated_tool_calls: dict[int, dict] = {}
+
+        try:
+            async with self._sem:
+                async with self._http.stream("POST", ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout) as resp:
+                    if resp.status_code >= 400:
+                        err_content = await resp.aread()
+                        raise AiError("brain", "http_error", f"{resp.status_code}: {err_content.decode(errors='replace')[:160]}")
+
+                    content_type = resp.headers.get("content-type", "").lower()
+                    # If endpoint returned non-SSE (e.g. application/json fallback from a mock or older server):
+                    if "text/event-stream" not in content_type:
+                        raw_bytes = await resp.aread()
+                        try:
+                            j = json.loads(raw_bytes)
+                        except Exception:
+                            raise AiError("brain", "bad_response", "invalid JSON response") from None
+                        out = j.get("output", j) if isinstance(j, dict) else j
+                        if isinstance(out, list):
+                            out = out[0] if out else {}
+                        if isinstance(out, dict) and "choices" in out:
+                            msg = out["choices"][0].get("message", {}) if out["choices"] else {}
+                            content = msg.get("content") or ""
+                            calls = msg.get("tool_calls") or []
+                        elif isinstance(out, dict) and ("text" in out or "content" in out):
+                            content = out.get("text") or out.get("content") or ""
+                            calls = out.get("tool_calls", [])
+                        elif isinstance(out, str):
+                            content, calls = out, []
+                        else:
+                            content, calls = "", []
+                        if calls:
+                            yield {"tool_calls": calls}
+                        if content:
+                            yield {"delta": content}
+                        yield {"done": True, "text": content}
+                        m.AI_REQUESTS.labels("brain", "ok").inc()
+                        return
+
+                    # Process SSE text/event-stream
+                    async for line in resp.aiter_lines():
+                        line = line.strip()
+                        if not line or line.startswith(":"):
+                            continue
+                        if line.startswith("data:"):
+                            data_str = line[5:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+                            choices = chunk.get("choices")
+                            if not choices or not isinstance(choices, list):
+                                continue
+                            delta = choices[0].get("delta", {})
+                            if not isinstance(delta, dict):
+                                continue
+
+                            content = delta.get("content")
+                            if content:
+                                accumulated_text.append(content)
+                                yield {"delta": content}
+
+                            tool_deltas = delta.get("tool_calls")
+                            if tool_deltas and isinstance(tool_deltas, list):
+                                for td in tool_deltas:
+                                    idx = td.get("index", 0)
+                                    if idx not in accumulated_tool_calls:
+                                        accumulated_tool_calls[idx] = {
+                                            "id": td.get("id", ""),
+                                            "type": td.get("type", "function"),
+                                            "function": {
+                                                "name": (td.get("function") or {}).get("name", ""),
+                                                "arguments": (td.get("function") or {}).get("arguments", "")
+                                            }
+                                        }
+                                    else:
+                                        target_fn = accumulated_tool_calls[idx]["function"]
+                                        delta_fn = td.get("function") or {}
+                                        if delta_fn.get("name"):
+                                            target_fn["name"] += delta_fn["name"]
+                                        if delta_fn.get("arguments"):
+                                            target_fn["arguments"] += delta_fn["arguments"]
+
+            if accumulated_tool_calls:
+                sorted_calls = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls.keys())]
+                yield {"tool_calls": sorted_calls}
+
+            full_text = "".join(accumulated_text)
+            yield {"done": True, "text": full_text}
+            m.AI_REQUESTS.labels("brain", "ok").inc()
+        except asyncio.TimeoutError:
+            m.AI_REQUESTS.labels("brain", "timeout").inc()
+            raise AiTimeout("brain", "timeout") from None
+        except AiError:
+            m.AI_REQUESTS.labels("brain", "error").inc()
+            raise
+        except (httpx.HTTPError, OSError) as e:
+            m.AI_REQUESTS.labels("brain", "error").inc()
+            raise AiUnavailable("brain", "unreachable", type(e).__name__) from e
+        except RuntimeError as e:
+            m.AI_REQUESTS.labels("brain", "error").inc()
+            if "closed" in str(e).lower():
+                raise AiUnavailable("brain", "client_closed") from e
+            raise
+        finally:
+            m.AI_LATENCY.labels("brain").observe(time.perf_counter() - t0)
 
     # ------------------------------------------------------------------ TTS
     async def synthesize(self, text: str, language: str) -> tuple[bytes, int]:
