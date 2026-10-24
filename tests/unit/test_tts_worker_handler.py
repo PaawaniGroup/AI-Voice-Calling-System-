@@ -1,0 +1,38 @@
+"""The RunPod TTS worker source kept in deploy/tts_worker_runpod/: it must always compile, and, where numpy/scipy/soundfile are installed, its own
+no-GPU self-test (fake model) must pass. The worker's real dependencies (torch, chatterbox, runpod) are NOT needed and are not used here."""
+import importlib.util
+import py_compile
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+HANDLER = Path(__file__).resolve().parents[2] / "deploy" / "tts_worker_runpod" / "handler.py"
+
+
+def test_the_worker_source_compiles(tmp_path):
+    py_compile.compile(str(HANDLER), cfile=str(tmp_path / "h.pyc"), doraise=True)
+
+
+@pytest.mark.skipif(any(importlib.util.find_spec(m) is None for m in ("numpy", "scipy", "soundfile")),
+                    reason="numpy/scipy/soundfile are not installed in this environment (the service itself does not need them)")
+def test_the_worker_self_test_passes_without_a_gpu():
+    r = subprocess.run([sys.executable, str(HANDLER), "--self-test"], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-500:]
+    assert "checks passed" in r.stdout and "FAIL" not in r.stdout
+
+
+def test_the_workflow_can_only_push_the_v3_tag_and_never_runs_for_main():
+    import yaml
+    d = yaml.safe_load((HANDLER.parent / "build-image-v3-test.yml").read_text(encoding="utf-8"))
+    triggers = d.get("on", d.get(True))                      # PyYAML reads the key `on` as the boolean True
+    assert triggers["push"]["branches"] == ["tts-v3"] and "workflow_dispatch" in triggers
+    steps = d["jobs"]["build"]["steps"]
+    pushed = [s for s in steps if str(s.get("uses", "")).startswith("docker/build-push-action")]
+    assert len(pushed) == 1 and pushed[0]["with"]["push"] is True
+    assert pushed[0]["with"]["tags"].split() == ["ghcr.io/aitechteammme-dev/mme-tts-runpod:v3"]   # :latest and :v2 can never be overwritten
+
+
+def test_the_readme_warns_against_pushing_the_test_to_main():
+    assert "never push this" in (HANDLER.parent / "README.md").read_text(encoding="utf-8").lower()
