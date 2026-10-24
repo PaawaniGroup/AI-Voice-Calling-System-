@@ -47,6 +47,9 @@ BARGE_IN_MS = 200      # minimum continuous loud speech to interrupt assistant p
 MAX_UTTERANCE_MS = 6000 # 6s max utterance cap prevents huge buffering and latency spikes
 IDLE_POLL_S = 0.05     # tighter 50ms gap polling for fast silence accounting
 WORKER_STOP_S = 2.0    # max wait for the turn worker to honour cancellation when a media socket ends
+MERGE_WINDOW_S = 1.5   # new speech this soon after the last utterance, before any assistant audio: the same question, merged into one turn
+MERGE_MAX_AUDIO_S = 15.0   # a merged utterance never grows beyond this (STT time/cost); past it the older speech is dropped instead
+TURN_STOP_S = 1.0      # max wait for a cancelled turn to unwind before the worker moves on
 PLIVO_PLAY_CHUNK = 8000        # mu-law bytes per playAudio (1 s => ~10.7 KB base64, under Plivo's 16 KB guidance)
 PLIVO_MAX_PLAY_S = 50          # Plivo queues ~60 s of audio; never send more than this per utterance
 PLIVO_MAX_MESSAGE = 65536      # Plivo guidance: messages up to 64 KB
@@ -224,7 +227,10 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         "silence_ms": 0,
         "buf": bytearray(),
         "in_speech": False,
+        "last_audio_at": 0.0,   # monotonic time the last assistant audio was handed to the transport
     }
+    turn: dict = {"task": None, "pcm": b"", "end_at": 0.0, "audio": False, "n": 1}   # the turn being processed (if any)
+    merge: dict = {"pcm": None, "n": 0}   # speech of a cancelled attempt that the NEXT utterance continues
 
     def on_start(duration_s: float) -> None:
         now = time.monotonic()
@@ -238,53 +244,116 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             turn_trace.mark("t_first_frame_to_plivo")
         try:
             await io.play(audio, src, lang, uid, on_start)
+            st["last_audio_at"] = time.monotonic()
         finally:
             if isinstance(io, NativeIO):
                 st["playing"] = False
 
+    async def run_turn(pcm: bytes, t_speech_end: float, t_endpoint: float) -> None:
+        """ONE turn (STT -> Brain -> TTS clauses -> audio) as its own task, so a new utterance can cancel it. Cancelling it cancels the
+        in-flight STT/Brain/TTS requests (and their RunPod jobs) and frees the worker for the next utterance."""
+        t_turn = time.perf_counter()
+        first = True
+        trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
+        turn_trace.start(trace)  # this task has its own context: the trace belongs to this turn only
+        recorded = False
+        try:
+            async for chunk in rt.conversation.stream_turn(pcm, rate):
+                if rt.conversation.cancelled:
+                    break
+                if first and (chunk.timings_ms or chunk.heard or chunk.reply):
+                    chunk.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
+                    if not chunk.error:
+                        m.AI_TURN_SECONDS.observe(chunk.timings_ms["turn_ms"] / 1000)
+                    await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply, trace_id=trace.trace_id)
+                    recorded = True
+                    first = False
+                if chunk.error and chunk.error != "cancelled":
+                    m.AI_TURN_ERRORS.labels(chunk.error[:40]).inc()
+                    ai.note_error(rt, chunk.error)
+                    if not rt.conversation.cancelled:
+                        await io.error(chunk.error)
+                    break
+                if chunk.audio and not rt.conversation.cancelled:
+                    turn["audio"] = True
+                    st["uid"] += 1
+                    await play(chunk.audio, chunk.sample_rate, chunk.language, st["uid"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # defence in depth: a failed turn must not take the call down
+            log.exception("conversation worker error")
+            m.AI_TURN_ERRORS.labels("worker_exception").inc()
+            ai.note_error(rt, "worker_exception")
+        finally:
+            if recorded:
+                trace.mark("t_turn_end")
+                try:
+                    final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
+                    await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
+                except Exception:  # latency bookkeeping must never take the call down
+                    log.exception("could not store turn latency trace")
+
     async def worker() -> None:
         while True:
             pcm, t_speech_end, t_endpoint = await utterances.get()
-            t_turn = time.perf_counter()
-            first = True
-            trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
-            turn_trace.start(trace)  # the worker is one long-lived task: each turn simply replaces the previous trace
-            recorded = False
+            n = 1
+            if merge["pcm"] is not None:   # an earlier attempt at this question was cancelled: this speech continues it
+                pcm, n = merge["pcm"] + pcm, merge["n"] + 1
+                merge["pcm"] = None
+            turn.update(pcm=pcm, end_at=t_speech_end, audio=False, n=n)
+            task = asyncio.create_task(run_turn(pcm, t_speech_end, t_endpoint), name="ai-turn")
+            turn["task"] = task
             try:
-                async for chunk in rt.conversation.stream_turn(pcm, rate):
-                    if rt.conversation.cancelled:
-                        break
-                    if first and (chunk.timings_ms or chunk.heard or chunk.reply):
-                        chunk.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
-                        if not chunk.error:
-                            m.AI_TURN_SECONDS.observe(chunk.timings_ms["turn_ms"] / 1000)
-                        await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply, trace_id=trace.trace_id)
-                        recorded = True
-                        first = False
-                    if chunk.error and chunk.error != "cancelled":
-                        m.AI_TURN_ERRORS.labels(chunk.error[:40]).inc()
-                        ai.note_error(rt, chunk.error)
-                        if not rt.conversation.cancelled:
-                            await io.error(chunk.error)
-                        break
-                    if chunk.audio and not rt.conversation.cancelled:
-                        st["uid"] += 1
-                        await play(chunk.audio, chunk.sample_rate, chunk.language, st["uid"])
+                await asyncio.wait({task})   # a cancelled turn ends here normally; only OUR cancellation raises
             except asyncio.CancelledError:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
                 raise
-            except Exception:  # defence in depth: the worker must outlive any single failed turn
-                log.exception("conversation worker error")
-                m.AI_TURN_ERRORS.labels("worker_exception").inc()
-                ai.note_error(rt, "worker_exception")
-                continue
             finally:
-                if recorded:
-                    trace.mark("t_turn_end")
-                    try:
-                        final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
-                        await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
-                    except Exception:  # latency bookkeeping must never take the call down
-                        log.exception("could not store turn latency trace")
+                if turn["task"] is task:
+                    turn["task"] = None
+
+    async def cancel_turn(reason: str) -> bool:
+        """Stop the turn in progress (if any): its STT/Brain/TTS requests are cancelled and the worker is free for the next utterance."""
+        task = turn["task"]
+        if task is None or task.done():
+            return False
+        rt.conversation.cancel()
+        t0 = time.monotonic()
+        task.cancel()
+        _, pending = await asyncio.wait({task}, timeout=TURN_STOP_S)
+        if pending:
+            log.error("a cancelled turn did not stop within %.1fs; the worker moves on", TURN_STOP_S)
+        m.AI_TURNS_CANCELLED.labels(reason).inc()
+        act = getattr(ai, "activity", None)
+        if act is not None:
+            act.publish(rt.tenant_id, "ai.turn_cancelled", call_id=rt.call_id, session_id=rt.session_id,
+                        data={"reason": reason, "unwind_ms": round((time.monotonic() - t0) * 1000, 1),
+                              "since_last_audio_ms": round((time.monotonic() - st["last_audio_at"]) * 1000, 1) if st["last_audio_at"] else None})
+        return True
+
+    async def on_speech_start(now: float, speech_ms: int) -> None:
+        """The caller starts speaking while a turn is in progress and the assistant is NOT being interrupted over live playback:
+        - the assistant already produced audio for this turn: the caller talks over it (barge-in): stop the rest of the reply;
+        - no audio yet and the speech starts within MERGE_WINDOW_S of the last utterance: the same question continued: cancel the
+          attempt and let the next utterance be merged into it;
+        - no audio yet, later than that: a new question: it supersedes the unanswered one."""
+        task = turn["task"]
+        if task is None or task.done():
+            return
+        if turn["audio"]:
+            reason = "barge_in"
+            if st["playing"] and now < st["play_until"]:
+                await io.interrupt()
+                st["playing"], st["play_until"] = False, 0.0
+        else:
+            started = now - speech_ms / 1000
+            if started - turn["end_at"] <= MERGE_WINDOW_S and len(turn["pcm"]) <= MERGE_MAX_AUDIO_S * rate * 2:
+                merge["pcm"], merge["n"] = turn["pcm"], turn["n"]
+                reason = "merged"
+            else:
+                reason = "superseded"
+        await cancel_turn(reason)
 
     async def flush_if_due() -> None:
         if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000):
@@ -354,10 +423,10 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     st["silence_ms"] = 0
                     if st["speech_ms"] >= BARGE_IN_MS:
                         log.info("barge-in triggered: rms=%.1f >= %.1f for %dms", frame_rms, barge_threshold, st["speech_ms"])
-                        rt.conversation.cancel()
                         st["playing"] = False
                         st["play_until"] = 0.0
-                        await io.interrupt()
+                        await io.interrupt()                 # clear first: the caller stops hearing the assistant at once
+                        await cancel_turn("barge_in")        # then stop generating the rest of the reply and free the worker
                         st["in_speech"] = True
                         st["buf"] = bytearray(frame)
                 else:
@@ -371,6 +440,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     st["speech_ms"] += fm
                     st["silence_ms"] = 0
                     if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:
+                        if not st["in_speech"]:
+                            st["in_speech"] = True
+                            await on_speech_start(now, st["speech_ms"])
                         st["in_speech"] = True
                 else:
                     st["silence_ms"] += fm

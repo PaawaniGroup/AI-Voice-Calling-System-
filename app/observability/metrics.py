@@ -43,6 +43,8 @@ PLIVO_STREAMS_ACTIVE = Gauge("mme_tel_plivo_streams_active", "Open Plivo media s
 AI_TURN_SECONDS = Histogram("mme_tel_ai_turn_seconds", "End of caller speech -> reply audio ready (STT+RAG+Brain+TTS)", registry=REGISTRY,
                             buckets=(0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 13, 20, 30))
 AI_TURN_ERRORS = Counter("mme_tel_ai_turn_errors_total", "AI turns that produced no audio", ["code"], registry=REGISTRY)
+AI_TURNS_CANCELLED = Counter("mme_tel_ai_turns_cancelled_total", "Turns cancelled because the caller spoke again (barge_in, merged, superseded)",
+                             ["reason"], registry=REGISTRY)
 AI_RUNTIMES = Gauge("mme_tel_ai_runtimes", "AI conversations holding resources in this process", registry=REGISTRY)
 DRAINING = Gauge("mme_tel_draining", "1 while the service is draining for shutdown", registry=REGISTRY)
 RECOVERY = Counter("mme_tel_recovery_total", "Startup recovery actions", ["action"], registry=REGISTRY)

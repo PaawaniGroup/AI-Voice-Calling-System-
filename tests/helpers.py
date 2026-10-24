@@ -1,5 +1,6 @@
 """Test helpers: in-loop real HTTP/WebSocket server and mock model services (MOCKS: only ever used in tests)."""
 import asyncio
+import base64
 import contextlib
 import io
 import json
@@ -57,14 +58,47 @@ class MockModels:
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
         self.stt_delay = 0.0
+        self.brain_delay = 0.0
+        self.tts_delay = 0.0
+        self.cancelled: list[str] = []  # services whose in-flight request was cancelled (the client gave up)
+        self.jobs: dict[str, dict] = {}        # RunPod-style serverless jobs (POST /run -> GET /status/{id} -> POST /cancel/{id})
+        self.cancel_calls: list[str] = []      # service of each job the client explicitly cancelled with /cancel
         self.healthy = {"stt", "brain", "tts", "rag"}
         self.reply = "Namaste! BTech ke liye eligibility 12th mein 50% hai."
         self.tts_ms = 300
         self.fail: dict[str, int] = {}  # service name -> HTTP status to answer with (failure injection)
         self.bad: dict[str, bytes] = {}  # service name -> body returned with HTTP 200 (malformed-response injection)
 
+    def _runpod(self, request: httpx.Request, host_path: str) -> httpx.Response:
+        svc = request.url.host.split(".")[0]          # stt.test / brain.test / tts.test
+        now = asyncio.get_event_loop().time()
+        if host_path.endswith("/run") and request.method == "POST":
+            body = json.loads(request.content or b"{}")
+            self.calls.append((svc, {"auth": request.headers.get("authorization"), **body}))
+            jid = f"job-{len(self.jobs) + 1}"
+            self.jobs[jid] = {"svc": svc, "ready_at": now + getattr(self, f"{svc}_delay", 0.0), "cancelled": False}
+            return httpx.Response(200, json={"id": jid, "status": "IN_QUEUE"})
+        jid = host_path.rsplit("/", 1)[-1]
+        job = self.jobs.get(jid)
+        if job is None:
+            return httpx.Response(404)
+        if "/cancel/" in host_path:
+            job["cancelled"] = True
+            self.cancel_calls.append(job["svc"])
+            return httpx.Response(200, json={"id": jid, "status": "CANCELLED"})
+        if job["cancelled"]:
+            return httpx.Response(200, json={"id": jid, "status": "CANCELLED"})
+        if now < job["ready_at"]:
+            return httpx.Response(200, json={"id": jid, "status": "IN_PROGRESS"})
+        out = {"stt": {"transcription": "mujhe BTech ke baare mein batao", "language": "hi"},
+               "brain": [{"choices": [{"message": {"content": self.reply}}]}],
+               "tts": {"audio_base64": base64.b64encode(tone_wav(self.tts_ms)).decode(), "format": "wav"}}[job["svc"]]
+        return httpx.Response(200, json={"id": jid, "status": "COMPLETED", "delayTime": 5, "executionTime": 7, "output": out})
+
     async def handler(self, request: httpx.Request) -> httpx.Response:
         host_path = request.url.path
+        if host_path.startswith("/v2/") and (host_path.endswith("/run") or "/status/" in host_path or "/cancel/" in host_path):
+            return self._runpod(request, host_path)
         svc = {"/v1/audio/transcriptions": "stt", "/v1/chat/completions": "brain", "/v1/audio/speech": "tts", "/search": "rag"}.get(host_path)
         if host_path == "/health":
             name = request.url.host.split(".")[0]
@@ -77,8 +111,13 @@ class MockModels:
             return httpx.Response(self.fail[svc])
         if svc in self.bad:
             return httpx.Response(200, content=self.bad[svc], headers={"content-type": "application/json" if svc != "tts" else "audio/wav"})
+        if svc in ("stt", "brain", "tts") and getattr(self, f"{svc}_delay"):
+            try:
+                await asyncio.sleep(getattr(self, f"{svc}_delay"))
+            except asyncio.CancelledError:
+                self.cancelled.append(svc)
+                raise
         if svc == "stt":
-            await asyncio.sleep(self.stt_delay)
             return httpx.Response(200, json={"text": "mujhe BTech ke baare mein batao", "language": "hi"})
         if svc == "brain":
             return httpx.Response(200, json={"choices": [{"message": {"content": self.reply}}]})
