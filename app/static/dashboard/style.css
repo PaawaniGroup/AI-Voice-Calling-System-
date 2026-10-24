@@ -53,6 +53,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
   .lat-tts{color:#34d399;background:rgba(52,211,153,0.12);border-color:rgba(52,211,153,0.3)}
   .lat-total{color:#fbbf24;background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.3)}
 }
+.lat-v2v{color:#dc2626;background:rgba(220,38,38,0.08);border-color:rgba(220,38,38,0.25)}
+.lat-rp{font-weight:400;font-size:11px;opacity:.8}
+@media (prefers-color-scheme: dark){.lat-v2v{color:#f87171;background:rgba(248,113,113,0.12);border-color:rgba(248,113,113,0.3)}}
 .lat-val{font-family:ui-monospace,monospace;font-weight:700}
 .lat-arrow{color:var(--muted);font-size:11px}
 

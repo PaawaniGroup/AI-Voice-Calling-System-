@@ -12,6 +12,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
+from app.ai import turn_trace
 from app.ai.clients import AiError, ModelClients
 
 log = logging.getLogger("mme_telephony.ai.pipeline")
@@ -293,7 +294,9 @@ class Conversation:
         res_timings: dict = {}
         try:
             t = time.perf_counter()
+            turn_trace.mark("t_stt_sent")
             stt = await self.clients.transcribe(pcm, rate, self.language)
+            turn_trace.mark("t_stt_final")
             res_timings["stt"] = round((time.perf_counter() - t) * 1000, 1)
             raw_text = (stt.get("text") or "").strip()
             heard = deduplicate_repetitions(raw_text)
@@ -330,6 +333,7 @@ class Conversation:
             else:
                 chat_messages = self.messages
 
+            turn_trace.mark("t_llm_sent")
             out = await self.clients.chat(chat_messages, TOOL_SCHEMAS if self.tools else None)
             for call in out.get("tool_calls", [])[:2]:
                 name = (call.get("function") or {}).get("name")
@@ -346,6 +350,8 @@ class Conversation:
                 followup_messages = inject_turn_hint(self.messages, mode=turn_mode, placement=self.hint_placement) if self.script_enforcement else self.messages
                 out = await self.clients.chat(followup_messages)
             res_timings["brain"] = round((time.perf_counter() - t) * 1000, 1)
+            # Legacy path is NOT streaming: the first token is only known when the whole reply has arrived.
+            turn_trace.mark("t_llm_first_token", overwrite=True)
             reply = out.get("text", "")
             if not reply:
                 del self.messages[mark:]
@@ -364,6 +370,7 @@ class Conversation:
             sentences = split_sentences(reply)
             if not sentences:
                 sentences = [reply]
+            turn_trace.mark("t_llm_first_clause")
 
             t_tts_total = 0.0
             clauses_violated = 0
@@ -384,7 +391,9 @@ class Conversation:
                     spoken_clause = sentence
 
                 t_sent = time.perf_counter()
+                turn_trace.mark("t_tts_sent")
                 audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.script_enforcement else lang)
+                turn_trace.mark("t_tts_first_chunk")
                 sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
                 t_tts_total += sent_tts_ms
 

@@ -26,7 +26,7 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.ai import codec
+from app.ai import codec, turn_trace
 from app.ai.clients import pcm16_to_wav, rms
 from app.core.errors import ApiError
 from app.core.ids import utcnow
@@ -199,6 +199,7 @@ class PlivoIO:
         for part in codec.chunks(mu, PLIVO_PLAY_CHUNK):
             await self.ws.send_text(json.dumps({"event": "playAudio", "media": {
                 "contentType": "audio/x-mulaw", "sampleRate": codec.MULAW_RATE, "payload": base64.b64encode(part).decode()}}))
+            turn_trace.mark("t_first_frame_to_plivo")  # first write wins
         name = f"utt-{uid}"
         self.sent_checkpoints.append(name)
         await self.ws.send_text(json.dumps({"event": "checkpoint", "streamId": self.stream_id, "name": name}))
@@ -211,8 +212,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     frames counts as silence, so an utterance still ends if the transport stops sending when the caller is quiet.
     """
     local: list[asyncio.Task] = []
-    utterances: asyncio.Queue[bytes] = asyncio.Queue(maxsize=3)
+    utterances: asyncio.Queue[tuple] = asyncio.Queue(maxsize=3)  # (pcm, t_speech_end, t_endpoint) on the monotonic clock
     st = {
+        "last_loud_at": 0.0,
         "playing": False,
         "play_until": 0.0,
         "play_started_at": 0.0,
@@ -231,6 +233,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         st["play_started_at"] = now
 
     async def play(audio: bytes, src: int, lang: str, uid: int) -> None:
+        if not isinstance(io, PlivoIO):  # PlivoIO marks the exact moment its first frame is written to the socket
+            turn_trace.mark("t_first_frame_to_plivo")
         try:
             await io.play(audio, src, lang, uid, on_start)
         finally:
@@ -239,9 +243,12 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
 
     async def worker() -> None:
         while True:
-            pcm = await utterances.get()
+            pcm, t_speech_end, t_endpoint = await utterances.get()
             t_turn = time.perf_counter()
             first = True
+            trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
+            turn_trace.start(trace)  # the worker is one long-lived task: each turn simply replaces the previous trace
+            recorded = False
             try:
                 async for chunk in rt.conversation.stream_turn(pcm, rate):
                     if rt.conversation.cancelled:
@@ -250,7 +257,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                         chunk.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
                         if not chunk.error:
                             m.AI_TURN_SECONDS.observe(chunk.timings_ms["turn_ms"] / 1000)
-                        await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply)
+                        await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply, trace_id=trace.trace_id)
+                        recorded = True
                         first = False
                     if chunk.error and chunk.error != "cancelled":
                         m.AI_TURN_ERRORS.labels(chunk.error[:40]).inc()
@@ -268,15 +276,24 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 m.AI_TURN_ERRORS.labels("worker_exception").inc()
                 ai.note_error(rt, "worker_exception")
                 continue
+            finally:
+                if recorded:
+                    trace.mark("t_turn_end")
+                    try:
+                        await ai.finalize_turn(rt, trace.trace_id, trace.to_ms())
+                    except Exception:  # latency bookkeeping must never take the call down
+                        log.exception("could not store turn latency trace")
 
     async def flush_if_due() -> None:
         if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000):
             utt = bytes(st["buf"])
+            t_endpoint = time.monotonic()
+            t_speech_end = st["last_loud_at"] or t_endpoint
             st.update(buf=bytearray(), in_speech=False, speech_ms=0, silence_ms=0)
             if utterances.full():  # backpressure: drop the oldest queued utterance
                 utterances.get_nowait()
                 await io.error("inbound_overflow")
-            utterances.put_nowait(utt)
+            utterances.put_nowait((utt, t_speech_end, t_endpoint))
 
     async def next_item():
         if hasattr(io, "next_item"):
@@ -330,6 +347,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 # Inbound audio is speaker echo + line noise, UNLESS caller deliberately talks over.
                 barge_threshold = max(vad_rms * BARGE_IN_RMS_MULTIPLIER, BARGE_IN_VAD_RMS)
                 if frame_rms >= barge_threshold:
+                    st["last_loud_at"] = now
                     st["speech_ms"] += fm
                     st["silence_ms"] = 0
                     if st["speech_ms"] >= BARGE_IN_MS:
@@ -347,6 +365,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 # Assistant is quiet, listening to the caller.
                 loud = frame_rms >= vad_rms
                 if loud:
+                    st["last_loud_at"] = now
                     st["speech_ms"] += fm
                     st["silence_ms"] = 0
                     if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:

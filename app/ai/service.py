@@ -311,7 +311,23 @@ class AiService:
         if r.modified_count:
             rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.reconnect_s, "media_reconnect_timeout"))
 
-    async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None) -> None:
+    async def finalize_turn(self, rt: Runtime, trace_id: str, trace_ms: dict) -> None:
+        """Second write of a turn: the complete latency trace (known only after the audio was sent) is merged into the turn
+        record created by `record_turn`, found by `trace_id`. Also refreshes the session-level `timings_ms` and the live feed."""
+        nums = {k: v for k, v in trace_ms.items() if isinstance(v, (int, float))}
+        if not nums:
+            return
+        await self.db["ai_sessions"].update_one(
+            {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
+            {"$set": {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
+                      **{f"timings_ms.{k}": v for k, v in nums.items()}}},
+            array_filters=[{"e.trace_id": trace_id}])
+        if self.activity is not None:
+            self.activity.publish(rt.tenant_id, "ai.turn_latency", call_id=rt.call_id, session_id=rt.session_id,
+                                  data={"trace_id": trace_id, **nums})
+
+    async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None,
+                          trace_id: str | None = None) -> None:
         now = utcnow()
         turn_num = len(rt.conversation.turns)
         entry = {
@@ -321,6 +337,8 @@ class AiService:
             "timings_ms": {k: v for k, v in timings.items() if isinstance(v, (int, float))},
             "ts": now.isoformat()
         }
+        if trace_id:
+            entry["trace_id"] = trace_id
         upd: dict = {
             "$set": {
                 "last_turn_at": now,

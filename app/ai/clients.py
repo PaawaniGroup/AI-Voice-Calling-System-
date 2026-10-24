@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.ai import tts_frontend
+from app.ai import tts_frontend, turn_trace
 from app.core.errors import Unprocessable
 from app.observability import metrics as m
 from config.settings import Settings
@@ -158,6 +158,7 @@ class ModelClients:
             raise AiError(service, "runpod_error", f"status={j.get('status')} {str(j.get('error', ''))[:160]}")
         if isinstance(j, dict) and j.get("error"):
             raise AiError(service, "runpod_error", str(j["error"])[:200])
+        turn_trace.note_runpod_response(service, j)  # delayTime (queue/cold start) vs executionTime (compute)
         return j
 
     def _tts_reference_b64(self) -> str | None:

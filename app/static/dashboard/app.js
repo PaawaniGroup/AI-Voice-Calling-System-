@@ -23,15 +23,31 @@ const t = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 const dur = (s) => (s == null ? '—' : s >= 60 ? Math.floor(s / 60) + 'm ' + Math.round(s % 60) + 's' : Math.round(s) + 's');
 const isRole = (r) => me && (r === 'viewer' || (r === 'operator' && (me.operator || me.admin)) || (r === 'admin' && me.admin));
 
-function latencyStrip(timings) {
-  if (!timings || (timings.stt_ms == null && timings.brain_ms == null && timings.tts_ms == null && timings.turn_ms == null)) return null;
+// Accepts the legacy flat keys (stt_ms ...) and the stored `timings_ms` of a turn (stt, brain, tts, turn_ms, voice_to_voice, <svc>_delay_ms ...).
+function normTim(x) {
+  if (!x) return null;
+  const tm = x.timings_ms || x.timings || x;
+  const pick = (...ks) => { for (const k of ks) if (tm[k] != null) return tm[k]; return null; };
+  return { stt_ms: pick('stt_ms', 'stt'), brain_ms: pick('brain_ms', 'brain'), tts_ms: pick('tts_ms', 'tts'), turn_ms: pick('turn_ms'),
+    voice_to_voice: pick('voice_to_voice'), stt_delay_ms: pick('stt_delay_ms'), stt_exec_ms: pick('stt_exec_ms'),
+    brain_delay_ms: pick('brain_delay_ms'), brain_exec_ms: pick('brain_exec_ms'), tts_delay_ms: pick('tts_delay_ms'), tts_exec_ms: pick('tts_exec_ms') };
+}
+
+function latencyStrip(raw) {
+  const timings = normTim(raw);
+  if (!timings || (timings.stt_ms == null && timings.brain_ms == null && timings.tts_ms == null && timings.turn_ms == null && timings.voice_to_voice == null)) return null;
   const f = (n) => (n != null ? Math.round(n) + ' ms' : '—');
+  const rp = (svc) => (timings[svc + '_delay_ms'] != null || timings[svc + '_exec_ms'] != null)
+    ? h('span', { class: 'lat-rp', title: 'RunPod ' + svc.toUpperCase() + ': delayTime (queue + cold start) / executionTime (compute)' },
+      ' (q ' + f(timings[svc + '_delay_ms']) + ' / run ' + f(timings[svc + '_exec_ms']) + ')') : null;
   return h('div', { class: 'latency-strip' },
-    h('span', { class: 'lat-badge lat-stt', title: 'Whisper STT processing latency' }, '🎙️ STT ', h('span', { class: 'lat-val' }, f(timings.stt_ms))),
+    timings.voice_to_voice != null ? h('span', { class: 'lat-badge lat-v2v', title: 'Voice-to-voice: caller stopped speaking -> first audio frame sent to Plivo' }, '🗣️→🔊 ', h('span', { class: 'lat-val' }, f(timings.voice_to_voice))) : null,
+    timings.voice_to_voice != null ? h('span', { class: 'lat-arrow' }, '|') : null,
+    h('span', { class: 'lat-badge lat-stt', title: 'Whisper STT processing latency' }, '🎙️ STT ', h('span', { class: 'lat-val' }, f(timings.stt_ms)), rp('stt')),
     h('span', { class: 'lat-arrow' }, '→'),
-    h('span', { class: 'lat-badge lat-brain', title: 'Qwen Brain / LLM generation latency' }, '🧠 Brain ', h('span', { class: 'lat-val' }, f(timings.brain_ms))),
+    h('span', { class: 'lat-badge lat-brain', title: 'Qwen Brain / LLM generation latency' }, '🧠 Brain ', h('span', { class: 'lat-val' }, f(timings.brain_ms)), rp('brain')),
     h('span', { class: 'lat-arrow' }, '→'),
-    h('span', { class: 'lat-badge lat-tts', title: 'Chatterbox TTS synthesis latency' }, '🔊 TTS ', h('span', { class: 'lat-val' }, f(timings.tts_ms))),
+    h('span', { class: 'lat-badge lat-tts', title: 'Chatterbox TTS synthesis latency' }, '🔊 TTS ', h('span', { class: 'lat-val' }, f(timings.tts_ms)), rp('tts')),
     h('span', { class: 'lat-arrow' }, '='),
     h('span', { class: 'lat-badge lat-total', title: 'Total end-to-end turn turnaround latency' }, '⚡ Turn ', h('span', { class: 'lat-val' }, f(timings.turn_ms)))
   );
@@ -46,7 +62,7 @@ function renderTranscript(transcript, lastExchange, isLive = false) {
   }
   return h('div', { class: 'transcript-card' }, turns.map((ex, idx) => {
     const turnNum = ex.turn != null ? ex.turn : idx + 1;
-    const tim = ex.timings || { stt_ms: ex.stt_ms, brain_ms: ex.brain_ms, tts_ms: ex.tts_ms, turn_ms: ex.turn_ms };
+    const tim = normTim(ex);
     return h('div', { class: 'exchange-turn' },
       h('div', { class: 'exchange-header' },
         h('span', { class: 'mono' }, `Turn #${turnNum}${ex.at ? ' · ' + t(ex.at) : ''}`),
@@ -288,7 +304,7 @@ async function ops(main) {
   function feedDetail(e) {
     if (e.kind === 'ai.turn' && e.data) {
       const d = e.data;
-      const tim = { stt_ms: d.stt_ms, brain_ms: d.brain_ms, tts_ms: d.tts_ms, turn_ms: d.turn_ms };
+      const tim = normTim(d);
       return h('div', { style: 'display:flex; flex-direction:column; gap:4px;' },
         h('div', {},
           h('b', {}, `Turn ${d.turn != null ? d.turn : ''}: `),
@@ -296,6 +312,9 @@ async function ops(main) {
         ),
         latencyStrip(tim)
       );
+    }
+    if (e.kind === 'ai.turn_latency' && e.data) {
+      return latencyStrip(e.data) || h('span', { class: 'muted' }, compact(e.data));
     }
     return h('span', { class: 'muted' }, compact(e.data));
   }
