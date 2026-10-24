@@ -1,0 +1,4194 @@
+{
+ "rows": [
+  {
+   "flag": false,
+   "id": "u001",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2186.4,
+   "reply_chars": 236,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 22
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u002",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2424.2,
+   "reply_chars": 134,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u003",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1529.2,
+   "reply_chars": 273,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 21
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u004",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 2027.5,
+   "reply_chars": 142,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u005",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1723.9,
+   "reply_chars": 111,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 11
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u006",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1893.8,
+   "reply_chars": 74,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u007",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1489.6,
+   "reply_chars": 141,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 15
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u008",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1572.1,
+   "reply_chars": 106,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u009",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1979.6,
+   "reply_chars": 253,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 18
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u010",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2498.6,
+   "reply_chars": 142,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    69.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u011",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1934.8,
+   "reply_chars": 328,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 18
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u012",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1887.6,
+   "reply_chars": 352,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 26
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u013",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2416.0,
+   "reply_chars": 125,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u014",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2283.4,
+   "reply_chars": 119,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    59.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u015",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2029.4,
+   "reply_chars": 126,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u016",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1879.0,
+   "reply_chars": 99,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u017",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2117.5,
+   "reply_chars": 132,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u018",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2078.9,
+   "reply_chars": 132,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u019",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2473.6,
+   "reply_chars": 127,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    58.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u020",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1909.6,
+   "reply_chars": 95,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u021",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2017.0,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u022",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2071.5,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u023",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1522.3,
+   "reply_chars": 148,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 16
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u024",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 2449.9,
+   "reply_chars": 129,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u025",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1409.3,
+   "reply_chars": 190,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 16
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u026",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2454.8,
+   "reply_chars": 129,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u027",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1414.4,
+   "reply_chars": 166,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 13
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u028",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1437.3,
+   "reply_chars": 182,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    54.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u029",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1689.5,
+   "reply_chars": 274,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 21
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u030",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2038.3,
+   "reply_chars": 140,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u031",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1960.3,
+   "reply_chars": 145,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u032",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1877.0,
+   "reply_chars": 207,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 14
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u033",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1567.3,
+   "reply_chars": 173,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 15
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u034",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2080.4,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u035",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2056.1,
+   "reply_chars": 133,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u036",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1569.2,
+   "reply_chars": 207,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 20
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u037",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1893.2,
+   "reply_chars": 243,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 30
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u038",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1918.1,
+   "reply_chars": 133,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u039",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1927.9,
+   "reply_chars": 258,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 28
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u040",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1648.4,
+   "reply_chars": 242,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 31
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u041",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1480.0,
+   "reply_chars": 137,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 16
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u042",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2007.6,
+   "reply_chars": 122,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u043",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1441.5,
+   "reply_chars": 129,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 15
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u044",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1421.8,
+   "reply_chars": 163,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u045",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1402.3,
+   "reply_chars": 191,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 16
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u046",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1978.2,
+   "reply_chars": 134,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    65.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u047",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1974.6,
+   "reply_chars": 294,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 24
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u048",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1955.9,
+   "reply_chars": 411,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 37
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u049",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1393.8,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 13
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u050",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2037.4,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u051",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1418.2,
+   "reply_chars": 175,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 15
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u052",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1404.1,
+   "reply_chars": 195,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 25
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u053",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1990.2,
+   "reply_chars": 205,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 25
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u054",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1997.0,
+   "reply_chars": 127,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u055",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1528.0,
+   "reply_chars": 197,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 24
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u056",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 2229.7,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u057",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1589.5,
+   "reply_chars": 141,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 17
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u058",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2049.3,
+   "reply_chars": 104,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u059",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1396.3,
+   "reply_chars": 155,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 16
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u060",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1131.6,
+   "reply_chars": 74,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u061",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1451.6,
+   "reply_chars": 95,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 11
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u062",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1388.6,
+   "reply_chars": 75,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u063",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1468.7,
+   "reply_chars": 76,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u064",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1039.6,
+   "reply_chars": 102,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u065",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1907.3,
+   "reply_chars": 75,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u066",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1621.8,
+   "reply_chars": 75,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u067",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1576.0,
+   "reply_chars": 76,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u068",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1276.3,
+   "reply_chars": 80,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u069",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2135.1,
+   "reply_chars": 128,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u070",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1986.1,
+   "reply_chars": 133,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u071",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1406.6,
+   "reply_chars": 118,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 9
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u072",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1089.3,
+   "reply_chars": 95,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u073",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1879.4,
+   "reply_chars": 237,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 27
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u074",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2224.9,
+   "reply_chars": 131,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u075",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1559.7,
+   "reply_chars": 246,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 30
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u076",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1453.2,
+   "reply_chars": 193,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 18
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u077",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1589.1,
+   "reply_chars": 215,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 13
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u078",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2437.5,
+   "reply_chars": 137,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u079",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2067.5,
+   "reply_chars": 325,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 29
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u080",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1918.6,
+   "reply_chars": 348,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u081",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1884.9,
+   "reply_chars": 124,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "roman_hindi_word": 2
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u082",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2541.3,
+   "reply_chars": 127,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    59.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u083",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1883.6,
+   "reply_chars": 365,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 29
+   },
+   "brain_delay_ms": [
+    54.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u084",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 2008.9,
+   "reply_chars": 302,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u085",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2003.0,
+   "reply_chars": 108,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u086",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2151.6,
+   "reply_chars": 130,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u087",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1461.0,
+   "reply_chars": 270,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 20
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u088",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1730.9,
+   "reply_chars": 231,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 19
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u089",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1053.7,
+   "reply_chars": 50,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 5
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u090",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1658.8,
+   "reply_chars": 60,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u091",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1731.7,
+   "reply_chars": 209,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 15
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u092",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1470.9,
+   "reply_chars": 52,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 5
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u093",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1431.6,
+   "reply_chars": 95,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 11
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u094",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1599.4,
+   "reply_chars": 45,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u095",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1404.3,
+   "reply_chars": 75,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 10
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u096",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1399.8,
+   "reply_chars": 99,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 12
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u097",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1455.4,
+   "reply_chars": 154,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 16
+   },
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u098",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2018.0,
+   "reply_chars": 139,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u099",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1899.9,
+   "reply_chars": 254,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 20
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": false,
+   "id": "u100",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1864.7,
+   "reply_chars": 293,
+   "brain_calls": 1,
+   "first_ok": null,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": null,
+   "final_ok": false,
+   "final_kinds": {
+    "no_devanagari_in_hi_mode": 1,
+    "roman_hindi_word": 27
+   },
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u001",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2510.4,
+   "reply_chars": 121,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u002",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2146.9,
+   "reply_chars": 108,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u003",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2085.3,
+   "reply_chars": 142,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u004",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1437.8,
+   "reply_chars": 121,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u005",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1760.5,
+   "reply_chars": 48,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u006",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1547.7,
+   "reply_chars": 63,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u007",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1615.1,
+   "reply_chars": 80,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    58.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u008",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1616.1,
+   "reply_chars": 63,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u009",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2496.6,
+   "reply_chars": 119,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    51.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u010",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1689.2,
+   "reply_chars": 102,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u011",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1713.2,
+   "reply_chars": 100,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u012",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1441.2,
+   "reply_chars": 91,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u013",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1949.2,
+   "reply_chars": 103,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u014",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2039.7,
+   "reply_chars": 89,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u015",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1575.3,
+   "reply_chars": 89,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u016",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1031.6,
+   "reply_chars": 38,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u017",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1393.1,
+   "reply_chars": 76,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u018",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1918.6,
+   "reply_chars": 108,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u019",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1620.7,
+   "reply_chars": 77,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    62.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u020",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1289.3,
+   "reply_chars": 106,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u021",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1757.2,
+   "reply_chars": 81,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u022",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 3038.6,
+   "reply_chars": 125,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u023",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2073.0,
+   "reply_chars": 99,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u024",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1451.0,
+   "reply_chars": 116,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u025",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2148.9,
+   "reply_chars": 140,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u026",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1993.6,
+   "reply_chars": 124,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u027",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2244.3,
+   "reply_chars": 113,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u028",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1431.6,
+   "reply_chars": 140,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u029",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2246.3,
+   "reply_chars": 112,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u030",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2075.9,
+   "reply_chars": 108,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    65.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u031",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2173.1,
+   "reply_chars": 125,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u032",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1467.8,
+   "reply_chars": 106,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u033",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2124.3,
+   "reply_chars": 132,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u034",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1926.0,
+   "reply_chars": 123,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    52.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u035",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2017.9,
+   "reply_chars": 101,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u036",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1641.8,
+   "reply_chars": 93,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u037",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2150.7,
+   "reply_chars": 118,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u038",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2161.3,
+   "reply_chars": 116,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u039",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1926.7,
+   "reply_chars": 121,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u040",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1114.2,
+   "reply_chars": 104,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u041",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1670.3,
+   "reply_chars": 94,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u042",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2009.6,
+   "reply_chars": 113,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u043",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1753.4,
+   "reply_chars": 81,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u044",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1303.8,
+   "reply_chars": 114,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u045",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2067.0,
+   "reply_chars": 139,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u046",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1659.2,
+   "reply_chars": 111,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u047",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1986.1,
+   "reply_chars": 126,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u048",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 2094.8,
+   "reply_chars": 127,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u049",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1879.6,
+   "reply_chars": 79,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u050",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1440.5,
+   "reply_chars": 66,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u051",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2426.7,
+   "reply_chars": 133,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u052",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1049.7,
+   "reply_chars": 71,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u053",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2516.5,
+   "reply_chars": 121,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u054",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2030.0,
+   "reply_chars": 100,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u055",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1970.0,
+   "reply_chars": 86,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u056",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1077.7,
+   "reply_chars": 88,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u057",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2086.6,
+   "reply_chars": 73,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u058",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1591.9,
+   "reply_chars": 73,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    51.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u059",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1552.2,
+   "reply_chars": 72,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u060",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1641.9,
+   "reply_chars": 87,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u061",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1920.5,
+   "reply_chars": 70,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u062",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1729.8,
+   "reply_chars": 64,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u063",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1445.5,
+   "reply_chars": 65,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u064",
+   "style": "english",
+   "error": null,
+   "mode": "hi",
+   "ms": 1473.1,
+   "reply_chars": 61,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u065",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1927.3,
+   "reply_chars": 112,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u066",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2055.4,
+   "reply_chars": 94,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u067",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2005.2,
+   "reply_chars": 102,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u068",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1083.3,
+   "reply_chars": 50,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u069",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1896.4,
+   "reply_chars": 111,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u070",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1874.5,
+   "reply_chars": 111,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u071",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2094.7,
+   "reply_chars": 77,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u072",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1188.6,
+   "reply_chars": 31,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u073",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1959.5,
+   "reply_chars": 94,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u074",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1946.2,
+   "reply_chars": 106,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u075",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1488.6,
+   "reply_chars": 84,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u076",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1489.1,
+   "reply_chars": 81,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u077",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1999.6,
+   "reply_chars": 151,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    51.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u078",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2039.6,
+   "reply_chars": 153,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u079",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1932.0,
+   "reply_chars": 112,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u080",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1146.2,
+   "reply_chars": 121,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u081",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2078.5,
+   "reply_chars": 114,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    71.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u082",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2076.1,
+   "reply_chars": 137,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u083",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2070.0,
+   "reply_chars": 129,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u084",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1189.9,
+   "reply_chars": 107,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u085",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1899.5,
+   "reply_chars": 76,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u086",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1926.0,
+   "reply_chars": 99,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u087",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2021.2,
+   "reply_chars": 131,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u088",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1414.7,
+   "reply_chars": 131,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u089",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1433.7,
+   "reply_chars": 59,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u090",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1432.6,
+   "reply_chars": 62,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u091",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2116.8,
+   "reply_chars": 90,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u092",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1122.3,
+   "reply_chars": 54,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u093",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 1631.3,
+   "reply_chars": 57,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u094",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 1688.2,
+   "reply_chars": 57,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u095",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 1497.1,
+   "reply_chars": 61,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u096",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1149.2,
+   "reply_chars": 64,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u097",
+   "style": "roman",
+   "error": null,
+   "mode": "hi",
+   "ms": 2199.2,
+   "reply_chars": 117,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u098",
+   "style": "devanagari",
+   "error": null,
+   "mode": "hi",
+   "ms": 2161.5,
+   "reply_chars": 107,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u099",
+   "style": "mixed",
+   "error": null,
+   "mode": "hi",
+   "ms": 2148.3,
+   "reply_chars": 140,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    50.0
+   ]
+  },
+  {
+   "flag": true,
+   "id": "u100",
+   "style": "english",
+   "error": null,
+   "mode": "en",
+   "ms": 1275.9,
+   "reply_chars": 69,
+   "brain_calls": 1,
+   "first_ok": true,
+   "retried": false,
+   "retry_ok": null,
+   "retry_ms": null,
+   "first_kinds": {},
+   "final_ok": true,
+   "final_kinds": {},
+   "brain_delay_ms": [
+    49.0
+   ]
+  }
+ ],
+ "cost": {
+  "per_service": {
+   "stt": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "brain": {
+    "job_s": 226.01,
+    "idle_s": 0.52,
+    "tail_s": 60.0,
+    "usd": 0.13925
+   },
+   "tts": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   }
+  },
+  "usd_estimated_total": 0.13925,
+  "budget_usd": 0.44,
+  "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+ },
+ "halted": null
+}
