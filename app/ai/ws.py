@@ -46,6 +46,7 @@ MIN_SPEECH_MS = 200    # minimum speech gate before speech accumulation begins
 BARGE_IN_MS = 200      # minimum continuous loud speech to interrupt assistant playback (prevents self-breaks)
 MAX_UTTERANCE_MS = 6000 # 6s max utterance cap prevents huge buffering and latency spikes
 IDLE_POLL_S = 0.05     # tighter 50ms gap polling for fast silence accounting
+WORKER_STOP_S = 2.0    # max wait for the turn worker to honour cancellation when a media socket ends
 PLIVO_PLAY_CHUNK = 8000        # mu-law bytes per playAudio (1 s => ~10.7 KB base64, under Plivo's 16 KB guidance)
 PLIVO_MAX_PLAY_S = 50          # Plivo queues ~60 s of audio; never send more than this per utterance
 PLIVO_MAX_MESSAGE = 65536      # Plivo guidance: messages up to 64 KB
@@ -379,9 +380,16 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     st["buf"] += frame
                     await flush_if_due()
     finally:
-        for tk in local:
-            tk.cancel()
-        await asyncio.gather(*local, return_exceptions=True)
+        # Bounded: a worker that does not honour cancellation must never keep the socket handler (and the call) alive.
+        pending = set(local)
+        for wait_s in (WORKER_STOP_S, WORKER_STOP_S / 2):
+            for tk in pending:
+                tk.cancel()
+            _, pending = await asyncio.wait(pending, timeout=wait_s)
+            if not pending:
+                break
+        if pending:
+            log.error("conversation worker did not stop after cancellation; abandoning it so the socket handler can end")
 
 
 # ---------------------------------------------------------------------------------- native protocol

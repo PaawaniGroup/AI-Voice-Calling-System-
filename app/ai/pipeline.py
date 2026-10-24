@@ -440,7 +440,7 @@ class Conversation:
                      turn_mode, first_gen_passed, clauses_violated, list(set(found_roman_tokens)))
         except asyncio.CancelledError:
             del self.messages[mark:]
-            yield TurnChunk(error="cancelled", is_last=True)
+            raise  # task cancellation must propagate: swallowing it left the media worker alive and hung the socket handler on hangup
         except AiError as e:
             del self.messages[mark:]
             yield TurnChunk(error=f"{e.service}_{e.kind}", is_last=True)
