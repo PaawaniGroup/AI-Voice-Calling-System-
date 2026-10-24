@@ -1,0 +1,48 @@
+{
+  "started_at": "2026-10-24T09:20:12.700610+00:00",
+  "endpoint": "hu8qhrvlxbv314",
+  "model_served": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+  "max_tokens": 60,
+  "prompt": "app system prompt + one short caller line (text not stored)",
+  "results": [
+    {
+      "route": "runsync",
+      "http": 200,
+      "ok": false,
+      "ttft_ms": null,
+      "total_ms": 90632.7,
+      "note": "whole reply arrives at once: time to first content == total",
+      "delay_ms": null,
+      "exec_ms": null,
+      "completion_tokens": null,
+      "prompt_tokens": null,
+      "request_id": "sync-f0a2c2ac-a649-4e2d-875f-48b1cc1f1289-e1"
+    }
+  ],
+  "halted": "budget cap $0.05 reached (estimated $0.0440 spent + idle tails + cold-start reserve)",
+  "cost": {
+    "per_service": {
+      "stt": {
+        "job_s": 0.0,
+        "idle_s": 0.0,
+        "tail_s": 0.0,
+        "usd": 0.0
+      },
+      "brain": {
+        "job_s": 90.63,
+        "idle_s": 0.0,
+        "tail_s": 60.0,
+        "usd": 0.07321
+      },
+      "tts": {
+        "job_s": 0.0,
+        "idle_s": 0.0,
+        "tail_s": 0.0,
+        "usd": 0.0
+      }
+    },
+    "usd_estimated_total": 0.07321,
+    "budget_usd": 0.05,
+    "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+  }
+}
