@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.observability.activity import strip_words
+
 PRE_ANSWER = {"queued", "initiating", "ringing"}
 CONNECTED = {"answered", "bridged", "transferring"}
 BAD_END = {"failed", "busy", "no_answer", "cancelled"}
@@ -111,7 +113,7 @@ def flow_stages(call: dict, session: dict | None = None, ai: dict | None = None)
         "overall": overall,
         "state": state,
         "stages": stages,
-        "ai_timings": (ai or {}).get("timings_ms", {}),
-        "last_exchange": (ai or {}).get("last_exchange"),
-        "transcript": (ai or {}).get("transcript", [])
+        "ai_timings": strip_words((ai or {}).get("timings_ms", {})),
+        "last_exchange": strip_words((ai or {}).get("last_exchange")),   # timings only: no words live
+        "transcript": strip_words((ai or {}).get("transcript", []))
     }

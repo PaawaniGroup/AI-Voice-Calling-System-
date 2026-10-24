@@ -23,6 +23,7 @@ from app.ai.pipeline import Conversation
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
 from app.observability import metrics as m
+from app.observability.activity import strip_words
 from config.settings import Settings
 
 log = logging.getLogger("mme_telephony.ai")
@@ -343,7 +344,7 @@ class AiService:
             "$set": {
                 "last_turn_at": now,
                 "last_exchange": entry,
-                **{f"timings_ms.{k}": v for k, v in timings.items()}
+                **{f"timings_ms.{k}": v for k, v in timings.items() if isinstance(v, (int, float))}
             },
             "$push": {
                 "transcript": entry
@@ -356,8 +357,6 @@ class AiService:
             self.activity.publish(rt.tenant_id, "ai.turn", call_id=rt.call_id, session_id=rt.session_id,
                                   data={
                                       "turn": turn_num,
-                                      "heard": heard or "",
-                                      "reply": reply or "",
                                       "stt_ms": timings.get("stt"),
                                       "brain_ms": timings.get("brain"),
                                       "tts_ms": timings.get("tts"),
@@ -427,8 +426,8 @@ class AiService:
         out: dict[str, Any] = {"session_id": session_id, "state": ai["state"] if ai else "not_started",
                                "language": ai["language"] if ai else None, "turns": ai["turns"] if ai else 0,
                                "timings_ms": ai.get("timings_ms") if ai else {},
-                               "last_exchange": ai.get("last_exchange") if ai else None,
-                               "transcript": ai.get("transcript", []) if ai else [],
+                               "last_exchange": strip_words(ai.get("last_exchange")) if ai else None,   # timings only: no words live
+                               "transcript": strip_words(ai.get("transcript", [])) if ai else [],
                                "error": ai.get("error") if ai else None,
                                "stop_reason": ai.get("stop_reason") if ai else None,
                                "media": {"connected": bool(ai and ai["media"]["connected"]), "bridge": bridge.name,

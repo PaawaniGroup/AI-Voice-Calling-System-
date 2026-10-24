@@ -37,6 +37,19 @@ def _level(kind: str) -> str:
     return "info"
 
 
+WORD_KEYS = frozenset({"heard", "reply"})   # what the caller said / what the assistant said
+
+
+def strip_words(v: Any) -> Any:
+    """Remove conversation content (`heard`, `reply`) from any JSON-like structure, at any depth. Live surfaces (feed, flow, session
+    view) carry timings and counts, never words: no role sees a caller's speech live."""
+    if isinstance(v, dict):
+        return {k: strip_words(x) for k, x in v.items() if k not in WORD_KEYS}
+    if isinstance(v, (list, tuple)):
+        return [strip_words(x) for x in v]
+    return v
+
+
 def _shrink(v: Any, depth: int = 0, key: str = "") -> Any:
     """Keep entries small: cut long strings, limit depth and collection size."""
     if depth > 3:
@@ -70,7 +83,7 @@ class ActivityBus:
             self._seq += 1
             entry = {"seq": self._seq, "ts": utcnow().isoformat(), "kind": kind[:60], "category": kind.split(".", 1)[0][:20],
                      "level": _level(kind), "call_id": call_id, "session_id": session_id,
-                     "data": _shrink(redact(data or {})), "_tenant": tenant_id}
+                     "data": _shrink(redact(strip_words(data or {}))), "_tenant": tenant_id}
             self._ring.append(entry)
             for w in list(self._waiters):
                 if not w.done():
