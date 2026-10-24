@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,6 +69,8 @@ class AiService:
                 "paths": {}, "keys": {}, "languages": LANGS[1:], "default_language": "auto",
                 "devanagari_hindi": False, "runpod_mode": "run",
                 "streaming_pipeline": False,   # token-streaming voice pipeline (Plivo calls only); OFF unless a tenant turns it on
+                "tts_ulaw8k": False,           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference audio sent; OFF by default
+                "tts_voice": None,             # name of the worker's voice for tts_ulaw8k (None = the worker's default, "utkarsh")
                 **{k: None for k in STREAM_KEYS}}   # None = the built-in provisional default (set after the TTS re-measurement)
 
     async def get_config(self, tenant_id: str) -> dict:
@@ -75,7 +78,7 @@ class AiService:
         cfg = self.default_config(tenant_id)
         if doc:
             for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
-                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", *STREAM_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", *STREAM_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
             for k in ("models", "timeouts", "paths", "keys"):
@@ -100,6 +103,13 @@ class AiService:
             cfg["runpod_mode"] = body["runpod_mode"]
         if body.get("streaming_pipeline") is not None:
             cfg["streaming_pipeline"] = bool(body["streaming_pipeline"])
+        if body.get("tts_ulaw8k") is not None:
+            cfg["tts_ulaw8k"] = bool(body["tts_ulaw8k"])
+        if "tts_voice" in body:
+            v = body["tts_voice"]
+            if v is not None and not (isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", v)):
+                raise Unprocessable("tts_voice must be 1-40 letters, digits, '_' or '-'", code="invalid_config")
+            cfg["tts_voice"] = v
         for k, (lo, hi) in STREAM_KEYS.items():
             if k in body and body[k] is not None:
                 v = float(body[k]) if isinstance(lo, float) else int(body[k])

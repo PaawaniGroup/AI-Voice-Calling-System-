@@ -66,7 +66,10 @@ class MockModels:
         self.healthy = {"stt", "brain", "tts", "rag"}
         self.reply = "Namaste! BTech ke liye eligibility 12th mein 50% hai."
         self.reply_queue: list[str] = []   # replies handed out first (one per Brain request) before `reply` is used again
-        self.brain_sse = False   # True: answer stream=true Brain requests as a server-sent-event token stream
+        self.tts_worker = "v3"                 # RunPod-style TTS worker generation (see _tts_output)
+        self.tts_voices = {"utkarsh", "priya"}  # voices the v3 worker "has baked"
+        self.tts_error: str | None = None      # when set, the RunPod-style TTS worker answers {"error": ...}
+        self.brain_sse = False  # True: answer stream=true Brain requests as a server-sent-event token stream
         self.stt_text = "mujhe BTech ke baare mein batao"
         self.tts_ms = 300
         self.fail: dict[str, int] = {}  # service name -> HTTP status to answer with (failure injection)
@@ -75,6 +78,21 @@ class MockModels:
     def _next_reply(self) -> str:
         return self.reply_queue.pop(0) if self.reply_queue else self.reply
 
+    def _tts_output(self, inp: dict) -> dict:
+        """MOCK of the TTS worker. `tts_worker`: "v2" (WAV only: refuses output_format ulaw8k like handler (5)) or "v3" (voices by name, ulaw8k)."""
+        if self.tts_error:
+            return {"error": self.tts_error}
+        if inp.get("output_format") == "ulaw8k":
+            if self.tts_worker != "v3":
+                return {"error": "output_format must be 'wav' or 'pcm16'"}
+            import audioop
+            voice = inp.get("voice", "utkarsh")
+            if voice not in self.tts_voices:
+                return {"error": f"Unknown voice: {voice!r}", "voices": sorted(self.tts_voices)}
+            ulaw = audioop.lin2ulaw(pcm_tone(self.tts_ms, 8000), 2)
+            return {"audio_base64": base64.b64encode(ulaw).decode(), "format": "ulaw8k", "sample_rate": 8000, "voice": voice}
+        return {"audio_base64": base64.b64encode(tone_wav(self.tts_ms)).decode(), "format": "wav"}
+
     def _runpod(self, request: httpx.Request, host_path: str) -> httpx.Response:
         svc = request.url.host.split(".")[0]          # stt.test / brain.test / tts.test
         now = asyncio.get_event_loop().time()
@@ -82,7 +100,7 @@ class MockModels:
             body = json.loads(request.content or b"{}")
             self.calls.append((svc, {"auth": request.headers.get("authorization"), **body}))
             jid = f"job-{len(self.jobs) + 1}"
-            self.jobs[jid] = {"svc": svc, "ready_at": now + getattr(self, f"{svc}_delay", 0.0), "cancelled": False}
+            self.jobs[jid] = {"svc": svc, "ready_at": now + getattr(self, f"{svc}_delay", 0.0), "cancelled": False, "input": body.get("input") or {}}
             return httpx.Response(200, json={"id": jid, "status": "IN_QUEUE"})
         jid = host_path.rsplit("/", 1)[-1]
         job = self.jobs.get(jid)
@@ -98,13 +116,17 @@ class MockModels:
             return httpx.Response(200, json={"id": jid, "status": "IN_PROGRESS"})
         out = {"stt": {"transcription": self.stt_text, "language": "hi"},
                "brain": [{"choices": [{"message": {"content": self._next_reply()}}]}],
-               "tts": {"audio_base64": base64.b64encode(tone_wav(self.tts_ms)).decode(), "format": "wav"}}[job["svc"]]
+               "tts": self._tts_output(job["input"])}[job["svc"]]
         return httpx.Response(200, json={"id": jid, "status": "COMPLETED", "delayTime": 5, "executionTime": 7, "output": out})
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
         host_path = request.url.path
         if host_path.startswith("/v2/") and (host_path.endswith("/run") or "/status/" in host_path or "/cancel/" in host_path):
             return self._runpod(request, host_path)
+        if "/openai/v1/" in host_path:   # RunPod's OpenAI-compatible route of a vLLM endpoint: /v2/<id>/openai/v1/...
+            host_path = "/v1/" + host_path.split("/openai/v1/", 1)[1]
+            if host_path == "/v1/models":
+                return httpx.Response(200, json={"data": [{"id": "Qwen3-30B-A3B-Instruct-2507"}]})
         svc = {"/v1/audio/transcriptions": "stt", "/v1/chat/completions": "brain", "/v1/audio/speech": "tts", "/search": "rag"}.get(host_path)
         if host_path == "/health":
             name = request.url.host.split(".")[0]

@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.ai import tts_frontend, turn_trace
+from app.ai import codec, tts_frontend, turn_trace
 from app.core.errors import Unprocessable
 from app.observability import metrics as m
 from config.settings import Settings
@@ -29,6 +29,7 @@ from config.settings import Settings
 log = logging.getLogger("mme_telephony.ai")
 
 SERVICES = ("stt", "brain", "tts", "rag")
+DEFAULT_TTS_VOICE = "utkarsh"   # the voice baked into the TTS worker image (v3); a tenant can name another with `tts_voice`
 _REF_CACHE: dict = {}
 
 
@@ -570,11 +571,21 @@ class ModelClients:
                         "model": model
                     }
                 }
-                ref = self._tts_reference_b64()
-                if ref:
-                    body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
+                ulaw = bool(self.cfg.get("tts_ulaw8k"))
+                if ulaw:
+                    # Per-tenant flag `tts_ulaw8k` (default OFF; needs worker v3): the voice is chosen BY NAME (prepared once on the worker) and
+                    # the worker answers in 8 kHz mu-law. No reference audio is read or sent: that saves ~0.77 MB of upload per request.
+                    body["input"]["voice"] = self.cfg.get("tts_voice") or DEFAULT_TTS_VOICE
+                    body["input"]["output_format"] = "ulaw8k"
+                else:
+                    ref = self._tts_reference_b64()
+                    if ref:
+                        body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
                 j = await self._runpod_call("tts", ep, hdrs, body)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
+                if ulaw and isinstance(out, dict) and out.get("error"):
+                    # the worker's own message ("Unknown voice: ...", "output_format must be ...": an old worker): its text holds no caller words
+                    raise AiError("tts", "worker_error", str(out["error"])[:80])
                 b64_audio = None
                 if isinstance(out, dict):
                     b64_audio = out.get("audio") or out.get("audio_base64")
@@ -582,8 +593,12 @@ class ModelClients:
                     b64_audio = out
                 if not b64_audio:
                     raise AiError("tts", "bad_response", "missing audio in output")
-                wav_bytes = base64.b64decode(b64_audio)
-                return wav_to_pcm16(wav_bytes)
+                raw = base64.b64decode(b64_audio)
+                if ulaw and isinstance(out, dict) and out.get("format") == "ulaw8k":
+                    if not raw:
+                        raise AiError("tts", "bad_response", "empty audio in output")
+                    return codec.mulaw_to_pcm16(raw), codec.MULAW_RATE     # audioop.ulaw2lin: 8-bit mu-law -> PCM16 at 8 kHz
+                return wav_to_pcm16(raw)                                   # also when a worker answers a WAV despite the request
             else:
                 body = {"model": model, "input": text, "response_format": "wav", "language": language}
                 r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
