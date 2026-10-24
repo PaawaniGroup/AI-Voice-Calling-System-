@@ -36,6 +36,7 @@ class TurnTrace:
         self.marks: dict[str, float] = {}
         self.runpod: dict[str, dict] = {}   # service -> {"delay_ms", "exec_ms", "calls"} of the FIRST call (the one that gates latency)
         self.meta: dict[str, float] = {}
+        self.stream: dict | None = None   # token-streaming pipeline metrics (numbers only); deliberately NOT part of to_ms(): the stored record is unchanged
         if t_speech_end is not None:
             self.marks["t_speech_end"] = t_speech_end
         if t_endpoint is not None:
