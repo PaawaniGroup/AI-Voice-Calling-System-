@@ -305,7 +305,7 @@ async function ops(main) {
     if (e.kind === 'ai.turn' && e.data) {
       const d = e.data;
       const tim = normTim(d);
-      return h('div', { style: 'display:flex; flex-direction:column; gap:4px;' },
+      return h('div', { class: 'col-gap' },
         h('div', {},
           h('b', {}, `Turn ${d.turn != null ? d.turn : ''}: `),
           h('span', {}, `🗣️ "${d.heard || '—'}" ➔ 🤖 "${d.reply || '—'}"`)
@@ -449,8 +449,8 @@ async function callDetail(main, id) {
           'Media bridge': `${aiS.media.bridge} — ${aiS.media.bridge_ready ? 'ready' : 'not ready: ' + aiS.media.bridge_reason}`,
           Error: aiS.error || '—'
         }),
-        timings ? h('div', { style: 'margin-top:12px; padding-top:10px; border-top:1px solid var(--line);' },
-          h('div', { class: 'muted', style: 'font-size:12px; margin-bottom:4px;' }, 'Latest Request Flow Model Latencies:'),
+        timings ? h('div', { class: 'lat-box' },
+          h('div', { class: 'muted lat-note' }, 'Latest Request Flow Model Latencies:'),
           latencyStrip(timings)
         ) : null
       ) : h('p', { class: 'muted' }, aiS ? aiS.__error : 'No AI session'),

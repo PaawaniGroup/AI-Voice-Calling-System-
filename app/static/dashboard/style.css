@@ -79,3 +79,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
 @media (max-width:760px){.app{grid-template-columns:1fr}nav{flex-direction:row;flex-wrap:wrap}nav .who{margin:0}}
 
+
+/* classes instead of inline style attributes: the CSP is style-src 'self' */
+.col-gap{display:flex;flex-direction:column;gap:4px}
+.lat-box{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.lat-note{font-size:12px;margin-bottom:4px}

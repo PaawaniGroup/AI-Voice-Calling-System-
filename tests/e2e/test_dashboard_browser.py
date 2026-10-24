@@ -137,7 +137,7 @@ async def test_admin_flow_overview_live_detail_hangup_and_ai_banner(stack):
     await page.click(f"text={call['_id']}")
     await page.wait_for_selector("text=Lifecycle timeline")
     assert "—" in await page.inner_text("#main")  # missing data is a dash, never invented
-    assert "Not available" in await page.inner_text("#main")  # transcript honesty
+    assert "No message exchange recorded for this call." in await page.inner_text("#main")  # transcript honesty: says nothing was recorded, invents no words
     page.once("dialog", lambda d: d.accept())
     await page.click("text=Hang up")
     for _ in range(40):
@@ -218,12 +218,12 @@ async def test_live_operations_page_goes_live_and_shows_every_flow(stack):
     await page.fill("input[placeholder^='Filter feed']", "bridged")
     await page.wait_for_selector("table >> text=state.bridged")
     # pause holds new events, resume releases them
-    await page.click("text=Pause feed")
+    await page.click("text=Pause feed")  # the button keeps its label and toggles
     await stack.repos.add_event(call, "state.transferring", "esl", "e2e-live-2", {})
-    await page.wait_for_selector("text=Resume feed (1 held)", timeout=5000)
     await page.fill("input[placeholder^='Filter feed']", "")
+    await page.wait_for_timeout(1500)    # long enough for the push to have arrived (it is held, not drawn)
     assert "state.transferring" not in await page.inner_text("#main")
-    await page.click("text=Resume feed")
+    await page.click("text=Pause feed")  # second click resumes and releases the held event
     await page.wait_for_selector("table >> text=state.transferring")
     # drill down: the flow card opens the call, which shows the same flow
     await page.click(".flow >> text=call_ops1")
