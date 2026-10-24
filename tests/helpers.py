@@ -66,6 +66,7 @@ class MockModels:
         self.healthy = {"stt", "brain", "tts", "rag"}
         self.reply = "Namaste! BTech ke liye eligibility 12th mein 50% hai."
         self.reply_queue: list[str] = []   # replies handed out first (one per Brain request) before `reply` is used again
+        self.brain_sse = False   # True: answer stream=true Brain requests as a server-sent-event token stream
         self.stt_text = "mujhe BTech ke baare mein batao"
         self.tts_ms = 300
         self.fail: dict[str, int] = {}  # service name -> HTTP status to answer with (failure injection)
@@ -125,6 +126,11 @@ class MockModels:
         if svc == "stt":
             return httpx.Response(200, json={"text": self.stt_text, "language": "hi"})
         if svc == "brain":
+            if self.brain_sse and body.get("stream"):   # OpenAI-style token stream (3 characters per event) instead of one JSON body
+                text = self._next_reply()
+                events = [{"choices": [{"delta": {"content": text[i:i + 3]}}]} for i in range(0, len(text), 3)]
+                sse = "".join(f"data: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events) + "data: [DONE]\n\n"
+                return httpx.Response(200, content=sse.encode("utf-8"), headers={"content-type": "text/event-stream"})
             return httpx.Response(200, json={"choices": [{"message": {"content": self._next_reply()}}]})
         if svc == "tts":
             return httpx.Response(200, content=tone_wav(self.tts_ms), headers={"content-type": "audio/wav"})

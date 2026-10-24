@@ -20,6 +20,7 @@ from pymongo.errors import DuplicateKeyError
 from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
+from app.ai.streaming.config import STREAM_KEYS, stream_config_from
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
 from app.observability import metrics as m
@@ -65,14 +66,16 @@ class AiService:
                 "timeouts": {"stt": self.s.ai_request_timeout_s, "brain": self.s.ai_request_timeout_s * 2,
                              "tts": self.s.ai_request_timeout_s, "rag": 5.0},
                 "paths": {}, "keys": {}, "languages": LANGS[1:], "default_language": "auto",
-                "devanagari_hindi": False, "runpod_mode": "run"}
+                "devanagari_hindi": False, "runpod_mode": "run",
+                "streaming_pipeline": False,   # token-streaming voice pipeline (Plivo calls only); OFF unless a tenant turns it on
+                **{k: None for k in STREAM_KEYS}}   # None = the built-in provisional default (set after the TTS re-measurement)
 
     async def get_config(self, tenant_id: str) -> dict:
         doc = await self.db["ai_config"].find_one({"tenant_id": tenant_id})
         cfg = self.default_config(tenant_id)
         if doc:
             for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
-                      "devanagari_hindi", "runpod_mode"):   # the last two: per-tenant switches (Devanagari replies; RunPod transport)
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", *STREAM_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
             for k in ("models", "timeouts", "paths", "keys"):
@@ -95,6 +98,14 @@ class AiService:
             if body["runpod_mode"] not in ("run", "runsync"):
                 raise Unprocessable("runpod_mode must be run or runsync", code="invalid_config")
             cfg["runpod_mode"] = body["runpod_mode"]
+        if body.get("streaming_pipeline") is not None:
+            cfg["streaming_pipeline"] = bool(body["streaming_pipeline"])
+        for k, (lo, hi) in STREAM_KEYS.items():
+            if k in body and body[k] is not None:
+                v = float(body[k]) if isinstance(lo, float) else int(body[k])
+                if not (lo <= v <= hi):
+                    raise Unprocessable(f"{k} must be between {lo} and {hi}", code="invalid_config")
+                cfg[k] = v
         if "default_language" in body:
             if body["default_language"] not in LANGS:
                 raise Unprocessable("unsupported language", code="invalid_language", details={"supported": LANGS})
@@ -255,6 +266,7 @@ class AiService:
             counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
             devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
+            streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")

@@ -275,8 +275,14 @@ class Conversation:
     def __init__(self, clients: ModelClients | None = None, language: str = "auto", tools: dict | None = None,
                  max_history: int = 12, devanagari_hindi: bool = False,
                  script_enforcement: bool = False, counsellor_gender: str = "masculine",
-                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix"):
+                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix", streaming=None):
         self.clients, self.language = clients, language
+        # Token-streaming voice pipeline (per tenant, flag `streaming_pipeline`, default OFF = None): a StreamConfig. Used only by the live Plivo
+        # path through app.ai.streaming.live; `stream_turn` and every other path are unchanged.
+        self.streaming = streaming
+        self._stream = None          # the StreamingTurn in progress (if any)
+        self.last_stream = None      # the TurnOutcome of the last streaming turn (numbers and in-memory text; never stored or logged)
+        self.filler_pcm8: bytes | None = None   # short "one moment" audio for slow tool calls (8 kHz PCM16), when the deployment has one
         self.tools = tools or {}  # name -> async handler(args: dict) -> str
         self.script_enforcement = script_enforcement
         self.devanagari_hindi = devanagari_hindi

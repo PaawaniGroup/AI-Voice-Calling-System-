@@ -249,6 +249,90 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             if isinstance(io, NativeIO):
                 st["playing"] = False
 
+    def silence_stream() -> None:
+        """Token-streaming turn only: stop its paced output NOW (synchronous), before anything else on a barge-in. Without this, a frame could
+        still be written between the clearAudio and the cancellation and be played after the caller was already cut off."""
+        s = turn.get("stream")
+        if s is not None:
+            s.silence()
+
+    async def clear_stream() -> None:
+        sink = turn.get("stream_sink")
+        if sink is not None:
+            await sink.clear(0)   # clearAudio unless nothing was written since the last clear
+
+    async def interrupt_io() -> None:
+        """The barge-in clear. For a streaming turn it goes through the sink, which remembers it (the cancel path then does not clear again)."""
+        sink = turn.get("stream_sink")
+        if sink is not None:
+            await sink.clear(0)
+        else:
+            await io.interrupt()
+
+    async def stream_turn_live(pcm: bytes, trace, t_turn: float, final: dict) -> bool:
+        """The token-streaming pipeline for ONE turn on a Plivo stream (tenant flag `streaming_pipeline`). Returns whether the turn was recorded.
+        Records exactly what the old path records: `record_turn` when the first audio is written, `finalize_turn` (by the caller) at the end."""
+        from app.ai.clients import AiError
+        from app.ai.streaming.live import run_streaming_turn
+        from app.ai.streaming.plivo_sink import PlivoStreamSink
+
+        def on_audio(seconds: float) -> None:
+            turn["audio"] = True
+            on_start(seconds)
+
+        sink = PlivoStreamSink(io, on_audio=on_audio)
+        turn["stream_sink"] = sink
+        st["uid"] += 1
+        uid = st["uid"]
+        rec_tasks: list[asyncio.Task] = []
+        state = {"recorded": False}
+
+        def on_created(s) -> None:
+            turn["stream"] = s
+
+        def on_first_frame(res, first_text: str) -> None:
+            res.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
+            m.AI_TURN_SECONDS.observe(res.timings_ms["turn_ms"] / 1000)
+            state["recorded"] = True
+            rec_tasks.append(asyncio.ensure_future(ai.record_turn(rt, dict(res.timings_ms), heard=res.heard, reply=first_text, trace_id=trace.trace_id)))
+
+        res = None
+        try:
+            try:
+                res = await run_streaming_turn(rt.conversation, pcm, rate, sink=sink, gen=uid, on_created=on_created, on_first_frame=on_first_frame)
+            except AiError as e:
+                code = f"{e.service}_{e.kind}"
+                m.AI_TURN_ERRORS.labels(code[:40]).inc()
+                ai.note_error(rt, code)
+                await io.error(code)
+                return False
+            out = res.outcome
+            if res.error and not state["recorded"]:
+                res.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
+                await ai.record_turn(rt, dict(res.timings_ms), heard=res.heard, reply=None, trace_id=trace.trace_id)
+                state["recorded"] = True
+            if res.error:
+                m.AI_TURN_ERRORS.labels(res.error[:40]).inc()
+                ai.note_error(rt, res.error)
+                if not rt.conversation.cancelled:
+                    await io.error(res.error)
+            if out is not None and out.status == "done" and not res.error:
+                await sink.finish(uid)
+                st["last_audio_at"] = time.monotonic()
+            if out is not None:
+                final["reply"] = out.reply_text if out.status == "done" else out.spoken_text
+            return state["recorded"]
+        except asyncio.CancelledError:
+            conv_out = rt.conversation.last_stream
+            if conv_out is not None:
+                final["reply"] = conv_out.spoken_text
+            raise
+        finally:
+            if rec_tasks:
+                await asyncio.gather(*rec_tasks, return_exceptions=True)   # the turn record must exist before finalize_turn updates it
+            final["recorded"] = state["recorded"]
+            turn["stream"] = None
+
     async def run_turn(pcm: bytes, t_speech_end: float, t_endpoint: float) -> None:
         """ONE turn (STT -> Brain -> TTS clauses -> audio) as its own task, so a new utterance can cancel it. Cancelling it cancels the
         in-flight STT/Brain/TTS requests (and their RunPod jobs) and frees the worker for the next utterance."""
@@ -257,7 +341,11 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
         turn_trace.start(trace)  # this task has its own context: the trace belongs to this turn only
         recorded = False
+        stream_final: dict = {}   # set only by the token-streaming path (tenant flag `streaming_pipeline`, Plivo calls)
         try:
+            if rt.conversation.streaming is not None and isinstance(io, PlivoIO):
+                await stream_turn_live(pcm, trace, t_turn, stream_final)
+                return
             async for chunk in rt.conversation.stream_turn(pcm, rate):
                 if rt.conversation.cancelled:
                     break
@@ -285,10 +373,14 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             m.AI_TURN_ERRORS.labels("worker_exception").inc()
             ai.note_error(rt, "worker_exception")
         finally:
+            recorded = recorded or stream_final.get("recorded", False)
             if recorded:
                 trace.mark("t_turn_end")
                 try:
-                    final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
+                    if "reply" in stream_final:   # streaming path: the reply of THIS turn (what was produced; after a barge-in, what was heard)
+                        final_reply = stream_final["reply"]
+                    else:
+                        final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
                     await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
                 except Exception:  # latency bookkeeping must never take the call down
                     log.exception("could not store turn latency trace")
@@ -300,7 +392,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             if merge["pcm"] is not None:   # an earlier attempt at this question was cancelled: this speech continues it
                 pcm, n = merge["pcm"] + pcm, merge["n"] + 1
                 merge["pcm"] = None
-            turn.update(pcm=pcm, end_at=t_speech_end, audio=False, n=n)
+            turn.update(pcm=pcm, end_at=t_speech_end, audio=False, n=n, stream=None, stream_sink=None)
             task = asyncio.create_task(run_turn(pcm, t_speech_end, t_endpoint), name="ai-turn")
             turn["task"] = task
             try:
@@ -319,17 +411,22 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         if task is None or task.done():
             return False
         rt.conversation.cancel()
+        silence_stream()                       # token-streaming turn: no frame is written after this line (no-op for the old path)
+        stream = turn.get("stream")
         t0 = time.monotonic()
         task.cancel()
         _, pending = await asyncio.wait({task}, timeout=TURN_STOP_S)
         if pending:
             log.error("a cancelled turn did not stop within %.1fs; the worker moves on", TURN_STOP_S)
+        await clear_stream()                   # and Plivo's own queue is flushed (once; skipped when the barge-in branch already cleared it)
         m.AI_TURNS_CANCELLED.labels(reason).inc()
         act = getattr(ai, "activity", None)
         if act is not None:
+            extra = (stream.interrupt_metrics() if stream is not None else None) or {}
             act.publish(rt.tenant_id, "ai.turn_cancelled", call_id=rt.call_id, session_id=rt.session_id,
                         data={"reason": reason, "unwind_ms": round((time.monotonic() - t0) * 1000, 1),
-                              "since_last_audio_ms": round((time.monotonic() - st["last_audio_at"]) * 1000, 1) if st["last_audio_at"] else None})
+                              "since_last_audio_ms": round((time.monotonic() - st["last_audio_at"]) * 1000, 1) if st["last_audio_at"] else None,
+                              **({"interrupt_to_last_frame_ms": extra["interrupt_to_last_frame_ms"]} if "interrupt_to_last_frame_ms" in extra else {})})
         return True
 
     async def on_speech_start(now: float, speech_ms: int) -> None:
@@ -344,7 +441,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         if turn["audio"]:
             reason = "barge_in"
             if st["playing"] and now < st["play_until"]:
-                await io.interrupt()
+                silence_stream()
+                await interrupt_io()
                 st["playing"], st["play_until"] = False, 0.0
         else:
             started = now - speech_ms / 1000
@@ -425,7 +523,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                         log.info("barge-in triggered: rms=%.1f >= %.1f for %dms", frame_rms, barge_threshold, st["speech_ms"])
                         st["playing"] = False
                         st["play_until"] = 0.0
-                        await io.interrupt()                 # clear first: the caller stops hearing the assistant at once
+                        silence_stream()                     # streaming turn: stop writing frames before the clear (a frame after it would still play)
+                        await interrupt_io()                 # clear first: the caller stops hearing the assistant at once
                         await cancel_turn("barge_in")        # then stop generating the rest of the reply and free the worker
                         st["in_speech"] = True
                         st["buf"] = bytearray(frame)

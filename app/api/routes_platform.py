@@ -358,6 +358,13 @@ class AiConfigIn(Strict):
     paths: dict[str, str] | None = None
     devanagari_hindi: bool | None = None   # Devanagari replies for Hindi/Hinglish callers (prompt + reply_mode tag + reply check/retry)
     runpod_mode: Literal["run", "runsync"] | None = None
+    streaming_pipeline: bool | None = None   # token-streaming voice pipeline (Plivo calls); default OFF per tenant
+    stream_first_min_words: int | None = Field(None, ge=1, le=8)
+    stream_min_words: int | None = Field(None, ge=1, le=20)
+    stream_max_words: int | None = Field(None, ge=6, le=40)
+    stream_prefetch_depth: int | None = Field(None, ge=1, le=4)
+    stream_prebuffer_ms: int | None = Field(None, ge=0, le=400)
+    runpod_poll_cap_s: float | None = Field(None, ge=0.03, le=1.0)
 
 
 @router.get("/ai/config")

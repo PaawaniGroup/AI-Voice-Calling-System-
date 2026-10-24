@@ -227,9 +227,10 @@ class ModelClients:
     async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j, poll_delay: float = 0.1):
         """RunPod `/runsync` stops waiting after ~90 s (cold start) and returns IN_QUEUE/IN_PROGRESS: poll `/status`.
         Adaptive fast polling (100ms -> 400ms) minimizes latency instead of waiting 1s per poll."""
+        cap = float(self.cfg.get("runpod_poll_cap_s") or 0.15)   # status polls are free: a tight cap trims the wait after the job finishes
         while isinstance(j, dict) and j.get("status") in ("IN_QUEUE", "IN_PROGRESS") and j.get("id"):
             await asyncio.sleep(poll_delay)
-            poll_delay = min(poll_delay * 1.5, 0.4)
+            poll_delay = min(poll_delay * 1.5, cap)
             if self._http.is_closed:
                 raise AiUnavailable(service, "client_closed")
             sr = await self._http.get(f"{ep.url}/status/{j['id']}", headers=hdrs, timeout=30)
@@ -392,6 +393,22 @@ class ModelClients:
             return {"text": content.strip() if isinstance(content, str) else "", "tool_calls": calls if isinstance(calls, list) else []}
         return await self._call("brain", go)
 
+    async def _served_brain_model(self, ep: ServiceEndpoint, hdrs: dict, configured: str) -> str:
+        """The model name the OpenAI route serves (the vLLM worker rejects any other name). Read once per client from GET /openai/v1/models
+        (free); the configured name is used when it is listed or when the list cannot be read."""
+        if getattr(self, "_served_model", None):
+            return self._served_model
+        name = configured
+        try:
+            r = await self._http.get(f"{ep.url}/openai/v1/models", headers=hdrs, timeout=min(ep.timeout, 30))
+            ids = [d.get("id") for d in (r.json().get("data") or []) if isinstance(d, dict) and d.get("id")] if r.status_code < 400 else []
+            if ids and configured not in ids:
+                name = ids[0]
+        except Exception as e:                                          # the configured name is tried as it is
+            log.info("could not list the served brain model: %s", type(e).__name__)
+        self._served_model = name
+        return name
+
     async def chat_stream(self, messages: list[dict], tools: list[dict] | None = None,
                           temperature: float | None = None) -> AsyncIterator[dict]:
         """Stream Brain / LLM generation.
@@ -405,6 +422,10 @@ class ModelClients:
         max_tok = int(self.cfg.get("max_tokens", 400))
         temp = float(temperature if temperature is not None else self.cfg.get("temperature", getattr(self.s, "ai_temperature", 0.3)))
         hdrs = self._auth_headers("brain")
+        if ep.path.endswith("/runsync") and self.cfg.get("streaming_pipeline"):
+            # Token streaming over RunPod: the same endpoint's OpenAI-compatible route (the /runsync route only returns whole replies).
+            ep = ServiceEndpoint(ep.url, "/openai/v1/chat/completions", ep.timeout)
+            model = await self._served_brain_model(ep, hdrs, model)
 
         # Fallback for RunPod /runsync or non-streaming paths:
         if ep.path.endswith("/runsync"):

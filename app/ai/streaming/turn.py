@@ -141,7 +141,8 @@ class StreamingTurn:
                         "brain_chunks": 0, "brain_span_s": 0.0, "clauses": [], "tts_errors": 0, "tool_rounds": 0}
         self._last_chunk_at = None
         self._script = {"first_ok": None, "first_retried": False, "first_retry_ok": None, "kinds": {}, "clauses_converted": 0, "clauses_violating": 0}
-        self._fail_all = False
+        self._t_int: float | None = None
+        self._snap: dict | None = None
 
     # ------------------------------------------------------------------ run
     async def run(self, messages: list) -> TurnOutcome:
@@ -325,11 +326,27 @@ class StreamingTurn:
             self._next += 1
 
     # ------------------------------------------------------------------ interruption
+    def silence(self) -> dict:
+        """SYNCHRONOUS: no frame is sent after this returns (the caller then clears the far end). Safe to call more than once; the first call
+        stamps the interruption time and takes the accounting snapshot."""
+        if self._t_int is None:
+            self._t_int = self.clock.now()
+            self._snap = self.playout.cancel()
+        return self._snap
+
+    def interrupt_metrics(self) -> dict | None:
+        """Interruption -> last frame, from the stamps of `silence()` (works when the owner cancelled the task itself)."""
+        if self._t_int is None:
+            return None
+        last = self.playout.t_last_send
+        return {"interrupt_to_last_frame_ms": round(max(0.0, (last - self._t_int)) * 1000, 1) if last else 0.0,
+                "lead_ms_dropped": (self._snap or {}).get("lead_ms"), "spoken_clauses": sum(1 for c in (self._snap or {}).get("clauses", []) if c["played_est"] > 0)}
+
     async def interrupt(self, reason: str = "barge_in") -> dict:
         """Barge-in / new utterance. Order matters: (1) no frame is sent after this call (sync), (2) the far end's queue is cleared,
         (3) the Brain stream and the in-flight TTS jobs are cancelled and the tasks unwound. Returns the accounting and the timings."""
-        t_int = self.clock.now()
-        snap = self.playout.cancel()
+        snap = self.silence()
+        t_int = self._t_int
         try:
             await self.sink.clear(self.gen)
         except Exception as e:
@@ -390,3 +407,8 @@ class _MarkingSink:
 
     async def clear(self, gen: int) -> None:
         await self.sink.clear(gen)
+
+    async def flush(self) -> None:
+        f = getattr(self.sink, "flush", None)
+        if f is not None:
+            await f()

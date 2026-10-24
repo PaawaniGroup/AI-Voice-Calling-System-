@@ -193,6 +193,7 @@ class TurnPlayout:
                     break
                 pcm, got = self._take(self.frame)
                 if got == 0:
+                    await self._flush()                                    # a sink that batches frames must not hold audio back while we wait
                     if self._ended:
                         break                                              # the turn's audio is all out
                     # UNDERRUN: the next clause is late. Nothing is sent (silence frames would sit `lead` ahead and delay the late clause by that
@@ -225,12 +226,18 @@ class TurnPlayout:
                 await self._send(pcm)
                 k += 1
             self.reason = self.reason or ("cancelled" if self.cancelled else "done")
+            await self._flush()
         finally:
             self.closed = True
         return self.report()
 
     def _next_idx(self) -> int:
         return self._q[0][0].idx if self._q else max(self.accounts, default=-1) + 1
+
+    async def _flush(self) -> None:
+        flush = getattr(self.sink, "flush", None)
+        if flush is not None and not self.closed:
+            await flush()
 
     async def _send(self, pcm: bytes) -> None:
         await self.sink.send(self.gen, pcm)
