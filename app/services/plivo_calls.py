@@ -143,11 +143,8 @@ async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) 
     tenant = route["tenant_id"]
     allowed = (pol or {}).get("allowed_callers") or []
     if allowed:  # opt-in caller allowlist (controlled test calls): only these numbers reach the AI, others are rejected before a call exists
-        try:
-            caller = phone.normalize("+" + params.get("From", "").lstrip("+"))
-        except ApiError:
-            caller = None
-        if caller not in allowed:
+        caller = phone.normalize_caller(params.get("From"), s.default_region)   # +digits first; national 0XXXXXXXXXX only as a fallback
+        if caller is None or caller not in allowed:
             m.PLIVO_CALLBACKS.labels("answer", "rejected_caller").inc()
             log.warning("plivo inbound call rejected: caller is not in the tenant's allowed_callers")
             return REJECT

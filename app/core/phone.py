@@ -11,6 +11,31 @@ from app.core.errors import Unprocessable
 _E164 = re.compile(r"^\+[1-9][0-9]{6,14}$")
 
 
+def normalize_caller(raw: str | None, default_region: str = "IN") -> str | None:
+    """E.164 of the caller number a carrier/Plivo presented, or None when it cannot be read with confidence (never raises).
+
+    Plivo sends digits with the country code and no plus (`91XXXXXXXXXX`), so `+<digits>` is tried FIRST. Only when that is not a valid
+    number AND the digits start with 0 (national trunk prefix `0XXXXXXXXXX`, or the `00` international prefix) is the number read in the
+    default region. Nothing else is ever reinterpreted: a short, malformed or foreign number is not turned into a local one, and an empty
+    / anonymous / missing caller ID is None. Whitespace and punctuation (`+91 98765-43210`) are ignored."""
+    if not isinstance(raw, str):
+        return None
+    digits = re.sub(r"[\s\-().]", "", raw)
+    if not re.fullmatch(r"\+?[0-9]{2,30}", digits):
+        return None
+    bare = digits.lstrip("+")
+    try:
+        return normalize("+" + bare)
+    except Unprocessable:
+        pass
+    if bare.startswith("0"):
+        try:
+            return normalize(bare, default_region)
+        except Unprocessable:
+            return None
+    return None
+
+
 def normalize(raw: str, default_region: str = "IN") -> str:
     """Return strict E.164 or raise Unprocessable. Output is safe to embed in dial strings."""
     if not isinstance(raw, str) or len(raw) > 32:
