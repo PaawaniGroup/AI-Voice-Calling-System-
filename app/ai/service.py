@@ -318,25 +318,25 @@ class AiService:
             return
         set_fields = {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
                       **{f"timings_ms.{k}": v for k, v in nums.items()}}
-        if reply:
-            set_fields["transcript.$[e].reply"] = reply
-            set_fields["last_exchange.reply"] = reply
+        if reply:  # the length only: conversation text is not stored (see record_turn)
+            set_fields["transcript.$[e].reply_chars"] = len(reply)
+            set_fields["last_exchange.reply_chars"] = len(reply)
         await self.db["ai_sessions"].update_one(
             {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
             {"$set": set_fields},
             array_filters=[{"e.trace_id": trace_id}])
         if self.activity is not None:
             self.activity.publish(rt.tenant_id, "ai.turn_latency", call_id=rt.call_id, session_id=rt.session_id,
-                                  data={"trace_id": trace_id, "reply": reply, **nums})
+                                  data={"trace_id": trace_id, "reply_chars": len(reply or ""), **nums})
 
     async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None,
                           trace_id: str | None = None) -> None:
         now = utcnow()
         turn_num = len(rt.conversation.turns)
-        entry = {
+        entry = {   # NO conversation text is stored (privacy): sizes and timings only. `heard` / `reply` are accepted but never written.
             "turn": turn_num,
-            "heard": heard or "",
-            "reply": reply or "",
+            "heard_chars": len(heard or ""),
+            "reply_chars": len(reply or ""),
             "timings_ms": {k: v for k, v in timings.items() if isinstance(v, (int, float))},
             "ts": now.isoformat()
         }

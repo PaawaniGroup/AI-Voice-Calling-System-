@@ -1,6 +1,6 @@
 """No role sees conversation words live: the activity feed, the call flow, the snapshot and the AI session view carry timings and
-counts, never `heard` / `reply` text. (The words stay in the stored session record; that is a separate retention decision.)
-Model services and the provider are MOCKS."""
+counts, never `heard` / `reply` text, and the stored session record holds lengths and timings, not text (until the operator decides
+otherwise). Model services and the provider are MOCKS."""
 import json
 from types import SimpleNamespace
 
@@ -29,6 +29,17 @@ async def _record_a_turn(env, call_id="call_w1", sid="s_w1"):
 
 def _assert_no_words(text: str, where: str):
     assert CALLER not in text and ASSISTANT not in text, f"conversation words leaked in {where}"
+
+
+async def test_the_stored_session_record_holds_lengths_and_timings_not_text(env):
+    await _record_a_turn(env)
+    doc = await env.db["ai_sessions"].find_one({"session_id": "s_w1"})
+    _assert_no_words(json.dumps(doc, default=str), "the ai_sessions document in MongoDB")
+    entry = doc["transcript"][0]
+    assert "heard" not in entry and "reply" not in entry
+    assert entry["heard_chars"] == len(CALLER) and entry["reply_chars"] == len(ASSISTANT)       # sizes are kept (useful, not sensitive)
+    assert entry["timings_ms"]["tts"] == 400.0 and entry["timings_ms"]["t_turn_end"] == 1500.0  # and so are the timings
+    assert doc["last_exchange"]["reply_chars"] == len(ASSISTANT) and "reply" not in doc["last_exchange"]
 
 
 @pytest.mark.parametrize("headers", [VIEWER, ADMIN], ids=["viewer", "admin"])
