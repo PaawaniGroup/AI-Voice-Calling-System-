@@ -141,6 +141,16 @@ async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) 
         m.PLIVO_CALLBACKS.labels("answer", "rejected_route").inc()
         return REJECT
     tenant = route["tenant_id"]
+    allowed = (pol or {}).get("allowed_callers") or []
+    if allowed:  # opt-in caller allowlist (controlled test calls): only these numbers reach the AI, others are rejected before a call exists
+        try:
+            caller = phone.normalize("+" + params.get("From", "").lstrip("+"))
+        except ApiError:
+            caller = None
+        if caller not in allowed:
+            m.PLIVO_CALLBACKS.labels("answer", "rejected_caller").inc()
+            log.warning("plivo inbound call rejected: caller is not in the tenant's allowed_callers")
+            return REJECT
     if await repos.count_active() >= ctrl.max_active or await repos.count_active(tenant) >= (pol or {}).get("max_active_calls", s.max_active_per_tenant):
         m.PLIVO_CALLBACKS.labels("answer", "busy").inc()
         return BUSY

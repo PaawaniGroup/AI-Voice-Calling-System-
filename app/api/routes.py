@@ -320,6 +320,7 @@ async def put_policy(request: Request, tenant_id: str, body: PolicyIn, p: Princi
     s, repos, _ = _ctx(request)
     data = body.model_dump(exclude_none=True)
     data["caller_ids"] = [phone.normalize(n, s.default_region) for n in data.get("caller_ids", [])]
+    data["allowed_callers"] = [phone.normalize(n, s.default_region) for n in data.get("allowed_callers", [])]
     data["transfer_destinations"] = [x if x.endswith("*") else phone.normalize(x, s.default_region)
                                      for x in data.get("transfer_destinations", [])]
     res = await repos.put_policy(tenant_id, data)
