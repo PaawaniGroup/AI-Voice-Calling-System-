@@ -277,11 +277,9 @@ class AiService:
         return _jwt.encode(payload, self.s.jwt_secret.get_secret_value(), algorithm=self.s.jwt_algorithm)
 
     async def _media_deadline(self, rt: Runtime, seconds: float, reason: str) -> None:
-        try:
-            await asyncio.sleep(seconds)
-            await self._finish(rt.tenant_id, rt.session_id, "failed", reason, error=reason)
-        except asyncio.CancelledError:
-            pass
+        """Fail the AI session if the media socket does not (re)connect in time. Cancelled (and ends as cancelled) when it does."""
+        await asyncio.sleep(seconds)
+        await self._finish(rt.tenant_id, rt.session_id, "failed", reason, error=reason)
 
     async def attach_media(self, tenant_id: str, session_id: str) -> Runtime:
         ai = await self._get_ai(tenant_id, session_id)
@@ -388,10 +386,12 @@ class AiService:
             rt.conversation.cancel()
             if rt.fs_uuid and hasattr(self.bridge, "end"):
                 await self.bridge.end(rt.fs_uuid)  # stop media bug + playback on FreeSWITCH
-            if rt.watchdog:
+            me = asyncio.current_task()  # the media watchdog calls _finish from its own task: it must never cancel itself,
+            if rt.watchdog and rt.watchdog is not me:  # or the rest of this method (session transition, event/webhook) is skipped
                 rt.watchdog.cancel()
             for t in rt.tasks:
-                t.cancel()
+                if t is not me:
+                    t.cancel()
             if rt.ws is not None:
                 try:
                     await rt.ws.close(code=1000)
