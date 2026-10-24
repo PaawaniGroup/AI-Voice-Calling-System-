@@ -103,6 +103,28 @@ def rms(pcm: bytes) -> float:
     return (sum(x * x for x in samples) / n) ** 0.5
 
 
+def parse_brain_output(out) -> tuple[str, list]:
+    """Content and tool calls of a non-streamed Brain reply. Same contract as `ModelClients.chat`: anything that is not a recognised
+    chat-completion shape raises AiError(brain, bad_response); only a recognised reply with no text is an (empty) reply."""
+    if isinstance(out, list):  # RunPod vLLM worker: [ {OpenAI chat.completion object} ]
+        out = out[0] if out else ""
+    if isinstance(out, dict) and "choices" in out:
+        if not out["choices"]:
+            raise AiError("brain", "bad_response", "empty choices list")
+        first = out["choices"][0]
+        msg = first.get("message") if isinstance(first, dict) else None
+        if not isinstance(msg, dict):
+            raise AiError("brain", "bad_response", "missing message in choice")
+        content, calls = msg.get("content"), msg.get("tool_calls")
+    elif isinstance(out, dict) and ("text" in out or "content" in out):
+        content, calls = out.get("text") or out.get("content") or "", out.get("tool_calls", [])
+    elif isinstance(out, str):
+        content, calls = out, []
+    else:
+        raise AiError("brain", "bad_response", "unrecognized response format")
+    return (content.strip() if isinstance(content, str) else ""), (calls if isinstance(calls, list) else [])
+
+
 @dataclass
 class ServiceEndpoint:
     url: str
@@ -368,19 +390,7 @@ class ModelClients:
                         except Exception:
                             raise AiError("brain", "bad_response", "invalid JSON response") from None
                         out = j.get("output", j) if isinstance(j, dict) else j
-                        if isinstance(out, list):
-                            out = out[0] if out else {}
-                        if isinstance(out, dict) and "choices" in out:
-                            msg = out["choices"][0].get("message", {}) if out["choices"] else {}
-                            content = msg.get("content") or ""
-                            calls = msg.get("tool_calls") or []
-                        elif isinstance(out, dict) and ("text" in out or "content" in out):
-                            content = out.get("text") or out.get("content") or ""
-                            calls = out.get("tool_calls", [])
-                        elif isinstance(out, str):
-                            content, calls = out, []
-                        else:
-                            content, calls = "", []
+                        content, calls = parse_brain_output(out)   # strict: a malformed body is `bad_response`, never a silent empty reply
                         if calls:
                             yield {"tool_calls": calls}
                         if content:

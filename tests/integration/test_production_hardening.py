@@ -76,9 +76,10 @@ async def test_unexpected_exception_in_a_turn_is_contained(monkeypatch):
     m = MockModels()
     clients = _clients(m)
 
-    async def boom(*a, **k):
+    async def boom(*a, **k):   # an async generator, like the chat_stream the pipeline now calls for the Brain
         raise RuntimeError("surprise")
-    monkeypatch.setattr(clients, "chat", boom)
+        yield  # pragma: no cover
+    monkeypatch.setattr(clients, "chat_stream", boom)
     conv = Conversation(clients, "auto")
     r = await conv.turn(pcm_tone(400, 8000), 8000)
     assert r.error == "internal_RuntimeError" and len(conv.messages) == 1
