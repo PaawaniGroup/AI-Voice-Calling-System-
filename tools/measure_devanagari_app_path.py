@@ -18,7 +18,7 @@ from e2e_latency_bench import BenchClients, Ledger, load_cfg, pct  # noqa: E402
 from app.ai.pipeline import Conversation  # noqa: E402
 from app.ai.script_enforcement import check_reply, problem_kinds  # noqa: E402
 from config.settings import Settings  # noqa: E402
-from measure_roman_hindi import load_utterances  # noqa: E402
+from measure_roman_hindi import load_utterances, stats  # noqa: E402
 
 PRICE = {"stt": 0.0, "brain": 0.000486, "tts": 0.0}
 
@@ -126,16 +126,185 @@ def summarize(rows, cost):
     print("estimated spend:", cost["usd_estimated_total"], "of cap", cost["budget_usd"])
 
 
+# ------------------------------------------------------------------------------------------------ suite: en-off row, multi-turn, adversarial
+def jl(name):
+    return [json.loads(l) for l in open(ROOT / "lexicon" / name, encoding="utf-8") if l.strip()]
+
+
+def roman_tokens(text, lx):
+    """Roman-letter Hindi tokens in a reply, by the lexicon (independent of the reply mode)."""
+    st = stats([("x", text)], lx).get("all") if text else None
+    return st["roman_tokens"] if st else 0
+
+
+def conv_for(cl, s, flag):
+    return Conversation(cl, "auto", devanagari_hindi=flag, counsellor_gender=s.ai_counsellor_gender, counsellor_name=s.ai_counsellor_name)
+
+
+def row_of(r, text, mode, lx, **extra):
+    rep = r["report"] or {}
+    ok, probs = check_reply(text, mode) if text else (None, [])
+    return {"mode": mode, "ms": r["ms"], "reply_chars": len(text), "roman_tokens": roman_tokens(text, lx), "check_ok": ok, "kinds": problem_kinds(probs),
+            "first_ok": rep.get("first_ok"), "first_kinds": rep.get("kinds"), "retried": rep.get("retried", False), "retry_ok": rep.get("retry_ok"),
+            "retry_ms": rep.get("retry_ms"), **extra}
+
+
+async def brain_workers(cl):
+    ep = cl.endpoint("brain")
+    r = await cl._http.get(f"{ep.url}/health", headers=cl._auth_headers("brain"), timeout=30)
+    j = r.json() if r.status_code < 400 else {}
+    w = j.get("workers", {}) if isinstance(j, dict) else {}
+    return {k: w.get(k) for k in ("idle", "ready", "running", "initializing")}
+
+
+async def suite(args):
+    from mme_lexicon import Lexicon
+    if not args.yes:
+        raise SystemExit("--yes required: chargeable")
+    lx = Lexicon()
+    out = {"phases": {}}
+    path = Path(args.out_suite)
+
+    def save():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    # 0. warm (health is free; a 1-token ping only if no worker is up). Its cost is reported separately and is NOT charged to the phase caps.
+    if path.exists() and args.phases != "all":                        # keep the phases already measured BEFORE anything is saved
+        prev = json.loads(path.read_text(encoding="utf-8"))
+        out["phases"] = prev.get("phases", {})
+    args.budget = args.warm_budget
+    s, cfg, cl = make(args, reserve=200.0)
+    try:
+        w0 = await brain_workers(cl)
+        up = sum(int(w0.get(k) or 0) for k in ("idle", "ready", "running"))
+        if not up and args.no_warm:
+            raise SystemExit(f"Brain is cold (workers {w0}) and --no-warm was given: nothing was sent, nothing was spent")
+        if not up:
+            cl.cfg["max_tokens"] = 1
+            await cl.chat([{"role": "user", "content": "hi"}])
+            c = cl.calls[-1]
+            out["warmup"] = {"was_cold": True, "brain_delay_ms": c["delay_ms"], "brain_exec_ms": c["exec_ms"], "est_spend_usd": round(cl.ledger.spent(), 5)}
+        else:
+            out["warmup"] = {"was_cold": False, "workers_before": w0}
+    finally:
+        await cl.aclose()
+    print("warmup:", json.dumps(out["warmup"]), flush=True)
+    save()
+
+    async def phase(name, budget, body):
+        args.budget = budget
+        s, cfg, cl = make(args, reserve=0.0)
+        rows, halted = [], None
+        try:
+            rows = await body(cl, s)
+        except SystemExit as e:
+            halted = str(e)
+        finally:
+            await cl.aclose()
+        halted = halted or cl.halted
+        out["phases"][name] = {"rows": rows, "cost": cl.ledger.report(), "halted": halted}
+        save()
+        print(f"phase {name}: rows={len(rows)} est_spend=${cl.ledger.spent():.4f} (cap ${budget}) halted={halted}", flush=True)
+
+    async def one(cl, conv, text, **extra):
+        try:
+            r = await conv.brain_reply(text)
+        except Exception as e:                                       # counted, never replaced by invented text
+            return None, {"error": type(e).__name__, **extra}
+        row = row_of(r, r["text"], r["mode"] or "hi", lx, **extra)
+        if cl.halted:
+            raise SystemExit(f"halted: {cl.halted}")
+        return r, row
+
+    async def en_off(cl, s):                                         # item 1a: flag OFF, English callers, judged with the en-mode check
+        rows = []
+        for u in [u for u in load_utterances(100) if u["style"] == "english"]:
+            r, row = await one(cl, conv_for(cl, s, False), u["text"], id=u["id"])
+            row["mode"] = "en"
+            row["check_ok_en"] = check_reply(r["text"], "en")[0] if r else None
+            rows.append(row)
+        return rows
+
+    async def multiturn(cl, s):                                      # item 1b: flag ON, 20 conversations x 10 turns, history kept (no tag in it)
+        rows = []
+        for c in jl("multiturn_conversations.jsonl"):
+            conv = conv_for(cl, s, True)
+            for n, t in enumerate(c["turns"], 1):
+                r, row = await one(cl, conv, t["text"], cid=c["id"], turn=n, style=t["style"])
+                rows.append(row)
+                if r:
+                    conv.messages.append({"role": "user", "content": t["text"]})
+                    conv.messages.append({"role": "assistant", "content": r["text"]})
+                    conv._trim()
+        return rows
+
+    async def adversarial(cl, s):                                    # item 2: flag ON; context/tool text sits before the caller turn as a system message
+        rows = []
+        for p in jl("adversarial_prompts.jsonl"):
+            conv = conv_for(cl, s, True)
+            if p.get("context"):
+                conv.messages.append({"role": "system", "content": p["context"]})
+            r, row = await one(cl, conv, p["text"], id=p["id"], kind=p["kind"])
+            rows.append(row)
+        return rows
+
+    todo = args.phases.split(",") if args.phases != "all" else ["en_off", "multiturn", "adversarial"]
+    for name, cap, body in (("en_off", args.cap_en_off, en_off), ("multiturn", args.cap_multiturn, multiturn), ("adversarial", args.cap_adv, adversarial)):
+        if name in todo:
+            await phase(name, cap, body)
+    summarize_suite(out)
+
+
+def summarize_suite(out):
+    print("\n=== suite summary (counts, lengths, kinds only) ===")
+    P = out["phases"]
+    rs = [r for r in P.get("en_off", {}).get("rows", []) if not r.get("error")]
+    if rs:
+        ms = [r["ms"] for r in rs if r["ms"]]
+        print(f"[1a] flag OFF, English callers, en-mode check: replies={len(rs)} | contain Devanagari (en check fails)={sum(1 for r in rs if r['check_ok_en'] is False)} | "
+              f"contain Roman-letter Hindi (lexicon)={sum(1 for r in rs if r['roman_tokens'])} | latency p50={pct(ms,50)}")
+    rows = [r for r in P.get("multiturn", {}).get("rows", []) if not r.get("error")]
+    if rows:
+        print(f"[1b] multi-turn, flag ON: turns run={len(rows)} errors={sum(1 for r in P['multiturn']['rows'] if r.get('error'))} halted={P['multiturn']['halted']}")
+        print("   turn | replies | Roman-Hindi (final) | retried | check failed")
+        for n in range(1, 11):
+            t = [r for r in rows if r["turn"] == n]
+            if t:
+                print(f"   {n:>4} | {len(t):>7} | {sum(1 for r in t if r['roman_tokens']):>19} | {sum(1 for r in t if r['retried']):>7} | {sum(1 for r in t if r['check_ok'] is False):>12}")
+        print(f"   overall Roman-Hindi share: {sum(1 for r in rows if r['roman_tokens'])}/{len(rows)}; retries: {sum(1 for r in rows if r['retried'])}; "
+              f"around the switch (turn 5 vs 6, wrong-language replies): {sum(1 for r in rows if r['turn'] in (5, 6) and r['check_ok'] is False)}")
+    ad = [r for r in P.get("adversarial", {}).get("rows", []) if not r.get("error")]
+    if ad:
+        rt = [r for r in ad if r["retried"]]
+        rm = [r["retry_ms"] for r in rt if r["retry_ms"] is not None]
+        print(f"[2] adversarial, flag ON: prompts run={len(ad)} | first reply failed check={sum(1 for r in ad if r['first_ok'] is False)} | retry fired={len(rt)}/{len(ad)} | "
+              f"retry fixed={sum(1 for r in rt if r['retry_ok'])} | retry failed or timed out (spoken as is)={sum(1 for r in rt if not r['retry_ok'])} | "
+              f"retry time ms p50={pct(rm,50)} max={max(rm) if rm else None} | final still failing={sum(1 for r in ad if r['check_ok'] is False)}")
+        for k in ("long_reply", "tool_result_english", "mixed_script", "instruction_conflict"):
+            g = [r for r in ad if r["kind"] == k]
+            print(f"   {k:<22} n={len(g)} retried={sum(1 for r in g if r['retried'])} final_roman={sum(1 for r in g if r['roman_tokens'])} final_check_failed={sum(1 for r in g if r['check_ok'] is False)}")
+        for r in sorted(rt, key=lambda r: -(r["retry_ms"] or 0))[:10]:
+            print(f"   retried: {r['kind']:<22} chars={r['reply_chars']:<4} first_kinds={r['first_kinds']} retry_ok={r['retry_ok']} retry_ms={r['retry_ms']} final_kinds={r['kinds']}")
+    spend = sum(P[k]["cost"]["usd_estimated_total"] for k in P)
+    print(f"estimated spend: phases ${round(spend,4)} (+ warm-up {out['warmup'].get('est_spend_usd', 0)})")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=("warm", "run"))
+    ap.add_argument("cmd", choices=("warm", "run", "suite"))
+    ap.add_argument("--phases", default="all", help="suite: all, or a comma list of en_off,multiturn,adversarial (earlier results in the output file are kept)")
+    ap.add_argument("--no-warm", action="store_true", help="suite: abort (free) if the Brain has no worker up instead of paying for a cold start")
+    ap.add_argument("--warm-budget", type=float, default=0.15); ap.add_argument("--cap-en-off", type=float, default=0.05)
+    ap.add_argument("--cap-multiturn", type=float, default=0.20); ap.add_argument("--cap-adv", type=float, default=0.15)
+    ap.add_argument("--out-suite", default=str(ROOT / "docs" / "evidence" / "devanagari_suite.json"))
     ap.add_argument("--tenant", default="mme-test"); ap.add_argument("--budget", type=float, default=0.50)
     ap.add_argument("--idle", type=float, default=60.0, help="Brain idle timeout in s (assumed; used only for the spend estimate)")
     ap.add_argument("--n", type=int, default=100); ap.add_argument("--yes", action="store_true")
     ap.add_argument("--out", default=str(ROOT / "docs" / "evidence" / "devanagari_app_path.json"))
     a = ap.parse_args()
     logging.getLogger().setLevel(logging.WARNING)
-    asyncio.run(warm(a) if a.cmd == "warm" else run(a))
+    asyncio.run({"warm": warm, "run": run, "suite": suite}[a.cmd](a))
 
 
 if __name__ == "__main__":
