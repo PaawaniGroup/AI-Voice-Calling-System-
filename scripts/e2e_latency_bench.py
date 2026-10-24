@@ -120,13 +120,13 @@ class BenchClients(ModelClients):
         self.role = "turn"
         self.inflight: dict = {}   # request id -> service (jobs whose id is known; used to cancel on abort)
 
-    async def _runpod_wait(self, service, ep, hdrs, j):
+    async def _runpod_wait(self, service, ep, hdrs, j, **kw):
         rec = _cur.get()
         if isinstance(j, dict) and j.get("id"):
             self.inflight[j["id"]] = service
             if rec is not None:
                 rec["request_id"] = j["id"]
-        res = await super()._runpod_wait(service, ep, hdrs, j)
+        res = await super()._runpod_wait(service, ep, hdrs, j, **kw)
         if isinstance(res, dict):
             if res.get("id"):
                 self.inflight.pop(res["id"], None)

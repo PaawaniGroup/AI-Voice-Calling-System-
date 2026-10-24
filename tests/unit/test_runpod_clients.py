@@ -1,6 +1,7 @@
 """RunPod serverless request/response contract of the STT and TTS adapters.
 The RunPod API is a MOCK (httpx.MockTransport); the real wire format was observed live on 2026-10-23
 (STT handler wants `audio_b64`, TTS handler wants `reference_audio_base64`, `/runsync` may return IN_PROGRESS)."""
+import asyncio
 import base64
 import io
 import json
@@ -29,7 +30,7 @@ def _transport(handler, seen):
 
 def _clients(transport, **settings):
     s = make_settings(ai_allowed_hosts="api.runpod.ai", **settings)
-    cfg = {"stt_url": BASE + "/runsync", "tts_url": BASE + "/runsync", "keys": {"stt": "k", "tts": "k"}}
+    cfg = {"stt_url": BASE + "/runsync", "tts_url": BASE + "/runsync", "keys": {"stt": "k", "tts": "k"}, "runpod_mode": "runsync"}
     return ModelClients(s, cfg, transport)
 
 
@@ -133,7 +134,7 @@ async def test_brain_parses_runpod_vllm_list_of_chat_completions():
         return httpx.Response(200, json=done)
 
     s = make_settings(ai_allowed_hosts="api.runpod.ai")
-    c = ModelClients(s, {"brain_url": BASE + "/runsync", "keys": {"brain": "k"}}, _transport(handler, seen))
+    c = ModelClients(s, {"brain_url": BASE + "/runsync", "keys": {"brain": "k"}, "runpod_mode": "runsync"}, _transport(handler, seen))
     res = await c.chat([{"role": "user", "content": "hi"}])
     await c.aclose()
     assert res == {"text": "Namaste!", "tool_calls": []}
@@ -143,7 +144,7 @@ async def test_brain_parses_runpod_vllm_list_of_chat_completions():
 
 async def test_brain_failed_job_is_an_error():
     s = make_settings(ai_allowed_hosts="api.runpod.ai")
-    c = ModelClients(s, {"brain_url": BASE + "/runsync"}, _transport(lambda r: httpx.Response(200, json={"status": "FAILED", "error": "oom"}), []))
+    c = ModelClients(s, {"brain_url": BASE + "/runsync", "runpod_mode": "runsync"}, _transport(lambda r: httpx.Response(200, json={"status": "FAILED", "error": "oom"}), []))
     with pytest.raises(AiError) as e:
         await c.chat([{"role": "user", "content": "hi"}])
     await c.aclose()
@@ -156,3 +157,116 @@ async def test_tts_unreadable_reference_is_a_clear_error(tmp_path):
         await c.synthesize("x", "en")
     await c.aclose()
     assert e.value.kind == "reference_unreadable"
+
+# ------------------------------------------------------------------ run mode (default): the job id is known at once, so a cancelled turn cancels the RunPod job
+def _run_clients(handler, seen, timeout=None, **cfg_extra):
+    s = make_settings(ai_allowed_hosts="api.runpod.ai")
+    cfg = {"stt_url": BASE + "/runsync", "keys": {"stt": "k"}, **cfg_extra}
+    if timeout:
+        cfg["timeouts"] = {"stt": timeout}
+    return ModelClients(s, cfg, _transport(handler, seen))
+
+
+def _paths(seen):
+    return [p.replace("/v2/abc123", "") for _, p, _ in seen]
+
+
+async def test_default_mode_submits_with_run_and_polls_status():
+    seen = []
+
+    def handler(req):
+        if req.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "job9", "status": "IN_QUEUE"})
+        n = sum(1 for p in _paths(seen) if p.startswith("/status/"))
+        if n < 2:
+            return httpx.Response(200, json={"id": "job9", "status": "IN_PROGRESS"})
+        return httpx.Response(200, json={"id": "job9", "status": "COMPLETED", "delayTime": 12, "executionTime": 34, "output": {"text": " ji ", "language": "hi"}})
+
+    c = _run_clients(handler, seen)
+    res = await c.transcribe(pcm_tone(200), 16000, "auto")
+    await c.aclose()
+    assert res == {"text": "ji", "language": "hi"}
+    assert _paths(seen) == ["/run", "/status/job9", "/status/job9"] and c.cancelled_jobs == []
+
+
+async def test_a_job_that_finishes_on_submit_needs_no_polling():
+    seen = []
+    c = _run_clients(lambda r: httpx.Response(200, json={"id": "j", "status": "COMPLETED", "output": {"text": "x"}}), seen)
+    assert (await c.transcribe(pcm_tone(200), 16000, "auto"))["text"] == "x"
+    await c.aclose()
+    assert _paths(seen) == ["/run"]
+
+
+async def test_cancelling_the_task_cancels_the_runpod_job_exactly_once():
+    seen = []
+
+    def handler(req):
+        if req.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "jobC", "status": "IN_QUEUE"})
+        if "/cancel/" in req.url.path:
+            return httpx.Response(200, json={"id": "jobC", "status": "CANCELLED"})
+        return httpx.Response(200, json={"id": "jobC", "status": "IN_PROGRESS"})
+
+    c = _run_clients(handler, seen)
+    task = asyncio.create_task(c.transcribe(pcm_tone(200), 16000, "auto"))
+    await asyncio.sleep(0.25)                    # submitted and polling
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await c.aclose()                             # waits for the background cancel call
+    assert [p for p in _paths(seen) if "/cancel/" in p] == ["/cancel/jobC"]
+    assert c.cancelled_jobs == [("stt", 200)]
+
+
+async def test_a_timeout_also_cancels_the_job_instead_of_leaving_it_billing():
+    from app.ai.clients import AiTimeout
+    seen = []
+
+    def handler(req):
+        if req.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "jobT", "status": "IN_QUEUE"})
+        if "/cancel/" in req.url.path:
+            return httpx.Response(200, json={"status": "CANCELLED"})
+        return httpx.Response(200, json={"id": "jobT", "status": "IN_QUEUE"})
+
+    c = _run_clients(handler, seen, timeout=0.4)
+    with pytest.raises(AiTimeout):
+        await c.transcribe(pcm_tone(200), 16000, "auto")
+    await c.aclose()
+    assert c.cancelled_jobs == [("stt", 200)] and any("/cancel/jobT" in p for p in _paths(seen))
+
+
+async def test_cancelling_while_the_submit_is_still_on_its_way_cancels_the_job_when_its_id_arrives():
+    seen = []
+
+    async def handler(req):
+        if req.url.path.endswith("/run"):
+            await asyncio.sleep(0.4)             # the submit is slow
+            return httpx.Response(200, json={"id": "jobS", "status": "IN_QUEUE"})
+        return httpx.Response(200, json={"status": "CANCELLED"})
+
+    c = _run_clients(handler, seen)
+    task = asyncio.create_task(c.transcribe(pcm_tone(200), 16000, "auto"))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await c.aclose()
+    assert c.cancelled_jobs == [("stt", 200)] and any("/cancel/jobS" in p for p in _paths(seen))
+
+
+async def test_http_error_on_submit_is_an_error_and_cancels_nothing():
+    seen = []
+    c = _run_clients(lambda r: httpx.Response(500), seen)
+    with pytest.raises(AiError) as e:
+        await c.transcribe(pcm_tone(200), 16000, "auto")
+    await c.aclose()
+    assert e.value.kind == "http_error" and c.cancelled_jobs == [] and _paths(seen) == ["/run"]
+
+
+async def test_runsync_mode_is_still_available_and_cannot_cancel():
+    seen = []
+    c = _run_clients(lambda r: httpx.Response(200, json={"id": "j", "status": "COMPLETED", "output": {"text": "y"}}), seen, runpod_mode="runsync")
+    assert (await c.transcribe(pcm_tone(200), 16000, "auto"))["text"] == "y"
+    await c.aclose()
+    assert _paths(seen) == ["/runsync"]

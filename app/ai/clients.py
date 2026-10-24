@@ -141,6 +141,8 @@ class ModelClients:
         limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=120.0)
         self._http = httpx.AsyncClient(transport=transport, follow_redirects=False, limits=limits,
                                        timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0))
+        self._bg: set[asyncio.Task] = set()          # fire-and-forget RunPod cancel calls (kept referenced until they finish)
+        self.cancelled_jobs: list[tuple[str, int | str]] = []   # (service, http status | error type) of each RunPod cancel attempt
 
     def _auth_headers(self, service: str | None = None) -> dict:
         key = None
@@ -153,6 +155,8 @@ class ModelClients:
         return {"Authorization": f"Bearer {key}"} if key else {}
 
     async def aclose(self) -> None:
+        if self._bg:  # let pending RunPod cancel calls finish: a cancelled job must not be left billing
+            await asyncio.wait(set(self._bg), timeout=3)
         await self._http.aclose()
 
     def endpoint(self, service: str) -> ServiceEndpoint:
@@ -165,10 +169,64 @@ class ModelClients:
             return ServiceEndpoint(url[:-8], "/runsync", float(t))
         return ServiceEndpoint(url, (self.cfg.get("paths") or {}).get(service, defaults[service]), float(t))
 
-    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j):
+    def _runpod_mode(self) -> str:
+        """Per-tenant `runpod_mode`: "run" (default: submit with /run, poll /status, cancellable) or "runsync" (one blocking call)."""
+        return "runsync" if str(self.cfg.get("runpod_mode") or "run").lower() == "runsync" else "run"
+
+    def _spawn(self, coro) -> None:
+        t = asyncio.ensure_future(coro)
+        self._bg.add(t)
+        t.add_done_callback(self._bg.discard)
+
+    async def _cancel_job(self, service: str, ep: ServiceEndpoint, hdrs: dict, job_id: str) -> None:
+        try:
+            r = await self._http.post(f"{ep.url}/cancel/{job_id}", headers=hdrs, timeout=5)
+            self.cancelled_jobs.append((service, r.status_code))
+        except Exception as e:  # reported, never raised: cancelling is best effort and must not disturb the next turn
+            self.cancelled_jobs.append((service, type(e).__name__))
+            log.warning("could not cancel a %s job: %s", service, type(e).__name__)
+
+    async def _cancel_when_submitted(self, post, service: str, ep: ServiceEndpoint, hdrs: dict) -> None:
+        """The turn was cancelled while the /run request was still on its way: cancel the job as soon as its id comes back."""
+        try:
+            r = await post
+            jid = r.json().get("id") if r.status_code < 400 else None
+        except Exception:
+            return
+        if jid:
+            await self._cancel_job(service, ep, hdrs, jid)
+
+    async def _runpod_call(self, service: str, ep: ServiceEndpoint, hdrs: dict, body: dict):
+        """Submit ONE RunPod job and return its finished result.
+
+        run mode (default): POST /run (the job id is known at once), then poll /status. If this task is cancelled (the caller spoke again,
+        a hangup, a timeout) the RunPod job is CANCELLED too: it stops billing and frees the single GPU worker for the next request.
+        runsync mode: one blocking POST /runsync; its id is unknown until it ends, so nothing can be cancelled."""
+        if self._runpod_mode() == "runsync":
+            r = await self._http.post(ep.url + "/runsync", json=body, headers=hdrs, timeout=ep.timeout)
+            if r.status_code >= 400:
+                raise AiError(service, "http_error", str(r.status_code))
+            return await self._runpod_wait(service, ep, hdrs, r.json())
+        post = asyncio.ensure_future(self._http.post(ep.url + "/run", json=body, headers=hdrs, timeout=ep.timeout))
+        try:
+            r = await asyncio.shield(post)
+        except asyncio.CancelledError:
+            self._spawn(self._cancel_when_submitted(post, service, ep, hdrs))
+            raise
+        if r.status_code >= 400:
+            raise AiError(service, "http_error", str(r.status_code))
+        j = r.json()
+        jid = j.get("id") if isinstance(j, dict) else None
+        try:
+            return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06)
+        except asyncio.CancelledError:
+            if jid:
+                self._spawn(self._cancel_job(service, ep, hdrs, jid))
+            raise
+
+    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j, poll_delay: float = 0.1):
         """RunPod `/runsync` stops waiting after ~90 s (cold start) and returns IN_QUEUE/IN_PROGRESS: poll `/status`.
         Adaptive fast polling (100ms -> 400ms) minimizes latency instead of waiting 1s per poll."""
-        poll_delay = 0.1
         while isinstance(j, dict) and j.get("status") in ("IN_QUEUE", "IN_PROGRESS") and j.get("id"):
             await asyncio.sleep(poll_delay)
             poll_delay = min(poll_delay * 1.5, 0.4)
@@ -256,10 +314,7 @@ class ModelClients:
                         "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
                     }
                 }
-                r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
-                if r.status_code >= 400:
-                    raise AiError("stt", "http_error", str(r.status_code))
-                j = await self._runpod_wait("stt", ep, hdrs, r.json())
+                j = await self._runpod_call("stt", ep, hdrs, body)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 if isinstance(out, dict):
                     text = out.get("transcription") or out.get("text") or ""
@@ -307,13 +362,15 @@ class ModelClients:
                 body = {"model": model, "messages": messages, "temperature": temp, "max_tokens": max_tok}
                 if tools:
                     body["tools"] = tools
-            r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
-            if r.status_code >= 400:
-                raise AiError("brain", "http_error", str(r.status_code))
+            if ep.path.endswith("/runsync"):
+                j = await self._runpod_call("brain", ep, hdrs, body)
+            else:
+                r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
+                if r.status_code >= 400:
+                    raise AiError("brain", "http_error", str(r.status_code))
             try:
-                j = r.json()
-                if ep.path.endswith("/runsync"):
-                    j = await self._runpod_wait("brain", ep, hdrs, j)
+                if not ep.path.endswith("/runsync"):
+                    j = r.json()
                 out = j["output"] if isinstance(j, dict) and "output" in j else j
                 if isinstance(out, list):  # RunPod vLLM worker: [ {OpenAI chat.completion object} ]
                     out = out[0] if out else ""
@@ -495,10 +552,7 @@ class ModelClients:
                 ref = self._tts_reference_b64()
                 if ref:
                     body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
-                r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
-                if r.status_code >= 400:
-                    raise AiError("tts", "http_error", str(r.status_code))
-                j = await self._runpod_wait("tts", ep, hdrs, r.json())
+                j = await self._runpod_call("tts", ep, hdrs, body)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 b64_audio = None
                 if isinstance(out, dict):
