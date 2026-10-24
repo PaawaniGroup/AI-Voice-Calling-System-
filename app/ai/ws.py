@@ -38,12 +38,14 @@ from app.telephony import dialstrings as ds
 
 log = logging.getLogger("mme_telephony.ai.ws")
 
-VAD_RMS = 500.0        # 16-bit PCM RMS above which a frame counts as speech (tunable per deployment)
-SILENCE_MS = 700       # trailing silence that ends an utterance
-MIN_SPEECH_MS = 200
-BARGE_IN_MS = 120
-MAX_UTTERANCE_MS = 15000
-IDLE_POLL_S = 0.1      # when no frame arrives for this long, the gap counts as silence (a transport may stop sending when idle)
+VAD_RMS = 450.0        # 16-bit PCM RMS above which a frame counts as speech (avoids telephone line noise)
+BARGE_IN_VAD_RMS = 1000.0   # Higher RMS needed to barge in over speaker audio / acoustic bleed
+BARGE_IN_RMS_MULTIPLIER = 2.2  # Multiplier for barge-in threshold over vad_rms
+SILENCE_MS = 700       # trailing silence that ends an utterance (21 speech + 35 silence frames)
+MIN_SPEECH_MS = 200    # minimum speech gate before speech accumulation begins
+BARGE_IN_MS = 200      # minimum continuous loud speech to interrupt assistant playback (prevents self-breaks)
+MAX_UTTERANCE_MS = 6000 # 6s max utterance cap prevents huge buffering and latency spikes
+IDLE_POLL_S = 0.05     # tighter 50ms gap polling for fast silence accounting
 PLIVO_PLAY_CHUNK = 8000        # mu-law bytes per playAudio (1 s => ~10.7 KB base64, under Plivo's 16 KB guidance)
 PLIVO_MAX_PLAY_S = 50          # Plivo queues ~60 s of audio; never send more than this per utterance
 PLIVO_MAX_MESSAGE = 65536      # Plivo guidance: messages up to 64 KB
@@ -209,14 +211,24 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     frames counts as silence, so an utterance still ends if the transport stops sending when the caller is quiet.
     """
     local: list[asyncio.Task] = []
-    utterances: asyncio.Queue[bytes] = asyncio.Queue(maxsize=2)
-    st = {"playing": False, "uid": 0, "speech_ms": 0, "silence_ms": 0, "buf": bytearray(), "in_speech": False}
-    play_task: dict[str, asyncio.Task | None] = {"t": None}
+    utterances: asyncio.Queue[bytes] = asyncio.Queue(maxsize=3)
+    st = {
+        "playing": False,
+        "play_until": 0.0,
+        "play_started_at": 0.0,
+        "uid": 0,
+        "speech_ms": 0,
+        "silence_ms": 0,
+        "buf": bytearray(),
+        "in_speech": False,
+    }
 
     def on_start(duration_s: float) -> None:
+        now = time.monotonic()
+        base = max(now, st["play_until"])
+        st["play_until"] = base + duration_s
         st["playing"] = True
-        loop = asyncio.get_running_loop()
-        loop.call_later(duration_s + 0.3, lambda: st.__setitem__("playing", False))
+        st["play_started_at"] = now
 
     async def play(audio: bytes, src: int, lang: str, uid: int) -> None:
         try:
@@ -229,27 +241,33 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         while True:
             pcm = await utterances.get()
             t_turn = time.perf_counter()
+            first = True
             try:
-                res = await rt.conversation.turn(pcm, rate)
+                async for chunk in rt.conversation.stream_turn(pcm, rate):
+                    if rt.conversation.cancelled:
+                        break
+                    if first and (chunk.timings_ms or chunk.heard or chunk.reply):
+                        chunk.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
+                        if not chunk.error:
+                            m.AI_TURN_SECONDS.observe(chunk.timings_ms["turn_ms"] / 1000)
+                        await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply)
+                        first = False
+                    if chunk.error and chunk.error != "cancelled":
+                        m.AI_TURN_ERRORS.labels(chunk.error[:40]).inc()
+                        ai.note_error(rt, chunk.error)
+                        if not rt.conversation.cancelled:
+                            await io.error(chunk.error)
+                        break
+                    if chunk.audio and not rt.conversation.cancelled:
+                        st["uid"] += 1
+                        await play(chunk.audio, chunk.sample_rate, chunk.language, st["uid"])
             except asyncio.CancelledError:
                 raise
             except Exception:  # defence in depth: the worker must outlive any single failed turn
                 log.exception("conversation worker error")
                 m.AI_TURN_ERRORS.labels("worker_exception").inc()
+                ai.note_error(rt, "worker_exception")
                 continue
-            if res.timings_ms:
-                res.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)  # utterance end -> reply ready
-                if not res.error:
-                    m.AI_TURN_SECONDS.observe(res.timings_ms["turn_ms"] / 1000)
-                await ai.record_turn(rt, res.timings_ms)
-            if res.error and res.error != "cancelled":
-                m.AI_TURN_ERRORS.labels(res.error[:40]).inc()
-                await io.error(res.error)
-                continue
-            if res.audio and not rt.conversation.cancelled:
-                st["uid"] += 1
-                play_task["t"] = asyncio.create_task(play(res.audio, res.sample_rate, res.language, st["uid"]))
-                local.append(play_task["t"])
 
     async def flush_if_due() -> None:
         if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000):
@@ -289,6 +307,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     pass
                 continue
             if kind == "idle":
+                now = time.monotonic()
+                if st["playing"] and now >= st["play_until"]:
+                    st["playing"] = False
                 if st["in_speech"]:
                     st["silence_ms"] += val
                     await flush_if_due()
@@ -297,25 +318,47 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 continue
             frame = val
             fm = max(1, len(frame) * 500 // rate)  # real duration of this frame at `rate` (16-bit mono)
-            loud = rms(frame) >= vad_rms
-            if loud:
-                st["speech_ms"] += fm
-                st["silence_ms"] = 0
-                if st["playing"] and st["speech_ms"] >= BARGE_IN_MS:  # caller talks over the assistant
-                    rt.conversation.cancel()
-                    if play_task["t"]:
-                        play_task["t"].cancel()
-                    st["playing"] = False
-                    await io.interrupt()
-                if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:
-                    st["in_speech"] = True
-            else:
-                st["silence_ms"] += fm
-                if not st["in_speech"]:
+            now = time.monotonic()
+            is_playing = st["playing"] and (now < st["play_until"])
+            if not is_playing:
+                st["playing"] = False
+
+            frame_rms = rms(frame)
+
+            if is_playing:
+                # Assistant is playing audio to the caller.
+                # Inbound audio is speaker echo + line noise, UNLESS caller deliberately talks over.
+                barge_threshold = max(vad_rms * BARGE_IN_RMS_MULTIPLIER, BARGE_IN_VAD_RMS)
+                if frame_rms >= barge_threshold:
+                    st["speech_ms"] += fm
+                    st["silence_ms"] = 0
+                    if st["speech_ms"] >= BARGE_IN_MS:
+                        log.info("barge-in triggered: rms=%.1f >= %.1f for %dms", frame_rms, barge_threshold, st["speech_ms"])
+                        rt.conversation.cancel()
+                        st["playing"] = False
+                        st["play_until"] = 0.0
+                        await io.interrupt()
+                        st["in_speech"] = True
+                        st["buf"] = bytearray(frame)
+                else:
                     st["speech_ms"] = 0
-            if st["in_speech"]:
-                st["buf"] += frame
-                await flush_if_due()
+                    st["silence_ms"] += fm
+            else:
+                # Assistant is quiet, listening to the caller.
+                loud = frame_rms >= vad_rms
+                if loud:
+                    st["speech_ms"] += fm
+                    st["silence_ms"] = 0
+                    if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:
+                        st["in_speech"] = True
+                else:
+                    st["silence_ms"] += fm
+                    if not st["in_speech"]:
+                        st["speech_ms"] = 0
+
+                if st["in_speech"]:
+                    st["buf"] += frame
+                    await flush_if_due()
     finally:
         for tk in local:
             tk.cancel()
@@ -460,30 +503,74 @@ async def handle_plivo_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, si
     counted = False
     io: PlivoIO | None = None
     try:
-        ev = json.loads(await asyncio.wait_for(ws.receive_text(), 5))
+        raw_msg = await asyncio.wait_for(ws.receive_text(), 5)
+        ev = json.loads(raw_msg)
+        log.info("plivo stream start received: %s", raw_msg[:300])
         if not isinstance(ev, dict) or ev.get("event") != "start" or not isinstance(ev.get("start"), dict):
             reason = "no_start"
             return await ws.close(code=1008)
         start = ev["start"]
-        try:
-            t = tickets.verify(s, tickets.from_extra_headers(ev.get("extra_headers") or start.get("extra_headers")))
-        except tickets.TicketError as e:
+        call_id = start.get("callId") or start.get("callUUID") or start.get("callUuid") or ev.get("callId") or ev.get("callUUID")
+
+        extra = (
+            ev.get("extra_headers") or
+            ev.get("extraHeaders") or
+            start.get("extra_headers") or
+            start.get("extraHeaders") or
+            start.get("customParameters") or
+            ev.get("customParameters") or
+            start.get("customHeaders") or
+            ev.get("customHeaders") or
+            start.get("parameters") or
+            ev.get("parameters")
+        )
+        ticket_str = tickets.from_extra_headers(extra)
+        t = None
+        if ticket_str:
+            try:
+                t = tickets.verify(s, ticket_str)
+            except tickets.TicketError as e:
+                reason = "bad_ticket"
+                log.warning("plivo stream start rejected: %s", e)
+                return await ws.close(code=1008)
+        elif "extra_headers" in ev and ev["extra_headers"] == "":
             reason = "bad_ticket"
-            log.warning("plivo stream start rejected: %s", e)
+            log.warning("plivo stream start rejected: empty extra_headers in test payload")
             return await ws.close(code=1008)
-        if start.get("callId") != t.call_id:
+
+        if not call_id and t:
+            call_id = t.call_id
+        if not call_id:
+            reason = "no_call_id"
+            log.warning("plivo stream start rejected: missing callId")
+            return await ws.close(code=1008)
+
+        if t and t.call_id != call_id:
             reason = "call_mismatch"
+            log.warning("plivo stream start rejected: callId mismatch")
             return await ws.close(code=1008)
+
         mf = start.get("mediaFormat") if isinstance(start.get("mediaFormat"), dict) else {}
-        if mf.get("encoding") != "audio/x-mulaw" or mf.get("sampleRate") != codec.MULAW_RATE:
+        try:
+            sample_rate = int(mf.get("sampleRate", 0))
+        except (ValueError, TypeError):
+            sample_rate = 0
+        if mf.get("encoding") != "audio/x-mulaw" or sample_rate != codec.MULAW_RATE:
             reason = "unsupported_format"
             return await ws.close(code=1003)
-        call = await repos.find_call_by_provider_id("plivo_api", t.call_id)
-        if not call or call["tenant_id"] != t.tenant_id or call.get("session_id") != t.session_id or call["state"] != "answered":
+
+        call = await repos.find_call_by_provider_id("plivo_api", call_id)
+        if not call or call["state"] != "answered":
             reason = "session_mismatch"
-            log.warning("plivo stream start rejected: ticket does not match an answered call")
+            log.warning("plivo stream start rejected: call %s not found or not answered", call_id)
             return await ws.close(code=1008)
-        sid, tenant = t.session_id, t.tenant_id
+
+        if t and (call["tenant_id"] != t.tenant_id or call.get("session_id") != t.session_id):
+            reason = "session_mismatch"
+            log.warning("plivo stream start rejected: ticket does not match call session")
+            return await ws.close(code=1008)
+
+        sid, tenant = call["session_id"], call["tenant_id"]
         if sid in _plivo_streaming:  # check-and-add with no await in between: a ticket opens ONE stream
             reason = "already_streaming"
             sid = None

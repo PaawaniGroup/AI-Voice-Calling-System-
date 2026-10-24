@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 
-from app.api import routes, routes_platform
+from app.api import routes, routes_live, routes_platform
 from app.ai.media import UnavailableBridge, WsForkBridge
 from app.ai.service import AiService
 from app.services.sessions import SessionService
@@ -21,6 +21,7 @@ from app.core.errors import ApiError
 from app.core.logging import RingHandler, correlation_id_var, request_id_var, setup_logging
 from app.events.webhooks import WebhookEmitter, WebhookWorker
 from app.observability import metrics as m
+from app.observability.activity import ActivityBus
 from app.persistence.db import Database
 from app.persistence.repos import Repos
 from app.providers.base import FreeSwitchGatewayProvider, MockProvider
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         ai = AiService(database, repos, s, sessions, emitter, bridge, transport=ai_transport)
         ctrl.sessions, ctrl.ai = sessions, ai
         app.state.sessions, app.state.ai = sessions, ai
+        repos.activity = sessions.activity = ai.activity = wworker.activity = app.state.activity  # live dashboard feed
         storage = rec_svc.make_storage(s)
         app.state.repos, app.state.controller, app.state.webhook_worker = repos, ctrl, wworker
         app.state.storage, app.state.db = storage, database
@@ -150,6 +152,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
                   openapi_url="/openapi.json" if s.docs_enabled else None)
     app.state.settings = s
     app.state.limiter = RateLimiter()
+    app.state.activity = ActivityBus()
     app.state.errlog = errlog
     app.state.last_ok = {}
     if s.csv(s.cors_origins):
@@ -202,6 +205,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
     app.include_router(routes.health)
     app.include_router(routes.v1)
     app.include_router(routes_platform.router)
+    app.include_router(routes_live.router)
     app.include_router(routes_platform.ws_router)
     if s.dashboard_enabled:
         from pathlib import Path

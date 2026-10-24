@@ -73,11 +73,21 @@ def verify(s: Settings, token: str) -> StreamTicket:
 
 
 def from_extra_headers(extra: object) -> str:
-    """Plivo's `extra_headers` is the `key1=value1;key2=value2` string from the Stream element."""
+    """Plivo's `extra_headers` / `extraHeaders` / `customParameters`: dict or string with mme_ticket."""
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            if "ticket" in k.lower():
+                if isinstance(v, list) and v:
+                    v = v[0]
+                return str(v).strip(' \t\r\n"\'')
+        return ""
     if not isinstance(extra, str):
         return ""
-    for part in extra.split(";"):
+    clean = extra.strip(' \t\r\n"\'')
+    for part in clean.replace(",", ";").split(";"):
         k, _, v = part.partition("=")
-        if k.strip() == "mme_ticket":
-            return v.strip()
+        if "ticket" in k.lower():
+            return v.strip(' \t\r\n"\'')
+        if "." in part and len(part) > 30 and "=" not in part:
+            return part.strip(' \t\r\n"\'')
     return ""

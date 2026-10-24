@@ -1,0 +1,41 @@
+{"id": "c01", "word": "aapko", "text": "Aapko form kal tak bharna hai.", "expect": "आपको form कल तक भरना है."}
+{"id": "c02", "word": "aapko", "text": "Main aapko course ki poori jaankari deta hoon.", "expect": "मैं आपको course की पूरी जानकारी देता हूँ."}
+{"id": "c03", "word": "hoon", "text": "Main aapka counsellor hoon.", "expect": "मैं आपका counsellor हूँ."}
+{"id": "c04", "word": "hoon", "text": "Main abhi aapki madad kar sakta hoon.", "expect": "मैं अभी आपकी मदद कर सकता हूँ."}
+{"id": "c05", "word": "han", "text": "Han, aapka admission ho gaya hai.", "expect": "हाँ, आपका admission हो गया है."}
+{"id": "c06", "word": "han", "text": "Haan, yeh course aapke liye sahi hai.", "expect": "हाँ, यह course आपके लिए सही है."}
+{"id": "c07", "word": "sakta", "text": "Main aapko fees bata sakta hoon.", "expect": "मैं आपको fees बता सकता हूँ."}
+{"id": "c08", "word": "sakta", "text": "Yeh form aap online bhar sakte hain, main help kar sakta hoon.", "expect": "यह form आप online भर सकते हैं, मैं help कर सकता हूँ."}
+{"id": "c09", "word": "chahiye", "text": "Aapko kaunse documents chahiye?", "expect": "आपको कौनसे documents चाहिए?"}
+{"id": "c10", "word": "chahiye", "text": "Aapko marksheet aur ID proof chaiya hoga.", "expect": "आपको marksheet और ID proof चाहिए होगा."}
+{"id": "c11", "word": "chahiye", "text": "Admission ke liye kya chaiye?", "expect": "Admission के लिए क्या चाहिए?"}
+{"id": "c12", "word": "baare", "text": "Is course ke baare mein bataiye.", "expect": "इस course के बारे में बताइए."}
+{"id": "c13", "word": "baare", "text": "Hostel ke bare main aapko details deta hoon.", "expect": "Hostel के बारे में आपको details देता हूँ."}
+{"id": "c14", "word": "baare", "text": "Fees ke baarey me kuch puchna hai?", "expect": "Fees के बारे में कुछ पूछना है?"}
+{"id": "c15", "word": "main-I", "text": "Main kal aapko call karunga.", "expect": "मैं कल आपको call करूँगा."}
+{"id": "c16", "word": "main-I", "text": "Main aapko step by step bata deta hoon.", "expect": "मैं आपको step by step बता देता हूँ."}
+{"id": "c17", "word": "main-in", "text": "Aap is course mein admission le sakte hain.", "expect": "आप इस course में admission ले सकते हैं."}
+{"id": "c18", "word": "main-in", "text": "Course ke andar main kya kya padhaya jata hai?", "expect": "Course के अंदर में क्या क्या पढ़ाया जाता है?"}
+{"id": "c19", "word": "main-in", "text": "Delhi main hostel milta hai.", "expect": "Delhi में hostel मिलता है."}
+{"id": "c20", "word": "aapka", "text": "Aapka naam kya hai?", "expect": "आपका नाम क्या है?"}
+{"id": "c21", "word": "aapka", "text": "Apka admission process shuru ho gaya hai.", "expect": "आपका admission process शुरू हो गया है."}
+{"id": "c22", "word": "hota", "text": "Admission ka process online hota hai.", "expect": "Admission का process online होता है."}
+{"id": "c23", "word": "hota", "text": "Yeh course 3 saal ka hota hai.", "expect": "यह course 3 साल का होता है."}
+{"id": "c24", "word": "hai", "text": "Aapki fees Rs. 45,000 hai.", "expect": "आपकी fees Rs. 45,000 है."}
+{"id": "c25", "word": "hai", "text": "Yeh course bahut accha hai.", "expect": "यह course बहुत अच्छा है."}
+{"id": "c26", "word": "deta", "text": "Main aapko link bhej deta hoon.", "expect": "मैं आपको link भेज देता हूँ."}
+{"id": "c27", "word": "deta", "text": "Hostel ki facility college deta hai.", "expect": "Hostel की facility college देता है."}
+{"id": "c28", "word": "course name", "text": "Aapka course name kya hai?", "expect": "आपका course name क्या है?"}
+{"id": "c29", "word": "course name", "text": "Please batayiye course name aur admission year.", "expect": "Please बताइए course name और admission year."}
+{"id": "c30", "word": "course name", "text": "Course name confirm kar dijiye.", "expect": "Course name confirm कर दीजिए."}
+{"id": "c31", "word": "to", "text": "Aapko to pata hoga ki fees kitni hai.", "expect": "आपको तो पता होगा कि fees कितनी है."}
+{"id": "c32", "word": "ki", "text": "Mujhe lagta hai ki aap sahi hain.", "expect": "मुझे लगता है कि आप सही हैं."}
+{"id": "c33", "word": "ki", "text": "Aapki baat sahi hai.", "expect": "आपकी बात सही है."}
+{"id": "c34", "word": "hi", "text": "Aap hi decide kijiye.", "expect": "आप ही decide कीजिए."}
+{"id": "c35", "word": "us/is", "text": "Is baare mein aap kya sochte hain?", "expect": "इस बारे में आप क्या सोचते हैं?"}
+{"id": "c36", "word": "do", "text": "Do din mein result aa jayega.", "expect": "दो दिन में result आ जाएगा."}
+{"id": "c37", "word": "control", "text": "This is the main reason for the delay.", "expect": "This is the main reason for the delay."}
+{"id": "c38", "word": "control", "text": "Please tell me the main page of the course name.", "expect": "Please tell me the main page of the course name."}
+{"id": "c39", "word": "control", "text": "Hi, how do I apply to the course?", "expect": "Hi, how do I apply to the course?"}
+{"id": "c40", "word": "control", "text": "The fees is fixed per year and we do not change it.", "expect": "The fees is fixed per year and we do not change it."}
+{"id": "c41", "word": "control", "text": "Are you sure about the admission to this course?", "expect": "Are you sure about the admission to this course?"}

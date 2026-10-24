@@ -8,6 +8,7 @@ reachable when this was written: **their actual API shape is UNVERIFIED** and is
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import logging
 import struct
@@ -18,6 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.ai import tts_frontend
 from app.core.errors import Unprocessable
 from app.observability import metrics as m
 from config.settings import Settings
@@ -25,6 +27,7 @@ from config.settings import Settings
 log = logging.getLogger("mme_telephony.ai")
 
 SERVICES = ("stt", "brain", "tts", "rag")
+_REF_CACHE: dict = {}
 
 
 class AiError(Exception):
@@ -111,11 +114,18 @@ class ModelClients:
     def __init__(self, s: Settings, cfg: dict, transport: httpx.AsyncBaseTransport | None = None):
         self.s, self.cfg = s, cfg or {}
         self._sem = asyncio.Semaphore(s.ai_max_concurrency)
-        self._http = httpx.AsyncClient(transport=transport, follow_redirects=False,
-                                       headers=self._auth_headers(), timeout=httpx.Timeout(s.ai_request_timeout_s))
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=120.0)
+        self._http = httpx.AsyncClient(transport=transport, follow_redirects=False, limits=limits,
+                                       timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0))
 
-    def _auth_headers(self) -> dict:
-        key = self.s.ai_api_key.get_secret_value()
+    def _auth_headers(self, service: str | None = None) -> dict:
+        key = None
+        if service and isinstance(self.cfg.get("keys"), dict) and self.cfg["keys"].get(service):
+            key = self.cfg["keys"][service]
+        elif service and self.cfg.get(f"{service}_api_key"):
+            key = self.cfg[f"{service}_api_key"]
+        elif self.s.ai_api_key:
+            key = self.s.ai_api_key.get_secret_value()
         return {"Authorization": f"Bearer {key}"} if key else {}
 
     async def aclose(self) -> None:
@@ -127,7 +137,40 @@ class ModelClients:
             raise AiUnavailable(service, "not_configured")
         defaults = {"stt": "/v1/audio/transcriptions", "brain": "/v1/chat/completions", "tts": "/v1/audio/speech", "rag": "/search"}
         t = (self.cfg.get("timeouts") or {}).get(service, self.s.ai_request_timeout_s)
+        if url.endswith("/runsync"):
+            return ServiceEndpoint(url[:-8], "/runsync", float(t))
         return ServiceEndpoint(url, (self.cfg.get("paths") or {}).get(service, defaults[service]), float(t))
+
+    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j):
+        """RunPod `/runsync` stops waiting after ~90 s (cold start) and returns IN_QUEUE/IN_PROGRESS: poll `/status`.
+        Adaptive fast polling (100ms -> 400ms) minimizes latency instead of waiting 1s per poll."""
+        poll_delay = 0.1
+        while isinstance(j, dict) and j.get("status") in ("IN_QUEUE", "IN_PROGRESS") and j.get("id"):
+            await asyncio.sleep(poll_delay)
+            poll_delay = min(poll_delay * 1.5, 0.4)
+            if self._http.is_closed:
+                raise AiUnavailable(service, "client_closed")
+            sr = await self._http.get(f"{ep.url}/status/{j['id']}", headers=hdrs, timeout=30)
+            if sr.status_code >= 400:
+                raise AiError(service, "http_error", str(sr.status_code))
+            j = sr.json()
+        if isinstance(j, dict) and j.get("status") not in (None, "COMPLETED"):
+            raise AiError(service, "runpod_error", f"status={j.get('status')} {str(j.get('error', ''))[:160]}")
+        if isinstance(j, dict) and j.get("error"):
+            raise AiError(service, "runpod_error", str(j["error"])[:200])
+        return j
+
+    def _tts_reference_b64(self) -> str | None:
+        """Base64 WAV of the voice the TTS worker clones (it refuses requests without one). Read once per process."""
+        path = self.s.ai_tts_reference_wav
+        if not path:
+            return None
+        if _REF_CACHE.get("path") != path:
+            try:
+                _REF_CACHE.update(path=path, b64=base64.b64encode(open(path, "rb").read()).decode("ascii"))
+            except OSError as e:
+                raise AiError("tts", "reference_unreadable", type(e).__name__) from None
+        return _REF_CACHE["b64"]
 
     async def _call(self, service: str, fn):
         ep = self.endpoint(service)
@@ -146,6 +189,11 @@ class ModelClients:
         except (httpx.HTTPError, OSError) as e:
             m.AI_REQUESTS.labels(service, "error").inc()
             raise AiUnavailable(service, "unreachable", type(e).__name__) from e
+        except RuntimeError as e:
+            m.AI_REQUESTS.labels(service, "error").inc()
+            if "closed" in str(e).lower():
+                raise AiUnavailable(service, "client_closed") from e
+            raise
         finally:
             m.AI_LATENCY.labels(service).observe(time.perf_counter() - t0)
 
@@ -158,7 +206,8 @@ class ModelClients:
             return {"service": service, "status": "not_configured", "checked_at": checked}
         t0 = time.perf_counter()
         try:
-            r = await asyncio.wait_for(self._http.get(ep.url + "/health"), min(ep.timeout, 5))
+            hdrs = self._auth_headers(service)
+            r = await asyncio.wait_for(self._http.get(ep.url + "/health", headers=hdrs), min(ep.timeout, 5))
             status = "healthy" if r.status_code < 400 else "unhealthy"
             return {"service": service, "status": status, "http_status": r.status_code,
                     "latency_ms": round((time.perf_counter() - t0) * 1000, 1), "checked_at": checked}
@@ -170,55 +219,149 @@ class ModelClients:
     # ------------------------------------------------------------------ STT
     async def transcribe(self, pcm: bytes, rate: int, language: str) -> dict:
         async def go(ep: ServiceEndpoint):
-            files = {"file": ("audio.wav", pcm16_to_wav(pcm, rate), "audio/wav")}
-            data = {"model": self.cfg.get("models", {}).get("stt", self.s.ai_stt_model)}
-            if language and language != "auto":
-                data["language"] = {"hinglish": "hi"}.get(language, language)
-            r = await self._http.post(ep.url + ep.path, files=files, data=data)
-            if r.status_code >= 400:
-                raise AiError("stt", "http_error", str(r.status_code))
-            try:
-                j = r.json()
-                text = j.get("text")
-                lang = j.get("language")
-            except (ValueError, AttributeError):
-                raise AiError("stt", "bad_response", "not a JSON object") from None
-            return {"text": text.strip() if isinstance(text, str) else "", "language": lang if isinstance(lang, str) and lang else language}
+            hdrs = self._auth_headers("stt")
+            if ep.path.endswith("/runsync"):
+                wav_bytes = pcm16_to_wav(pcm, rate)
+                b64 = base64.b64encode(wav_bytes).decode("ascii")
+                body = {
+                    "input": {
+                        "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
+                        "audio": b64,
+                        "audio_base64": b64,
+                        "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
+                    }
+                }
+                r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
+                if r.status_code >= 400:
+                    raise AiError("stt", "http_error", str(r.status_code))
+                j = await self._runpod_wait("stt", ep, hdrs, r.json())
+                out = j.get("output", {}) if isinstance(j, dict) else {}
+                if isinstance(out, dict):
+                    text = out.get("transcription") or out.get("text") or ""
+                    lang = out.get("language") or language
+                elif isinstance(out, str):
+                    text, lang = out, language
+                else:
+                    text, lang = "", language
+                return {"text": text.strip(), "language": lang}
+            else:
+                files = {"file": ("audio.wav", pcm16_to_wav(pcm, rate), "audio/wav")}
+                data = {"model": self.cfg.get("models", {}).get("stt", self.s.ai_stt_model)}
+                if language and language != "auto":
+                    data["language"] = {"hinglish": "hi"}.get(language, language)
+                r = await self._http.post(ep.url + ep.path, files=files, data=data, headers=hdrs, timeout=ep.timeout)
+                if r.status_code >= 400:
+                    raise AiError("stt", "http_error", str(r.status_code))
+                try:
+                    j = r.json()
+                    text = j.get("text")
+                    lang = j.get("language")
+                except (ValueError, AttributeError):
+                    raise AiError("stt", "bad_response", "not a JSON object") from None
+                return {"text": text.strip() if isinstance(text, str) else "", "language": lang if isinstance(lang, str) and lang else language}
         return await self._call("stt", go)
 
     # ------------------------------------------------------------------ Brain
-    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, temperature: float | None = None) -> dict:
         async def go(ep: ServiceEndpoint):
-            body = {"model": self.cfg.get("models", {}).get("brain", self.s.ai_brain_model), "messages": messages,
-                    "temperature": 0.3, "max_tokens": 400}
-            if tools:
-                body["tools"] = tools
-            r = await self._http.post(ep.url + ep.path, json=body)
+            hdrs = self._auth_headers("brain")
+            model = self.cfg.get("models", {}).get("brain", self.s.ai_brain_model)
+            max_tok = int(self.cfg.get("max_tokens", 400))
+            temp = float(temperature if temperature is not None else self.cfg.get("temperature", getattr(self.s, "ai_temperature", 0.3)))
+            if ep.path.endswith("/runsync"):
+                prompt = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages)
+                body = {
+                    "input": {
+                        "prompt": prompt,
+                        "messages": messages,
+                        "model": model,
+                        "sampling_params": {"temperature": temp, "max_tokens": max_tok}  # RunPod vLLM worker format
+                    }
+                }
+            else:
+                body = {"model": model, "messages": messages, "temperature": temp, "max_tokens": max_tok}
+                if tools:
+                    body["tools"] = tools
+            r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
             if r.status_code >= 400:
                 raise AiError("brain", "http_error", str(r.status_code))
             try:
-                msg = r.json()["choices"][0]["message"]
-                content, calls = msg.get("content"), msg.get("tool_calls")
-            except (KeyError, IndexError, TypeError, ValueError, AttributeError):
-                raise AiError("brain", "bad_response", "unexpected response shape") from None
+                j = r.json()
+                if ep.path.endswith("/runsync"):
+                    j = await self._runpod_wait("brain", ep, hdrs, j)
+                out = j["output"] if isinstance(j, dict) and "output" in j else j
+                if isinstance(out, list):  # RunPod vLLM worker: [ {OpenAI chat.completion object} ]
+                    out = out[0] if out else ""
+                if isinstance(out, dict) and "choices" in out:
+                    if not out["choices"]:
+                        raise AiError("brain", "bad_response", "empty choices list")
+                    msg = out["choices"][0].get("message") if isinstance(out["choices"][0], dict) else None
+                    if not isinstance(msg, dict):
+                        raise AiError("brain", "bad_response", "missing message in choice")
+                    content, calls = msg.get("content"), msg.get("tool_calls")
+                elif isinstance(out, dict) and ("text" in out or "content" in out):
+                    content, calls = out.get("text") or out.get("content") or "", out.get("tool_calls", [])
+                elif isinstance(out, str):
+                    content, calls = out, []
+                else:
+                    raise AiError("brain", "bad_response", "unrecognized response format")
+            except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
+                raise AiError("brain", "bad_response", f"unexpected response shape: {type(e).__name__}") from None
             return {"text": content.strip() if isinstance(content, str) else "", "tool_calls": calls if isinstance(calls, list) else []}
         return await self._call("brain", go)
 
     # ------------------------------------------------------------------ TTS
     async def synthesize(self, text: str, language: str) -> tuple[bytes, int]:
         async def go(ep: ServiceEndpoint):
-            body = {"model": self.cfg.get("models", {}).get("tts", self.s.ai_tts_model), "input": text,
-                    "response_format": "wav", "language": language}
-            r = await self._http.post(ep.url + ep.path, json=body)
-            if r.status_code >= 400:
-                raise AiError("tts", "http_error", str(r.status_code))
-            return wav_to_pcm16(r.content)
+            hdrs = self._auth_headers("tts")
+            model = self.cfg.get("models", {}).get("tts", self.s.ai_tts_model)
+            if ep.path.endswith("/runsync"):
+                spoken, lang = text, language
+                if self.s.ai_tts_normalize:
+                    # Chatterbox test: per-sentence hi/en tag (Hindi + Hinglish -> hi, plain English -> en) and numbers/rupees/dates/phones/
+                    # acronyms written as spoken Devanagari words. Other explicit language codes pass through untouched.
+                    if language in ("", "auto", "hi", "en", "hinglish"):
+                        lang = tts_frontend.detect_lang(text)
+                    spoken = tts_frontend.normalize(text, lang)
+                elif language == "hinglish":
+                    lang = "hi"
+                body = {
+                    "input": {
+                        "text": spoken,
+                        "prompt": spoken,
+                        "language": lang,
+                        "model": model
+                    }
+                }
+                ref = self._tts_reference_b64()
+                if ref:
+                    body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
+                r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
+                if r.status_code >= 400:
+                    raise AiError("tts", "http_error", str(r.status_code))
+                j = await self._runpod_wait("tts", ep, hdrs, r.json())
+                out = j.get("output", {}) if isinstance(j, dict) else {}
+                b64_audio = None
+                if isinstance(out, dict):
+                    b64_audio = out.get("audio") or out.get("audio_base64")
+                elif isinstance(out, str):
+                    b64_audio = out
+                if not b64_audio:
+                    raise AiError("tts", "bad_response", "missing audio in output")
+                wav_bytes = base64.b64decode(b64_audio)
+                return wav_to_pcm16(wav_bytes)
+            else:
+                body = {"model": model, "input": text, "response_format": "wav", "language": language}
+                r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
+                if r.status_code >= 400:
+                    raise AiError("tts", "http_error", str(r.status_code))
+                return wav_to_pcm16(r.content)
         return await self._call("tts", go)
 
     # ------------------------------------------------------------------ RAG
     async def retrieve(self, query: str, k: int = 4) -> list[str]:
         async def go(ep: ServiceEndpoint):
-            r = await self._http.post(ep.url + ep.path, json={"query": query, "top_k": k})
+            r = await self._http.post(ep.url + ep.path, json={"query": query, "top_k": k}, timeout=ep.timeout)
             if r.status_code >= 400:
                 raise AiError("rag", "http_error", str(r.status_code))
             try:

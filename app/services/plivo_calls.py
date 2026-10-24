@@ -42,12 +42,15 @@ def _xml(body: str) -> str:
     return f"<Response>{body}</Response>"
 
 
-def stream_xml(s, ticket: str) -> str:
+def stream_xml(s, ticket: str, greeting: str | None = None) -> str:
     """Plivo `<Stream>`: bidirectional, keep the call alive after the stream, mu-law 8 kHz, signed ticket echoed back in `start`,
     stream lifecycle callbacks to our signed stream-status route. Body = the public wss:// URL (<= 2048 chars)."""
     wss = plivo_mod.stream_wss_url(s)
     status_cb = plivo_mod.callback_url(s, f"{s.api_prefix}/providers/plivo/stream-status")
+    text = greeting if greeting is not None else getattr(s, "ai_greeting", "Welcome to MME AI Voice Calling Agent.")
+    speak_part = f"<Speak>{escape(text)}</Speak>" if text else ""
     return _xml(
+        f"{speak_part}"
         f'<Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000" '
         f'extraHeaders={quoteattr("mme_ticket=" + ticket)} statusCallbackUrl={quoteattr(status_cb)} statusCallbackMethod="POST">'
         f"{escape(wss)}</Stream>")
@@ -94,10 +97,10 @@ async def _respond(app, call: dict) -> str:
             return REJECT
         call = {**call, "session_id": sid}
         if not call.get("stream_connected"):  # a late duplicate keeps the watchdog honest
-            await repos.update_call(call["_id"], {"stream_expected_by": utcnow() + timedelta(seconds=s.plivo_stream_connect_s),
+            await repos.update_call(call["_id"], {"stream_expected_by": utcnow() + timedelta(seconds=s.plivo_stream_connect_s + 15),
                                                   "stream_watch_done": False})
         ticket = tickets.mint(s, session_id=sid, tenant_id=call["tenant_id"], call_id=call["provider_call_id"])
-        return stream_xml(s, ticket)
+        return stream_xml(s, ticket, greeting=getattr(s, "ai_greeting", "Welcome to MME AI Voice Calling Agent."))
     return _xml(f'<Wait length="{cap}"/>')
 
 
@@ -156,7 +159,7 @@ async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) 
         "route_action": action, "route_target": route.get("target"), "ai_enabled": action == "ai" and ai_ok, "language": language,
     }
     if call["ai_enabled"]:
-        call["stream_expected_by"] = now + timedelta(seconds=s.plivo_stream_connect_s)
+        call["stream_expected_by"] = now + timedelta(seconds=s.plivo_stream_connect_s + 15)
     try:
         await repos.insert_call(call)
     except DuplicateKeyError:  # a concurrent duplicate Answer won the race: describe THAT call
@@ -175,6 +178,8 @@ async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) 
 
     await ctrl.apply(call, S.ANSWERED, source="plivo", dedup_id=f"plivo:{uuid_}:answer")  # also creates/links the session
     call = await repos.get_call(call["_id"]) or call
+    if call.get("ai_enabled"):
+        asyncio.create_task(ai.warmup(tenant))
     return await _respond(app, call)
 
 

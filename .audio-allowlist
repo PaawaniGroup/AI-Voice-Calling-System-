@@ -1,0 +1,4 @@
+# Audio files that MAY be committed (fnmatch patterns, repo-relative, forward slashes). Used by scripts/check_commit_guard.py.
+# Keep this list empty unless a test needs a fixture. Never list a voice-cloning reference or a real recording.
+# Example (synthetic, generated silence/tone only):
+# tests/fixtures/audio/*.wav

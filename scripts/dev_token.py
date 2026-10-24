@@ -9,7 +9,10 @@ import jwt
 
 if os.environ.get("MME_TEL_ENV", "development") in ("production", "staging"):
     sys.exit("refusing to mint tokens in a production-like environment")
-secret = os.environ.get("MME_TEL_JWT_SECRET", "")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config.settings import Settings
+secret = os.environ.get("MME_TEL_JWT_SECRET") or Settings().jwt_secret.get_secret_value()
 if not secret:
     sys.exit("MME_TEL_JWT_SECRET is not set")
 tenant, roles = sys.argv[1], sys.argv[2].split(",")

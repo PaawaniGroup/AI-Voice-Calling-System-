@@ -41,6 +41,7 @@ def can_transition(cur: str, target: str) -> bool:
 class SessionService:
     def __init__(self, db: Database, s: Settings, emitter: WebhookEmitter | None = None):
         self.db, self.s, self.emitter = db, s, emitter
+        self.activity = None  # ActivityBus (live dashboard feed), set by the app factory
 
     # ------------------------------------------------------------------ create
     async def create(self, tenant_id: str, *, call_ref: str | None, caller: str | None, destination: str | None = None,
@@ -178,6 +179,9 @@ class SessionService:
             log.exception("session sync failed for call")
 
     async def _emit(self, session: dict, event_type: str) -> None:
+        if self.activity is not None:
+            self.activity.publish(session["tenant_id"], event_type, call_id=session.get("call_id"), session_id=session["_id"],
+                                  data={"status": session.get("status"), "end_reason": session.get("end_reason")})
         if not self.emitter:
             return
         await self.emitter.emit_generic(

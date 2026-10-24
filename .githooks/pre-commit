@@ -1,0 +1,11 @@
+#!/bin/sh
+# Versioned pre-commit hook. Enable once per clone:  git config core.hooksPath .githooks
+# Rejects audio files outside .audio-allowlist and notebooks that embed audio (scripts/check_commit_guard.py).
+root="$(git rev-parse --show-toplevel)"
+for py in python3 python py; do
+  if command -v "$py" >/dev/null 2>&1; then
+    exec "$py" "$root/scripts/check_commit_guard.py"
+  fi
+done
+echo "pre-commit: no python found, cannot run the audio guard" >&2
+exit 1
