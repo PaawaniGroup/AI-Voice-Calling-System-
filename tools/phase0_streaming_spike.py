@@ -42,7 +42,7 @@ class Spike:
     def base(self, svc):
         return self.cl.endpoint(svc).url                    # https://api.runpod.ai/v2/<id>
 
-    async def job(self, svc, body, mode, timeout=300):
+    async def job(self, svc, body, mode, timeout=300, poll_cap=0.4):
         """One RunPod job, timed. mode: run (POST /run + poll /status, as the app does) or runsync. Dispatch overhead = wall - delayTime - executionTime."""
         self.ledger.before(svc)
         cl, hdrs, base = self.cl, self.cl._auth_headers(svc), self.base(svc)
@@ -62,7 +62,7 @@ class Spike:
                 self.inflight[j["id"]] = (svc, base, hdrs)
             pd = 0.06
             while j.get("status") in ("IN_QUEUE", "IN_PROGRESS"):
-                await asyncio.sleep(pd); pd = min(pd * 1.5, 0.4); polls += 1
+                await asyncio.sleep(pd); pd = min(pd * 1.5, poll_cap); polls += 1
                 sr = await cl._http.get(f"{base}/status/{j['id']}", headers=hdrs, timeout=30)
                 sr.raise_for_status(); j = sr.json()
             self.inflight.pop(j.get("id"), None)
