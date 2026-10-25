@@ -275,8 +275,11 @@ class Conversation:
     def __init__(self, clients: ModelClients | None = None, language: str = "auto", tools: dict | None = None,
                  max_history: int = 12, devanagari_hindi: bool = False,
                  script_enforcement: bool = False, counsellor_gender: str = "masculine",
-                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix", streaming=None):
+                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix", streaming=None, duplex=None):
         self.clients, self.language = clients, language
+        # Full-duplex input handling (per tenant, flag `full_duplex_input`, default OFF = None): a DuplexConfig used only by the shared serve_loop in
+        # app/ai/ws.py (barge-in rule, echo guard, kept speech, end-of-speech hysteresis). With None the old rules run unchanged.
+        self.duplex = duplex
         # Token-streaming voice pipeline (per tenant, flag `streaming_pipeline`, default OFF = None): a StreamConfig. Used only by the live Plivo
         # path through app.ai.streaming.live; `stream_turn` and every other path are unchanged.
         self.streaming = streaming

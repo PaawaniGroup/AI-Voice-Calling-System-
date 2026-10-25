@@ -21,6 +21,7 @@ from pymongo.errors import DuplicateKeyError
 from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
+from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
 from app.ai.streaming.config import STREAM_KEYS, stream_config_from
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
@@ -71,14 +72,16 @@ class AiService:
                 "streaming_pipeline": False,   # token-streaming voice pipeline (Plivo calls only); OFF unless a tenant turns it on
                 "tts_ulaw8k": False,           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference audio sent; OFF by default
                 "tts_voice": None,             # name of the worker's voice for tts_ulaw8k (None = the worker's default, "utkarsh")
-                **{k: None for k in STREAM_KEYS}}   # None = the built-in provisional default (set after the TTS re-measurement)
+                **{k: None for k in STREAM_KEYS},   # None = the built-in provisional default (set after the TTS re-measurement)
+                "full_duplex_input": False,        # listen while the assistant speaks: min voiced time, echo guard, kept speech, hysteresis; OFF by default
+                **{k: None for k in DUPLEX_KEYS}}  # None = the provisional defaults of app/ai/duplex.py (to be tuned on real call recordings)
 
     async def get_config(self, tenant_id: str) -> dict:
         doc = await self.db["ai_config"].find_one({"tenant_id": tenant_id})
         cfg = self.default_config(tenant_id)
         if doc:
             for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
-                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", *STREAM_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
             for k in ("models", "timeouts", "paths", "keys"):
@@ -110,7 +113,9 @@ class AiService:
             if v is not None and not (isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", v)):
                 raise Unprocessable("tts_voice must be 1-40 letters, digits, '_' or '-'", code="invalid_config")
             cfg["tts_voice"] = v
-        for k, (lo, hi) in STREAM_KEYS.items():
+        if body.get("full_duplex_input") is not None:
+            cfg["full_duplex_input"] = bool(body["full_duplex_input"])
+        for k, (lo, hi) in {**STREAM_KEYS, **DUPLEX_KEYS}.items():
             if k in body and body[k] is not None:
                 v = float(body[k]) if isinstance(lo, float) else int(body[k])
                 if not (lo <= v <= hi):
@@ -277,6 +282,7 @@ class AiService:
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
             devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
             streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
+            duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")

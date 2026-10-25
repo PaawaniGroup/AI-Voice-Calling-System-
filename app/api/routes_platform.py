@@ -359,6 +359,12 @@ class AiConfigIn(Strict):
     devanagari_hindi: bool | None = None   # Devanagari replies for Hindi/Hinglish callers (prompt + reply_mode tag + reply check/retry)
     runpod_mode: Literal["run", "runsync"] | None = None
     streaming_pipeline: bool | None = None   # token-streaming voice pipeline (Plivo calls); default OFF per tenant
+    full_duplex_input: bool | None = None    # listen while the assistant speaks (barge-in minimum, echo guard, kept speech); default OFF per tenant
+    duplex_min_voiced_ms: int | None = Field(None, ge=100, le=1000)
+    duplex_dropout_ms: int | None = Field(None, ge=0, le=500)
+    duplex_echo_ratio: float | None = Field(None, ge=0.0, le=2.0)
+    duplex_resume_ms: int | None = Field(None, ge=0, le=300)
+    duplex_pre_roll_ms: int | None = Field(None, ge=0, le=1000)
     tts_ulaw8k: bool | None = None           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference sent; default OFF per tenant
     tts_voice: str | None = Field(None, max_length=40)   # the worker's voice name (validated in the service: letters, digits, _ and -)
     stream_first_min_words: int | None = Field(None, ge=1, le=8)

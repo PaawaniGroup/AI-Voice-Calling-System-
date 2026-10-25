@@ -28,6 +28,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.ai import codec, turn_trace
 from app.ai.clients import pcm16_to_wav, rms
+from app.ai.duplex import BargeInDetector, OutboundLevel, PreRoll, silence_resets
 from app.core.errors import ApiError
 from app.core.ids import utcnow
 from app.observability import metrics as m
@@ -232,6 +233,17 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     turn: dict = {"task": None, "pcm": b"", "end_at": 0.0, "audio": False, "n": 1}   # the turn being processed (if any)
     merge: dict = {"pcm": None, "n": 0}   # speech of a cancelled attempt that the NEXT utterance continues
 
+    # Full-duplex input handling (tenant flag `full_duplex_input`; None = OFF: every line below takes the old path, unchanged)
+    duplex = getattr(rt.conversation, "duplex", None)
+    det = BargeInDetector(duplex, vad_rms) if duplex else None            # barge-in needs min voiced time, bridges short gaps, applies the echo guard
+    out_level = OutboundLevel() if duplex else None                       # how loud the assistant has been, on the playback timeline
+    pre = PreRoll(duplex.pre_roll_ms) if duplex else None                 # audio before speech was confirmed: kept, not thrown away
+    st["voiced_run_ms"] = 0
+
+    def on_level(duration_s: float, level: float) -> None:
+        if out_level is not None:
+            out_level.add_next(time.monotonic(), duration_s, level)
+
     def on_start(duration_s: float) -> None:
         now = time.monotonic()
         base = max(now, st["play_until"])
@@ -242,6 +254,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     async def play(audio: bytes, src: int, lang: str, uid: int) -> None:
         if not isinstance(io, PlivoIO):  # PlivoIO marks the exact moment its first frame is written to the socket
             turn_trace.mark("t_first_frame_to_plivo")
+        if out_level is not None:
+            out_level.add_clip(time.monotonic(), audio, src)   # whole clip handed over at once: its loudness over time, for the echo guard
         try:
             await io.play(audio, src, lang, uid, on_start)
             st["last_audio_at"] = time.monotonic()
@@ -280,7 +294,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             turn["audio"] = True
             on_start(seconds)
 
-        sink = PlivoStreamSink(io, on_audio=on_audio)
+        sink = PlivoStreamSink(io, on_audio=on_audio, on_level=on_level if out_level is not None else None)
         turn["stream_sink"] = sink
         st["uid"] += 1
         uid = st["uid"]
@@ -511,7 +525,26 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
 
             frame_rms = rms(frame)
 
-            if is_playing:
+            if is_playing and det is not None:
+                # Full-duplex input handling (tenant flag): a barge-in needs `min_voiced_ms` of VOICED speech (a short "hmm" is not one), short gaps
+                # inside speech are bridged, speaker echo (quieter than what the assistant is playing) is ignored, and the speech that triggered the
+                # interruption is KEPT as the start of the next utterance (the old rule kept only the triggering frame).
+                level = out_level.recent(now, duplex.echo_window_ms, duplex.echo_stat)
+                if frame_rms >= det.threshold(level):
+                    st["last_loud_at"] = now
+                if det.feed(frame, frame_rms, fm, level):
+                    log.info("barge-in triggered (full duplex): voiced %dms, threshold %.1f, echo-suppressed frames %d",
+                             det.voiced_ms, det.last_threshold, det.echo_suppressed_frames)
+                    kept = det.take()
+                    st["playing"] = False
+                    st["play_until"] = 0.0
+                    silence_stream()
+                    await interrupt_io()
+                    await cancel_turn("barge_in")
+                    out_level.clear()
+                    pre.clear()
+                    st.update(in_speech=True, buf=bytearray(kept), silence_ms=0, speech_ms=0, voiced_run_ms=0)
+            elif is_playing:
                 # Assistant is playing audio to the caller.
                 # Inbound audio is speaker echo + line noise, UNLESS caller deliberately talks over.
                 barge_threshold = max(vad_rms * BARGE_IN_RMS_MULTIPLIER, BARGE_IN_VAD_RMS)
@@ -534,13 +567,23 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             else:
                 # Assistant is quiet, listening to the caller.
                 loud = frame_rms >= vad_rms
+                if det is not None:
+                    det.reset()                              # a barge-in run never continues across a pause in the assistant's audio
+                    st["voiced_run_ms"] = st["voiced_run_ms"] + fm if loud else 0
+                    if not st["in_speech"]:
+                        pre.push(frame, fm)                  # the audio before speech is confirmed is kept, not thrown away
                 if loud:
                     st["last_loud_at"] = now
                     st["speech_ms"] += fm
-                    st["silence_ms"] = 0
+                    if det is None or silence_resets(st["in_speech"], st["voiced_run_ms"], duplex):
+                        st["silence_ms"] = 0
+                    else:
+                        st["silence_ms"] += fm               # end-of-speech hysteresis: a click shorter than resume_ms does not postpone the end
                     if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:
                         if not st["in_speech"]:
                             st["in_speech"] = True
+                            if det is not None:
+                                st["buf"] = bytearray(pre.drain(exclude_last=True))   # the first 200 ms that confirmed the speech belong to it
                             await on_speech_start(now, st["speech_ms"])
                         st["in_speech"] = True
                 else:

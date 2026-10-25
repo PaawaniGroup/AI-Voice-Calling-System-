@@ -11,9 +11,10 @@ from app.ai import codec, turn_trace
 
 
 class PlivoStreamSink:
-    def __init__(self, io, *, on_audio=None, batch_ms: int = 100, rate: int = codec.MULAW_RATE):
+    def __init__(self, io, *, on_audio=None, on_level=None, batch_ms: int = 100, rate: int = codec.MULAW_RATE):
         self.io = io                       # the PlivoIO: .ws, .stream_id, .sent_checkpoints, .interrupt()
         self.on_audio = on_audio           # called with the seconds of audio just handed over (feeds the barge-in "assistant is playing" window)
+        self.on_level = on_level           # optional: called with (seconds, RMS) of each frame (feeds the echo guard of full-duplex input)
         self.rate = rate
         self.batch_bytes = rate * batch_ms // 1000
         self.buf = bytearray()
@@ -28,6 +29,8 @@ class PlivoStreamSink:
         self._since_clear += 1
         if self.on_audio is not None:
             self.on_audio(len(frame) / 2 / self.rate)
+        if self.on_level is not None:
+            self.on_level(len(frame) / 2 / self.rate, codec.audioop.rms(frame, 2))   # codec guards audioop for Python 3.13 (audioop-lts)
         if len(self.buf) >= self.batch_bytes:
             await self.flush()
 

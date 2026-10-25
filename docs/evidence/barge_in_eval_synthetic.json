@@ -1,0 +1,326 @@
+{
+ "synthetic": {
+  "S1 line noise rms 200": {
+   "legacy": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S1 line noise rms 500": {
+   "legacy": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S1 line noise rms 900": {
+   "legacy": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S2 backchannel bursts 80-230 ms (caller level 2500), none a real interruption": {
+   "legacy": {
+    "false_triggers": 10,
+    "false_per_min": 3.33,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S3 speaker echo -6 dB + noise 250": {
+   "legacy": {
+    "false_triggers": 54,
+    "false_per_min": 18.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 4,
+    "false_per_min": 1.33,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 62,
+    "false_per_min": 20.67,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S3 speaker echo -10 dB + noise 250": {
+   "legacy": {
+    "false_triggers": 51,
+    "false_per_min": 17.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 54,
+    "false_per_min": 18.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S3 speaker echo -14 dB + noise 250": {
+   "legacy": {
+    "false_triggers": 8,
+    "false_per_min": 2.67,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 6,
+    "false_per_min": 2.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S3 speaker echo -20 dB + noise 250": {
+   "legacy": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   },
+   "duplex-0": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 0,
+    "detected": 0,
+    "detection_rate": null,
+    "latency_ms_p50": null,
+    "kept_ms_mean": null
+   }
+  },
+  "S4 caller talks over the assistant (700-1500 ms, level 2500), quiet line": {
+   "legacy": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 23,
+    "detected": 22,
+    "detection_rate": 0.96,
+    "latency_ms_p50": 440,
+    "kept_ms_mean": 20.0
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 23,
+    "detected": 20,
+    "detection_rate": 0.87,
+    "latency_ms_p50": 520,
+    "kept_ms_mean": 337.0
+   },
+   "duplex-0": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 23,
+    "detected": 23,
+    "detection_rate": 1.0,
+    "latency_ms_p50": 340,
+    "kept_ms_mean": 305.0
+   }
+  },
+  "S5 caller talks over the assistant, WITH echo -10 dB": {
+   "legacy": {
+    "false_triggers": 40,
+    "false_per_min": 13.33,
+    "events": 23,
+    "detected": 14,
+    "detection_rate": 0.61,
+    "latency_ms_p50": 420,
+    "kept_ms_mean": 20.0
+   },
+   "duplex": {
+    "false_triggers": 0,
+    "false_per_min": 0.0,
+    "events": 23,
+    "detected": 19,
+    "detection_rate": 0.83,
+    "latency_ms_p50": 460,
+    "kept_ms_mean": 338.0
+   },
+   "duplex-0": {
+    "false_triggers": 44,
+    "false_per_min": 14.67,
+    "events": 23,
+    "detected": 16,
+    "detection_rate": 0.7,
+    "latency_ms_p50": 360,
+    "kept_ms_mean": 284.0
+   }
+  },
+  "S5 caller talks over the assistant, WITH echo -6 dB": {
+   "legacy": {
+    "false_triggers": 42,
+    "false_per_min": 14.0,
+    "events": 22,
+    "detected": 15,
+    "detection_rate": 0.68,
+    "latency_ms_p50": 320,
+    "kept_ms_mean": 20.0
+   },
+   "duplex": {
+    "false_triggers": 3,
+    "false_per_min": 1.0,
+    "events": 22,
+    "detected": 18,
+    "detection_rate": 0.82,
+    "latency_ms_p50": 300,
+    "kept_ms_mean": 321.0
+   },
+   "duplex-0": {
+    "false_triggers": 53,
+    "false_per_min": 17.67,
+    "events": 22,
+    "detected": 13,
+    "detection_rate": 0.59,
+    "latency_ms_p50": 380,
+    "kept_ms_mean": 286.0
+   }
+  }
+ },
+ "minutes": 3.0,
+ "seed": 7,
+ "note": "synthetic caller audio built from one speech recording; levels are assumptions"
+}
