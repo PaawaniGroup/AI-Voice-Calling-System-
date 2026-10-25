@@ -149,6 +149,58 @@ async def test_the_single_probe_sends_no_reference_and_a_named_voice_and_reports
     assert "rpa_" not in capsys.readouterr().out
 
 
+def _old_style_args(tmp_path, **kw):
+    d = dict(endpoint_id="testep", voice="utkarsh", probe_timeout=30.0, idle=60.0, budget=0.02, out_probe1=str(tmp_path / "old.json"), tenant="mme-test", allow_cold=False)
+    d.update(kw)
+    return Namespace(**d)
+
+
+async def test_the_old_style_probe_sends_the_apps_normal_request_and_reports_delay_execution_and_rate(tmp_path, capsys):
+    sp, cl, seen, _ = spike(tmp_path, ref=True)
+    orig = t.make
+    t.make = lambda args, reserve: (cl, sp)
+    try:
+        rec = await t.run_old_style_probe(_old_style_args(tmp_path))
+    finally:
+        t.make = orig
+    assert len(seen) == 1 and "reference_audio_base64" in seen[0] and "voice" not in seen[0] and "output_format" not in seen[0]      # exactly what the app sends today
+    assert rec["verdict"] == "ok" and rec["delay_ms"] == 20 and rec["exec_ms"] == 1500 and rec["sample_rate"] == 16000 and rec["audio_s"] > 0
+    assert rec["cost"]["usd_estimated_total"] <= 0.02 and "rpa_" not in capsys.readouterr().out                                 # a warm worker, a 60 s idle tail: inside the $0.02 cap
+
+
+async def test_the_old_style_probe_sends_nothing_when_no_worker_is_warm(tmp_path, capsys):
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append((req.method, req.url.path))
+        if req.url.path.endswith("/health"):
+            return httpx.Response(200, json={"workers": {"idle": 0, "ready": 0, "running": 0, "initializing": 0}})
+        return httpx.Response(500)
+    cl = ModelClients(make_settings(ai_allowed_hosts="api.runpod.ai"), {"tts_url": URL + "/runsync", "keys": {"tts": "k"}}, httpx.MockTransport(handler))
+    sp = t.V3Spike(cl, Ledger(t.PRICE, {"stt": 0.0, "brain": 0.0, "tts": 60.0}, 0.02, 0.0), URL, "utkarsh")
+    orig = t.make
+    t.make = lambda args, reserve: (cl, sp)
+    try:
+        rec = await t.run_old_style_probe(_old_style_args(tmp_path))
+    finally:
+        t.make = orig
+    assert rec["verdict"] == "not_sent_no_warm_worker" and [m for m, _ in seen] == ["GET"]                                       # only the free health call
+    assert "NOTHING was sent" in capsys.readouterr().out
+
+
+async def test_the_old_style_probe_is_refused_by_the_ledger_when_the_idle_tail_alone_exceeds_the_cap(tmp_path, capsys):
+    sp, cl, seen, _ = spike(tmp_path, ref=True)
+    sp.ledger = Ledger(t.PRICE, {"stt": 0.0, "brain": 0.0, "tts": 300.0}, 0.02, 0.0)                                           # idle timeout 300 s: tail 0.0576 USD
+    orig = t.make
+    t.make = lambda args, reserve: (cl, sp)
+    try:
+        rec = await t.run_old_style_probe(_old_style_args(tmp_path, idle=300.0))
+    finally:
+        t.make = orig
+    assert rec["verdict"] == "refused_by_ledger" and seen == []                                                                   # nothing was sent: the cap needs an idle timeout of 60 s or less
+    assert "refused by the spend ledger" in capsys.readouterr().out
+
+
 async def test_a_probe_that_never_gets_an_answer_is_cancelled_and_reports_the_job_id_and_how_far_it_got(tmp_path, capsys):
     """A worker that takes the job and never finishes: the probe must give up at its time limit, cancel, and say which status it reached."""
     jobs = {}

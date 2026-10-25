@@ -269,6 +269,50 @@ async def run_ulaw_probe(a):
         Path(a.out_probe1).write_text(json.dumps(out_rec, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+async def run_old_style_probe(a):
+    """ONE request exactly as the telephony app sends it today: the reference voice in the request, no voice name, the default (wav) output. It shows whether the worker
+    behind the endpoint is healthy at all. Sent only when a worker is ALREADY warm (a cold start alone could exceed a small cap); nothing is sent otherwise."""
+    cl, sp = make(a, reserve=0.0)
+    rec_out = {"endpoint": a.endpoint_id, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "style": "old (reference in the request, wav)"}
+    try:
+        w, code = await workers(sp)
+        rec_out["workers_before"] = w
+        print("workers before:", json.dumps(w), "health http", code, flush=True)
+        if not sum(int(w.get(k) or 0) for k in ("idle", "ready", "running")) and not a.allow_cold:
+            print("no worker is warm: a cold start could exceed the cap, so NOTHING was sent (use --allow-cold to accept that)", flush=True)
+            rec_out["verdict"] = "not_sent_no_warm_worker"
+            return rec_out
+        body = {"input": sp.tts_body(CLAUSES[4][0])["input"]}                 # the app's own request (with the reference)
+        rec_out["request_fields"] = sorted(body["input"])
+        try:
+            rec, out = await asyncio.wait_for(sp.job("tts", body, "run", timeout=a.probe_timeout, poll_cap=POLL_CAP), a.probe_timeout)
+        except asyncio.TimeoutError:
+            await sp.cancel_all()
+            rec_out.update(verdict="timeout", job_id=getattr(sp, "last_id", None), status_first_seen_s=getattr(sp, "status_log", None))
+            print(f"no answer within {a.probe_timeout:.0f} s: cancelled. job id {rec_out['job_id']} | status first seen at (s): {rec_out['status_first_seen_s']}", flush=True)
+            return rec_out
+        rate, dur = None, None
+        if isinstance(out, dict) and not out.get("error"):
+            b64 = out.get("audio_base64") or out.get("audio")
+            pcm, rate = wav_to_pcm16(base64.b64decode(b64))
+            dur = round(len(pcm) / 2 / rate, 3)
+        rec_out.update(job_id=getattr(sp, "last_id", None), verdict="error" if isinstance(out, dict) and out.get("error") else "ok", delay_ms=rec["delay_ms"], exec_ms=rec["exec_ms"],
+                       wall_ms=rec["wall_ms"], overhead_ms=rec["overhead_ms"], sample_rate=rate, audio_s=dur, format=(out or {}).get("format") if isinstance(out, dict) else None,
+                       worker_timing=(out or {}).get("timing") if isinstance(out, dict) else None, error=(str(out.get("error"))[:120] if isinstance(out, dict) and out.get("error") else None))
+        print("OLD-STYLE PROBE RESULT:", json.dumps({k: v for k, v in rec_out.items() if k != "started"}, ensure_ascii=False), flush=True)
+        return rec_out
+    except StopBench as e:
+        rec_out["verdict"] = "refused_by_ledger"
+        print("refused by the spend ledger BEFORE sending:", e, flush=True)
+        return rec_out
+    finally:
+        rec_out["cost"] = sp.ledger.report()
+        await cl.aclose()
+        print("estimated cost: $", rec_out["cost"]["usd_estimated_total"], "of cap $", a.budget, f"(delay + execution + one idle tail of {a.idle:.0f} s)", flush=True)
+        Path(a.out_probe1).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out_probe1).write_text(json.dumps(rec_out, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 async def run_probe(a):
     """2 and 3 jobs started at the same moment on warm workers. The workers are warmed first by concurrent warm-up pings (cheap)."""
     out = {"endpoint": a.endpoint_id, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rounds": []}
@@ -317,6 +361,8 @@ def main():
     ap.add_argument("--budget", type=float, default=0.15); ap.add_argument("--idle", type=float, default=60.0, help="the test endpoint's idle timeout in s (spend estimate)")
     ap.add_argument("--probe", action="store_true"); ap.add_argument("--yes", action="store_true")
     ap.add_argument("--ulaw-probe", action="store_true", help="ONE request with output_format ulaw8k and no reference: is the worker behind this endpoint the v3 handler?")
+    ap.add_argument("--old-style-probe", action="store_true", help="ONE request as the app sends it today (reference in the request, wav): is the worker healthy at all?")
+    ap.add_argument("--allow-cold", action="store_true", help="old-style probe: send even when no worker is warm (a cold start may exceed a small cap)")
     ap.add_argument("--probe-timeout", type=float, default=240.0)
     ap.add_argument("--out-probe1", default=str(ROOT / "docs" / "evidence" / "phase0b_ulaw_probe.json"))
     ap.add_argument("--listen-dir", default=""); ap.add_argument("--phase0", default=str(ROOT / "docs" / "evidence" / "phase0_streaming_spike.json"))
@@ -325,7 +371,7 @@ def main():
     a = ap.parse_args()
     if not a.yes:
         raise SystemExit("--yes required: chargeable")
-    asyncio.run(run_ulaw_probe(a) if a.ulaw_probe else run_probe(a) if a.probe else run_measure(a))
+    asyncio.run(run_old_style_probe(a) if a.old_style_probe else run_ulaw_probe(a) if a.ulaw_probe else run_probe(a) if a.probe else run_measure(a))
 
 
 if __name__ == "__main__":
