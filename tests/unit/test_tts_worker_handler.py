@@ -36,3 +36,13 @@ def test_the_workflow_can_only_push_the_v3_tag_and_never_runs_for_main():
 
 def test_the_readme_warns_against_pushing_the_test_to_main():
     assert "never push this" in (HANDLER.parent / "README.md").read_text(encoding="utf-8").lower()
+
+
+def test_the_v3_dockerfile_bakes_the_voice_at_the_path_the_handler_reads():
+    import re
+    src = HANDLER.read_text(encoding="utf-8")
+    default = re.search(r'DEFAULT_REF_WAV = os\.getenv\("DEFAULT_REF_WAV", "([^"]+)"\)', src).group(1)
+    df = (HANDLER.parent / "Dockerfile").read_text(encoding="utf-8")
+    assert f"COPY ref_voice.wav {default}" in df and f"ENV DEFAULT_REF_WAV={default}" in df     # a mismatch would leave the worker with no voice
+    assert "COPY handler.py ." in df and 'CMD ["python", "-u", "handler.py"]' in df               # the entry point is unchanged
+    assert "snapshot_download('ResembleAI/chatterbox')" in df and df.index("snapshot_download") < df.index("HF_HUB_OFFLINE=1")   # weights first, then offline

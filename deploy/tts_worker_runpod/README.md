@@ -25,14 +25,20 @@ to main for the test**: work on a branch, build only the tag `v3`, and point a N
 2. **Replace `handler.py`** in the repo root with the `handler.py` of this folder (the whole file).
 3. **`requirements.txt`:** add one line, `scipy>=1.11` (it is needed for the 24 kHz -> 8 kHz resample; it normally arrives with `librosa`, but only
    indirectly). If the build log reports a numpy conflict with chatterbox, use `scipy>=1.11,<1.16` instead.
-4. **Dockerfile and `ref_voice.wav`: unchanged.** (The Dockerfile already copies `ref_voice.wav` to `/app/ref_voice.wav`, sets `DEFAULT_REF_WAV`, copies
-   `handler.py` and starts `python -u handler.py`; `libsndfile1` is already installed.) Optional: `COPY voices/ /app/voices/` only if you want more voices.
+4. **Replace the `Dockerfile` with the one of this folder, and put `ref_voice.wav` in the repo root.** The Dockerfile of the repo at the time of writing had NO
+   bake lines: it did not copy a reference voice into the image and did not download the model weights at build time. With it, v3 would have no voice
+   (every request fails with `Unknown voice`), and every cold worker would download the weights from Hugging Face. The v3 Dockerfile adds exactly five lines:
+   `ENV HF_HOME=/app/hf_cache`, `RUN python -c "...snapshot_download('ResembleAI/chatterbox')"`, `COPY ref_voice.wav /app/ref_voice.wav`,
+   `ENV HF_HUB_OFFLINE=1` and `ENV DEFAULT_REF_WAV=/app/ref_voice.wav`; everything else is yours unchanged.
+   `ref_voice.wav` is the 12-second, 24 kHz, mono, 16-bit recording of the voice (the same file the telephony service sends today with every request, so the voice
+   stays the same). It must be committed to the worker repo. Optional: `COPY voices/ /app/voices/` only if you want more voices.
 5. **Optional check on your own machine (no GPU):** `python -m venv v && v/bin/pip install numpy scipy soundfile && v/bin/python handler.py --self-test`
    (on Windows: `v\Scripts\...`). Expected last line: `23/23 checks passed`. Do not push if it says FAILED.
 6. **Add the separate workflow:** copy `build-image-v3-test.yml` of this folder to `.github/workflows/build-image-v3-test.yml` on the branch. Do not edit
    or delete the existing `build-image.yml`. The new workflow runs only for pushes to `tts-v3` and pushes only `ghcr.io/aitechteammme-dev/mme-tts-runpod:v3`.
-7. **Push:** `git add handler.py requirements.txt .github/workflows/build-image-v3-test.yml && git commit -m "TTS worker v3" && git push -u origin tts-v3`.
-   GitHub -> Actions -> "Build TTS v3 test image" must finish green. The first build downloads the model weights into the image: allow 20 to 40 minutes.
+7. **Push:** `git add handler.py Dockerfile ref_voice.wav requirements.txt .github/workflows/build-image-v3-test.yml && git commit -m "TTS worker v3" && git push -u origin tts-v3`.
+   GitHub -> Actions -> "Build TTS v3 test image" must finish green. The build now downloads the model weights into the image: allow 20 to 40 minutes, and
+   expect a bigger image (several GB more), which is what makes cold starts faster.
 8. **Check the package:** GitHub -> your organisation -> Packages -> `mme-tts-runpod`: the tag `v3` exists, and the digests of `latest` and `v2` did not change.
 9. **RunPod: a NEW template and a NEW endpoint (never edit the live ones).**
    * Serverless -> Templates -> open the template of the live TTS endpoint -> **Clone**. Name it `mme-tts-v3-test`. Change only the image to
@@ -64,7 +70,10 @@ to main for the test**: work on a branch, build only the tag `v3`, and point a N
 | `ModuleNotFoundError: No module named 'scipy'` | The `scipy` line is missing from `requirements.txt`, or the image was built before it was added | Add the line, push again, rebuild |
 | `ModuleNotFoundError: ... chatterbox` / `soundfile` / `runpod` | `requirements.txt` of the repo lacks it (the old handler needed the same) | Add it |
 | `RuntimeError: CUDA GPU is not available` | The endpoint got a worker without a GPU or the wrong GPU type | Use the same GPU type as the live endpoint |
-| `[TTS] WARNING: default reference not found at /app/ref_voice.wav` and later `Unknown voice` | `ref_voice.wav` was not in the build context, so no voice exists | Make sure `ref_voice.wav` is committed in the repo root |
+| The GitHub build fails with `COPY failed: ... ref_voice.wav: not found` | `ref_voice.wav` is not in the repo root of the branch | Commit it (step 4) and push again |
+| `[TTS] WARNING: default reference not found at /app/ref_voice.wav` and later `Unknown voice` | The image was built from the OLD Dockerfile (no `COPY ref_voice.wav`) | Use the v3 Dockerfile (step 4) |
+| At start-up an `OSError` / `LocalEntryNotFoundError` about "offline mode" or a file "not found in the cache" | `HF_HUB_OFFLINE=1` is set but the build-time download did not include a file the model asks for | Remove the line `ENV HF_HUB_OFFLINE=1` from the Dockerfile and rebuild (the worker then fetches the missing file at start-up); tell me the file name |
+| The build step `snapshot_download` fails (network / rate limit) | Hugging Face was unreachable from GitHub's runner | Re-run the workflow |
 | `RuntimeError: the model has no .conds after prepare_conditionals()` | The installed Chatterbox keeps the prepared voice under a different attribute | Send me this line and the Chatterbox version; do not use this image |
 | `[TTS] voice 'utkarsh' prepared in` takes much longer than 3 s | The GPU is slow or the model is still loading from disk | Note the time; it is a one-off per worker |
 | response `{"error": "Unknown voice: 'x'", "voices": [...]}` | The request named a voice that is not baked | Use a name from `voices` |
