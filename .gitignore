@@ -19,6 +19,7 @@ Utkarsh_voice_ref12s_24k.wav
 *.ogg
 *.flac
 *.m4a
+*.opus
 MME_Chatterbox_V3_TEST_COLAB_(3).ipynb
 # Allowlist for needed fixtures (keep in step with .audio-allowlist):
 # !tests/fixtures/audio/*.wav

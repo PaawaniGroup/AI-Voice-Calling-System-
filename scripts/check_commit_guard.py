@@ -3,7 +3,7 @@
 scripts/check_commit_guard.py - pre-commit guard so voice recordings and audio-bearing notebooks are never committed by accident.
 
 Rejects a commit that ADDS or MODIFIES
-  1. an audio file (.wav .mp3 .ogg .flac .m4a) whose path is not allowlisted in .audio-allowlist (fnmatch patterns, one per line, '#' comments), or
+  1. an audio file (.wav .mp3 .ogg .flac .m4a .opus) whose path is not allowlisted in .audio-allowlist (fnmatch patterns, one per line, '#' comments), or
   2. a .ipynb notebook whose staged content embeds audio: the text "data:audio", or an output mime type "audio/..." (Colab players embed generated speech this way).
 It also catches files added with `git add -f` (that bypasses .gitignore, not this hook).
 Already-tracked audio is not re-flagged unless it is modified; `--all` lists it (report only, exit 0 unless --strict).
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-AUDIO_EXT = (".wav", ".mp3", ".ogg", ".flac", ".m4a")
+AUDIO_EXT = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".opus")
 NB_AUDIO = re.compile(rb"data:audio|\"audio/[a-z0-9.+-]+\"\s*:")
 
 

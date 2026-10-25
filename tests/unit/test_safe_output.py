@@ -4,7 +4,7 @@ from app.core.safe_output import hide_number, safe_json, safe_url, scrub
 AUTH_ID = "MAYTJHMWM4YTKTNWVKYY"            # shape of a Plivo Auth ID (not a real one)
 TOKEN = "ODI2MTI3ZWUtYmNkYS00YzYzLTY4NDMtMjdlNmNm"
 TICKET = "eyJzIjoic2Vzc2lvbiIsInQiOiJ0MSJ9.Zm9vYmFyYmF6cXV4.c2lnbmF0dXJl"
-KEY = "rpa_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+KEY = "rpa_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE12"   # obviously fake; same shape (rpa_ + 46 characters) as a RunPod key
 
 
 def test_a_number_is_never_shown_even_partially():

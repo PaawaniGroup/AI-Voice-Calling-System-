@@ -18,9 +18,9 @@ def files(**kw):
 
 
 def test_audio_rejected_unless_allowlisted():
-    f = [("Utkarsh_voice.wav", lambda: b""), ("docs/a.MP3", lambda: b""), ("x/b.ogg", lambda: b""), ("c.flac", lambda: b""), ("d.m4a", lambda: b""), ("readme.md", lambda: b"")]
-    assert len(G.check(f, [])) == 5
-    assert G.check(f, ["Utkarsh_voice.wav", "docs/*.MP3", "x/*.ogg", "c.flac", "d.m4a"]) == []
+    f = [("Utkarsh_voice.wav", lambda: b""), ("docs/a.MP3", lambda: b""), ("x/b.ogg", lambda: b""), ("c.flac", lambda: b""), ("d.m4a", lambda: b""), ("e.OPUS", lambda: b""), ("readme.md", lambda: b"")]
+    assert len(G.check(f, [])) == 6
+    assert G.check(f, ["Utkarsh_voice.wav", "docs/*.MP3", "x/*.ogg", "c.flac", "d.m4a", "e.OPUS"]) == []
     fx = [("tests/fixtures/audio/tone.wav", lambda: b"")]
     assert G.check(fx, ["tests/fixtures/audio/*.wav"]) == [] and len(G.check(fx, ["other/*.wav"])) == 1
 
@@ -42,7 +42,7 @@ def test_allowlist_parser_ignores_comments_and_blanks():
 
 def test_gitignore_covers_audio_and_the_colab_notebook():
     lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    for pat in ("*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a", "MME_Chatterbox_V3_TEST_COLAB_(3).ipynb", "Utkarsh_voice.wav", "Utkarsh_voice_ref12s_24k.wav"):
+    for pat in ("*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a", "*.opus", "MME_Chatterbox_V3_TEST_COLAB_(3).ipynb", "Utkarsh_voice.wav", "Utkarsh_voice_ref12s_24k.wav"):
         assert pat in lines, pat
 
 
