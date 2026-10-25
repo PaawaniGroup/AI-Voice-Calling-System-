@@ -23,7 +23,23 @@ def test_the_worker_self_test_passes_without_a_gpu():
     assert "checks passed" in r.stdout and "FAIL" not in r.stdout
 
 
-def test_the_workflow_can_only_push_the_v3_tag_and_never_runs_for_main():
+def test_the_handler_never_deep_copies_the_prepared_voice():
+    """The first v3 image crashed every worker at start-up: Chatterbox's prepared voice holds graph tensors that PyTorch refuses to deep-copy. Guard: no deepcopy call
+    in the handler (a shallow copy of the object and its dict is used), and the self-test carries a fake voice that raises on deepcopy."""
+    import re
+    src = HANDLER.read_text(encoding="utf-8")
+    assert re.search(r"copy\.deepcopy\(|\bdeepcopy\(", src) is None
+    assert "def __deepcopy__" in src and "graph leaves" in src                         # the fake that models the real failure is part of the self-test
+    assert "copy.copy(conds)" in src
+
+
+def test_the_readme_documents_the_exact_start_up_error_of_the_v3_image():
+    readme = (HANDLER.parent / "README.md").read_text(encoding="utf-8")
+    assert "Only Tensors created explicitly by the user (graph leaves) support the deepcopy protocol at the moment" in readme
+    assert "Never use the `v3` tag" in readme and "NEW test endpoint" in readme and "30/30 checks passed" in readme
+
+
+def test_the_workflow_can_only_push_the_v4_tag_and_never_runs_for_main():
     import yaml
     d = yaml.safe_load((HANDLER.parent / "build-image-v3-test.yml").read_text(encoding="utf-8"))
     triggers = d.get("on", d.get(True))                      # PyYAML reads the key `on` as the boolean True
@@ -31,7 +47,7 @@ def test_the_workflow_can_only_push_the_v3_tag_and_never_runs_for_main():
     steps = d["jobs"]["build"]["steps"]
     pushed = [s for s in steps if str(s.get("uses", "")).startswith("docker/build-push-action")]
     assert len(pushed) == 1 and pushed[0]["with"]["push"] is True
-    assert pushed[0]["with"]["tags"].split() == ["ghcr.io/aitechteammme-dev/mme-tts-runpod:v3"]   # :latest and :v2 can never be overwritten
+    assert pushed[0]["with"]["tags"].split() == ["ghcr.io/aitechteammme-dev/mme-tts-runpod:v4"]   # :latest, :v2 and the broken :v3 can never be overwritten
 
 
 def test_the_readme_warns_against_pushing_the_test_to_main():
