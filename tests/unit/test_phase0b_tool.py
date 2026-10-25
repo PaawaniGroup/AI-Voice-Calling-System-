@@ -67,6 +67,20 @@ def test_summarize_rows_gives_fits_and_per_length_ratios():
     assert set(s["by_words"]) == {4, 8, 16} and s["by_words"][16]["wall_over_audio"] == pytest.approx((3 + 0.5 * 6.2) / 6.2, abs=0.02)
 
 
+def test_a_verified_warm_worker_lowers_the_cold_start_reserve_so_a_small_cap_can_be_used():
+    warm, cold = {"idle": 2, "ready": 2, "running": 0, "initializing": 0}, {"idle": 0, "ready": 0, "running": 0, "initializing": 1}
+    assert t.warm_reserve_s(warm, 200.0) == t.WARM_RESERVE_S == 30.0
+    assert t.warm_reserve_s({"idle": None, "ready": None, "running": 1}, 200.0) == 30.0
+    assert t.warm_reserve_s(cold, 200.0) == 200.0 and t.warm_reserve_s({}, 200.0) == 200.0 and t.warm_reserve_s(None, 200.0) == 200.0   # no worker up: keep the full reserve
+    assert t.warm_reserve_s(warm, 10.0) == 10.0                                                                                        # never raises a smaller reserve
+    # the effect on the spend guard: a $0.02 cap refuses a call with the 200 s reserve (about $0.038) and allows it with the warm reserve
+    refuse = Ledger(t.PRICE, {"stt": 0.0, "brain": 0.0, "tts": 60.0}, 0.02, 200.0)
+    with pytest.raises(Exception, match="budget cap"):
+        refuse.before("tts")
+    allow = Ledger(t.PRICE, {"stt": 0.0, "brain": 0.0, "tts": 60.0}, 0.02, t.warm_reserve_s(warm, 200.0))
+    allow.before("tts")
+
+
 def test_concurrency_verdicts():
     assert t.concurrency_verdict(4.0, [4.0, 4.2], [20, 30])["verdict"] == "parallel"
     assert t.concurrency_verdict(4.0, [4.0, 8.1, 12.0], [20, 4000, 8000])["verdict"] == "serialised"

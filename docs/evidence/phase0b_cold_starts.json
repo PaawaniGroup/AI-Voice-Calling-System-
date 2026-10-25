@@ -1,0 +1,40 @@
+{
+ "runs": [
+  {
+   "run": 1,
+   "verdict": "workers never scaled to zero",
+   "workers": {
+    "idle": 2,
+    "ready": 2,
+    "running": 0,
+    "initializing": 0
+   }
+  }
+ ],
+ "cost": {
+  "per_service": {
+   "stt": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "brain": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "tts": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   }
+  },
+  "usd_estimated_total": 0.0,
+  "budget_usd": 0.15,
+  "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+ },
+ "done": true
+}

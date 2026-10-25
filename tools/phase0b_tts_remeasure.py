@@ -14,7 +14,7 @@ Variants, on the SAME worker and the SAME clauses, to separate where the time go
 Phase 0 (the old worker, the old request) is compared in the report. Output: timings, lengths, counts, byte sizes. No keys, no text.
 Listening files (5 mu-law replies as WAV) are written to --listen-dir, which must be OUTSIDE the repository (the commit guard refuses audio).
 """
-import argparse, asyncio, audioop, base64, json, statistics, sys, time, wave
+import argparse, asyncio, audioop, base64, json, os, statistics, sys, time, wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -128,6 +128,8 @@ def make(a, reserve):
     s = Settings()
     cfg = load_cfg_brain(s, a.tenant)
     cfg["timeouts"] = {**(cfg.get("timeouts") or {}), "tts": 900.0}
+    if os.environ.get("RUNPOD_TTS_KEY"):   # a key made for the test endpoint wins over the one stored for the live voice endpoint
+        cfg["keys"] = {**(cfg.get("keys") or {}), "tts": os.environ["RUNPOD_TTS_KEY"]}
     url = f"https://api.runpod.ai/v2/{a.endpoint_id}"
     cfg["tts_url"] = url + "/runsync"
     cl = ModelClients(s, cfg)
@@ -234,6 +236,16 @@ def classify_probe(out):
     return "old_or_unknown", f"answered format {out.get('format')!r} instead of ulaw8k"
 
 
+WARM_RESERVE_S = 30.0
+
+
+def warm_reserve_s(workers_health: dict, cold_reserve_s: float) -> float:
+    """Seconds of billing the ledger reserves before a call: a worker that /health shows as idle, ready or running means no cold start to pay for. NOTE: the
+    first pickup on such a worker can still take about 50 s (Phase 0b, 25 Oct), so callers must still wait long enough."""
+    up = sum(int((workers_health or {}).get(k) or 0) for k in ("idle", "ready", "running"))
+    return min(cold_reserve_s, WARM_RESERVE_S) if up else cold_reserve_s
+
+
 async def run_ulaw_probe(a):
     """ONE request: output_format ulaw8k, a named voice, NO reference. An old worker can only refuse it (cheap); a v3 worker answers with 8 kHz mu-law."""
     cl, sp = make(a, reserve=200.0)
@@ -242,14 +254,16 @@ async def run_ulaw_probe(a):
         w, code = await workers(sp)
         out_rec["workers_before"], out_rec["health_http"] = w, code
         print("workers before:", json.dumps(w), "health http", code, flush=True)
+        sp.ledger.cold_reserve_s = warm_reserve_s(w, sp.ledger.cold_reserve_s)
         inp = sp.tts_body(CLAUSES[4][0])["input"]
         inp.pop("reference_audio_base64", None)
         inp.update(voice=a.voice, output_format="ulaw8k")
         try:
-            rec, out = await asyncio.wait_for(sp.job("tts", {"input": inp}, "run", timeout=a.probe_timeout, poll_cap=POLL_CAP), a.probe_timeout)
+            rec, out = await asyncio.wait_for(sp.job("tts", {"input": inp}, "run", timeout=a.probe_timeout, poll_cap=1.0), a.probe_timeout)   # polled about once a second
+            out_rec.update(status_first_seen_s=getattr(sp, "status_log", None), worker_id=getattr(sp, "worker_id", None))
         except asyncio.TimeoutError:
             await sp.cancel_all()
-            out_rec.update(verdict="timeout", job_id=getattr(sp, "last_id", None), status_first_seen_s=getattr(sp, "status_log", None))
+            out_rec.update(verdict="timeout", job_id=getattr(sp, "last_id", None), status_first_seen_s=getattr(sp, "status_log", None), worker_id=getattr(sp, "worker_id", None))
             print(f"no answer within {a.probe_timeout:.0f} s: the job was cancelled. job id {out_rec['job_id']} | status first seen at (s): {out_rec['status_first_seen_s']} "
                   "(IN_QUEUE only = no worker took it; IN_PROGRESS = a worker started and did not finish). NOTE: cancelling does not stop a running handler.", flush=True)
             return out_rec

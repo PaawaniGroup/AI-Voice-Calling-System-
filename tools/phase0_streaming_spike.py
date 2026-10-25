@@ -58,7 +58,7 @@ class Spike:
                 t_sub = time.perf_counter()
             r.raise_for_status()
             j = r.json()
-            self.last_id, self.status_log = j.get("id"), {"SUBMITTED": 0.0}       # for diagnosis when a job never answers: its id and when each status was first seen
+            self.last_id, self.status_log, self.worker_id = j.get("id"), {"SUBMITTED": 0.0}, j.get("workerId")       # for diagnosis when a job never answers: its id, when each status was first seen, the worker if the API names it
             if j.get("id"):
                 self.inflight[j["id"]] = (svc, base, hdrs)
             pd = 0.06
@@ -67,6 +67,8 @@ class Spike:
                 await asyncio.sleep(pd); pd = min(pd * 1.5, poll_cap); polls += 1
                 sr = await cl._http.get(f"{base}/status/{j['id']}", headers=hdrs, timeout=30)
                 sr.raise_for_status(); j = sr.json()
+                self.worker_id = j.get("workerId") or self.worker_id
+            self.status_log.setdefault(j.get("status"), round(time.perf_counter() - t0, 1))
             self.inflight.pop(j.get("id"), None)
             if j.get("status") != "COMPLETED":
                 raise RuntimeError(f"job status {j.get('status')}")
