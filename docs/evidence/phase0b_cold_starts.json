@@ -1,4 +1,7 @@
 {
+ "STATUS": "NO MEASUREMENT: workers did not scale to zero",
+ "what_happened": "On 25 Oct 2026 the cold-start test waited more than 300 s for endpoint 6bmxas8ccwzhrv to show zero workers; /health stayed at idle 2, ready 2, running 0. No job was sent, so there is no pickup time in this file and nothing may be quoted from it. Cost 0.00 USD.",
+ "to_redo": "Set Active workers to 0 and check the idle timeout, then rerun the 3 cold starts (cap 0.15 USD).",
  "runs": [
   {
    "run": 1,
