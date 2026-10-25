@@ -36,6 +36,8 @@ Reading it:
 | Brain | `zx6o64kfl8ecj0` | `/runsync` | `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` |
 | TTS | `tanq00wi13novj` | `/runsync` | `mme-tts-runpod` |
 
+**Stale as of 24 Oct 2026:** the endpoint IDs above were the tenant's on 23 Oct; the tenant's `ai_config` in the database now holds different ones, so do not use them.
+
 Notes: the settings default for the TTS model is `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, but the tenant overrides it; the model id `mme-tts-runpod` is a worker name, not a model. Whether the worker is Chatterbox is **not confirmed by anything in this repo** (client comments say "Chatterbox"); it will be confirmed from the handler you paste. `Qwen3-30B-A3B-Instruct-2507` is the non-thinking variant, so there is no thinking mode to switch off on that checkpoint.
 
 ## Test baseline (before any realtime change)
