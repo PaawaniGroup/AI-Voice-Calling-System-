@@ -43,10 +43,10 @@ Heard at about `confirmed end-of-turn + 0.15 s prebuffer + 0.2 s call leg`: 1.05
 
 | Spike | Tool | Cost | What it measures | Go / no-go |
 |---|---|---|---|---|
-| (a) End-of-turn replay at 700 / 550 / 450 / 350 ms | `tools/eot_replay.py` | $0, offline | Files cut off at a pause, per threshold, and the longest pause inside speech | Go: at most 2% of files cut off at the chosen threshold with speculation; no-go above 5%. The tool counts the plain cut-off rate; speculation is judged on top of it. |
+| (a) End-of-turn replay at 700 / 550 / 450 / 350 ms | `tools/eot_replay.py` | $0, offline | Files cut off at a pause, per threshold, and the longest pause inside speech | Go: at most 2% of files cut off at the chosen threshold with speculation; no-go above 5%. Zero cut-offs in n utterances only bounds the true rate below 1 - 0.05^(1/n) (39% at 6, 9.5% at 30, 3.7% at 80, 2% at 150), so **a PASS needs about 150 clean utterances**; the 80 of the protocol give a range or a clear no-go, and below 150 the tool reports a range, not a pass. The tool counts the plain cut-off rate; speculation is judged on top of it. |
 | (b) Rolling-window STT | `tools/rolling_stt_spike.py` | cap $0.20 (RunPod STT) | Final-text delay of decoding only the tail, and the word error against the whole-utterance decode | Go: final delay p50 at most 0.25 s and mean word error at most 2 points above the plain decode |
 
-Every recording is run in two versions, reported separately: `clean8k` and `phone` (8 kHz, 300–3400 Hz band-pass, mu-law; `tools/telephone_chain.py`). The tools are tested offline with synthetic signals and a fake recogniser. Neither has touched a real recording or endpoint yet. The recording set is 30 files (the owner's 12 caller lines, 3 pause lines, 3 noise lines, 1 speakerphone line; see `docs/RECORDING_PROTOCOL.md`).
+Every recording is run in two versions, reported separately: `clean8k` and `phone` (8 kHz, 300–3400 Hz band-pass, mu-law; `tools/telephone_chain.py`). The tools are tested offline with synthetic signals and a fake recogniser. Neither has touched a real recording or endpoint yet. The recording set is 80 recordings plus 3 room tones: 30 scripted lines (the owner's 12 caller lines, 3 pause lines, noise and speakerphone lines), 20 extra pause lines and 30 open answers (see `docs/RECORDING_PROTOCOL.md` and the one-page sheet per speaker in `docs/RECORDING_SHEET.md`). `tools/recording_intake_check.py` checks the files first (free, ids and counts only).
 
 ## 4. Pod spikes, ordered by cost
 

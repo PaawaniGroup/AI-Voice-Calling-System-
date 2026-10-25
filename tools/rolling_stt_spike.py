@@ -161,6 +161,9 @@ def report(res: dict) -> None:
     w = s["wer_vs_whole"]
     print(f"word error vs whole decode    : mean {w['mean']}  median {w['median']}  p95 {w['p95']}  max {w['max']}  share over 0.25: {w['share_over_0.25']}")
     print(f"VERDICT {res['verdict']} (go: final delay p50 <= 0.25 s and mean word error <= 0.02) | cost estimate ${res['estimated_cost_usd']} of cap ${res['budget_usd']}")
+    n = s["n_measured"]
+    print(f"HOW MUCH THIS PROVES: these are medians and means over n={n} recordings" + ("; below about 20 the p95 is close to the maximum and only indicative" if n < 20 else "") +
+          ". Recordings of one speaker are not independent: read the verdict as a range, not a guarantee.")
 
 
 def make(a):
