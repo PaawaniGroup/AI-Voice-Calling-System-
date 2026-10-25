@@ -1,0 +1,112 @@
+{
+ "STATUS": "MEASUREMENT: 3 of 3 runs answered",
+ "rule": "pickup under 5 s = warm pickup, over 20 s = cold start; runs are never averaged together; /health counts are information only",
+ "runs": [
+  {
+   "run": 1,
+   "health_before_info_only": {
+    "idle": 2,
+    "ready": 2,
+    "running": 0,
+    "initializing": 0
+   },
+   "worker_id": "eue16e1ghsp2s8",
+   "time_to_in_progress_s": 41.3,
+   "status_first_seen_s": {
+    "SUBMITTED": 0.0,
+    "IN_QUEUE": 0.4,
+    "IN_PROGRESS": 41.3,
+    "COMPLETED": 44.0
+   },
+   "delay_s": 40.63,
+   "exec_s": 1.48,
+   "wall_s": 44.03,
+   "label": "cold start",
+   "handler": {
+    "audio_s": 1.88,
+    "generate_s": 1.407,
+    "total_s": 1.412
+   },
+   "format": "ulaw8k"
+  },
+  {
+   "run": 2,
+   "health_before_info_only": {
+    "idle": 2,
+    "ready": 2,
+    "running": 0,
+    "initializing": 0
+   },
+   "worker_id": "eue16e1ghsp2s8",
+   "time_to_in_progress_s": 1.6,
+   "status_first_seen_s": {
+    "SUBMITTED": 0.0,
+    "IN_QUEUE": 0.5,
+    "IN_PROGRESS": 1.6,
+    "COMPLETED": 5.0
+   },
+   "delay_s": 1.11,
+   "exec_s": 2.2,
+   "wall_s": 5.02,
+   "label": "warm pickup",
+   "handler": {
+    "audio_s": 2.48,
+    "generate_s": 2.013,
+    "total_s": 2.017
+   },
+   "format": "ulaw8k"
+  },
+  {
+   "run": 3,
+   "health_before_info_only": {
+    "idle": 2,
+    "ready": 2,
+    "running": 0,
+    "initializing": 0
+   },
+   "worker_id": "eue16e1ghsp2s8",
+   "time_to_in_progress_s": 1.7,
+   "status_first_seen_s": {
+    "SUBMITTED": 0.0,
+    "IN_QUEUE": 0.4,
+    "IN_PROGRESS": 1.7,
+    "COMPLETED": 4.0
+   },
+   "delay_s": 1.12,
+   "exec_s": 1.76,
+   "wall_s": 3.99,
+   "label": "warm pickup",
+   "handler": {
+    "audio_s": 1.84,
+    "generate_s": 1.709,
+    "total_s": 1.712
+   },
+   "format": "ulaw8k"
+  }
+ ],
+ "cost": {
+  "per_service": {
+   "stt": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "brain": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "tts": {
+    "job_s": 48.3,
+    "idle_s": 120.0,
+    "tail_s": 60.0,
+    "usd": 0.04383
+   }
+  },
+  "usd_estimated_total": 0.04383,
+  "budget_usd": 0.15,
+  "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+ }
+}
