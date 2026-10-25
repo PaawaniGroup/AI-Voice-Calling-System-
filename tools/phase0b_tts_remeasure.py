@@ -216,6 +216,59 @@ def report(out, phase0_path):
                       (f" | C {c_['wall_s']} (C-B {round(c_['wall_s'] - b_[w]['wall_s'], 2):+})" if c_ else ""))
 
 
+def classify_probe(out):
+    """What a ONE-request probe with output_format ulaw8k and no reference tells about the worker behind the endpoint. Returns (verdict, detail)."""
+    if not isinstance(out, dict):
+        return "unexpected", "the output is not an object"
+    err = str(out.get("error") or "")
+    if err:
+        if "output_format must be" in err and "ulaw8k" not in err:
+            return "old_worker", "refuses ulaw8k (the handler (5) generation: voice from the request, wav/pcm16 only)"
+        if "reference_audio_base64" in err or "reference" in err.lower() and "provide" in err.lower():
+            return "old_worker", "requires a reference in the request (older than handler (5))"
+        if err.startswith("Unknown voice"):
+            return "new_handler_other_voice", f"v3 handler, but it has no voice of that name; it offers {out.get('voices')}"
+        return "error", err[:100]
+    if out.get("format") == "ulaw8k":
+        return "new_handler", "answered ulaw8k"
+    return "old_or_unknown", f"answered format {out.get('format')!r} instead of ulaw8k"
+
+
+async def run_ulaw_probe(a):
+    """ONE request: output_format ulaw8k, a named voice, NO reference. An old worker can only refuse it (cheap); a v3 worker answers with 8 kHz mu-law."""
+    cl, sp = make(a, reserve=200.0)
+    out_rec = {"endpoint": a.endpoint_id, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    try:
+        w, code = await workers(sp)
+        out_rec["workers_before"], out_rec["health_http"] = w, code
+        print("workers before:", json.dumps(w), "health http", code, flush=True)
+        inp = sp.tts_body(CLAUSES[4][0])["input"]
+        inp.pop("reference_audio_base64", None)
+        inp.update(voice=a.voice, output_format="ulaw8k")
+        try:
+            rec, out = await asyncio.wait_for(sp.job("tts", {"input": inp}, "run", timeout=a.probe_timeout, poll_cap=POLL_CAP), a.probe_timeout)
+        except asyncio.TimeoutError:
+            await sp.cancel_all()
+            out_rec.update(verdict="timeout", job_id=getattr(sp, "last_id", None), status_first_seen_s=getattr(sp, "status_log", None))
+            print(f"no answer within {a.probe_timeout:.0f} s: the job was cancelled. job id {out_rec['job_id']} | status first seen at (s): {out_rec['status_first_seen_s']} "
+                  "(IN_QUEUE only = no worker took it; IN_PROGRESS = a worker started and did not finish). NOTE: cancelling does not stop a running handler.", flush=True)
+            return out_rec
+        verdict, detail = classify_probe(out)
+        raw = base64.b64decode((out or {}).get("audio_base64") or "") if isinstance(out, dict) and not out.get("error") else b""
+        out_rec.update(job_id=getattr(sp, "last_id", None), verdict=verdict, detail=detail, delay_ms=rec["delay_ms"], exec_ms=rec["exec_ms"], wall_ms=rec["wall_ms"], overhead_ms=rec["overhead_ms"],
+                       sample_rate=(out or {}).get("sample_rate") if isinstance(out, dict) else None, format=(out or {}).get("format") if isinstance(out, dict) else None,
+                       voice=(out or {}).get("voice") if isinstance(out, dict) else None, audio_bytes=len(raw), audio_s=round(len(raw) / 8000, 3) if raw else None,
+                       worker_timing=(out or {}).get("timing") if isinstance(out, dict) else None, error=(str((out or {}).get("error"))[:120] if isinstance(out, dict) and out.get("error") else None))
+        print("PROBE RESULT:", json.dumps({k: v for k, v in out_rec.items() if k not in ("started",)}, ensure_ascii=False), flush=True)
+        return out_rec
+    finally:
+        out_rec["cost"] = sp.ledger.report()
+        await cl.aclose()
+        print("estimated cost of the probe: $", out_rec["cost"]["usd_estimated_total"], "(delay + execution + one idle tail of", a.idle, "s)", flush=True)
+        Path(a.out_probe1).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out_probe1).write_text(json.dumps(out_rec, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 async def run_probe(a):
     """2 and 3 jobs started at the same moment on warm workers. The workers are warmed first by concurrent warm-up pings (cheap)."""
     out = {"endpoint": a.endpoint_id, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rounds": []}
@@ -263,13 +316,16 @@ def main():
     ap.add_argument("--endpoint-id", required=True); ap.add_argument("--tenant", default="mme-test"); ap.add_argument("--voice", default="utkarsh")
     ap.add_argument("--budget", type=float, default=0.15); ap.add_argument("--idle", type=float, default=60.0, help="the test endpoint's idle timeout in s (spend estimate)")
     ap.add_argument("--probe", action="store_true"); ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--ulaw-probe", action="store_true", help="ONE request with output_format ulaw8k and no reference: is the worker behind this endpoint the v3 handler?")
+    ap.add_argument("--probe-timeout", type=float, default=240.0)
+    ap.add_argument("--out-probe1", default=str(ROOT / "docs" / "evidence" / "phase0b_ulaw_probe.json"))
     ap.add_argument("--listen-dir", default=""); ap.add_argument("--phase0", default=str(ROOT / "docs" / "evidence" / "phase0_streaming_spike.json"))
     ap.add_argument("--out", default=str(ROOT / "docs" / "evidence" / "phase0b_tts_v3.json"))
     ap.add_argument("--out-probe", default=str(ROOT / "docs" / "evidence" / "phase0b_tts_v3_concurrency.json"))
     a = ap.parse_args()
     if not a.yes:
         raise SystemExit("--yes required: chargeable")
-    asyncio.run(run_probe(a) if a.probe else run_measure(a))
+    asyncio.run(run_ulaw_probe(a) if a.ulaw_probe else run_probe(a) if a.probe else run_measure(a))
 
 
 if __name__ == "__main__":

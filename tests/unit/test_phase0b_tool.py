@@ -1,6 +1,7 @@
 """tools/phase0b_tts_remeasure.py, offline: the analysis functions and the measuring class against a FAKE RunPod TTS worker (httpx mock). Spends nothing."""
 import json
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import httpx
@@ -24,6 +25,8 @@ def fake_runpod(worker: MockModels, seen: list):
     jobs = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path.endswith("/health"):
+            return httpx.Response(200, json={"workers": {"idle": 1, "ready": 1, "running": 0, "initializing": 0}, "jobs": {"completed": 0}})
         if req.method == "POST" and req.url.path.endswith("/run"):
             body = json.loads(req.content)
             jid = f"j{len(jobs) + 1}"
@@ -115,6 +118,64 @@ async def test_report_prints_the_three_variants_and_the_phase0_comparison(tmp_pa
     for must in ("A ulaw8k + voice, no reference", "B wav 24k + voice, no reference", "C wav 24k + 768 KB reference", "Phase 0, OLD worker", "A vs Phase 0", "Where the time goes"):
         assert must in out, must
     assert "key" not in out.lower() and "rpa_" not in out
+
+
+def test_the_probe_tells_a_v3_worker_from_older_ones():
+    v3 = MockModels()
+    assert t.classify_probe(v3._tts_output({"output_format": "ulaw8k", "voice": "utkarsh"}))[0] == "new_handler"
+    v2 = MockModels()
+    v2.tts_worker = "v2"
+    assert t.classify_probe(v2._tts_output({"output_format": "ulaw8k"}))[0] == "old_worker"                # handler (5): "output_format must be 'wav' or 'pcm16'"
+    assert t.classify_probe({"error": "Provide reference_audio_base64 containing a WAV recording"})[0] == "old_worker"   # handlers (3) and (4)
+    assert t.classify_probe({"error": "No reference voice available. Bake one into the image or send reference_audio_base64"})[0] == "old_worker"
+    other = t.classify_probe({"error": "Unknown voice: 'x'", "voices": ["utkarsh"]})
+    assert other[0] == "new_handler_other_voice" and "utkarsh" in other[1]
+    assert t.classify_probe({"audio_base64": "AA==", "format": "wav"})[0] == "old_or_unknown"
+    assert t.classify_probe({"error": "CUDA out of memory"})[0] == "error" and t.classify_probe("text")[0] == "unexpected"
+
+
+async def test_the_single_probe_sends_no_reference_and_a_named_voice_and_reports_rate_delay_and_execution(tmp_path, capsys):
+    sp, cl, seen, _ = spike(tmp_path)
+    a = Namespace(endpoint_id="testep", voice="utkarsh", probe_timeout=30.0, idle=60.0, budget=0.1, out_probe1=str(tmp_path / "probe.json"), tenant="mme-test")
+    orig = t.make
+    t.make = lambda args, reserve: (cl, sp)
+    try:
+        rec = await t.run_ulaw_probe(a)
+    finally:
+        t.make = orig
+    assert len(seen) == 1 and seen[0]["voice"] == "utkarsh" and seen[0]["output_format"] == "ulaw8k" and "reference_audio_base64" not in seen[0]
+    assert rec["verdict"] == "new_handler" and rec["sample_rate"] == 8000 and rec["delay_ms"] == 20 and rec["exec_ms"] == 1500 and rec["audio_s"] == pytest.approx(0.3, abs=0.01)
+    assert json.loads((tmp_path / "probe.json").read_text())["verdict"] == "new_handler"
+    assert "rpa_" not in capsys.readouterr().out
+
+
+async def test_a_probe_that_never_gets_an_answer_is_cancelled_and_reports_the_job_id_and_how_far_it_got(tmp_path, capsys):
+    """A worker that takes the job and never finishes: the probe must give up at its time limit, cancel, and say which status it reached."""
+    jobs = {}
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/health"):
+            return httpx.Response(200, json={"workers": {"idle": 2, "ready": 2, "running": 0, "initializing": 0}})
+        if req.method == "POST" and req.url.path.endswith("/run"):
+            jobs["j1"] = json.loads(req.content)
+            return httpx.Response(200, json={"id": "j1", "status": "IN_QUEUE"})
+        if req.method == "POST" and "/cancel/" in req.url.path:
+            jobs["cancelled"] = True
+            return httpx.Response(200, json={"status": "CANCELLED"})
+        return httpx.Response(200, json={"id": "j1", "status": "IN_PROGRESS"})          # picked up, never completes
+    s = make_settings(ai_allowed_hosts="api.runpod.ai")
+    cl = ModelClients(s, {"tts_url": URL + "/runsync", "keys": {"tts": "k"}}, httpx.MockTransport(handler))
+    sp = t.V3Spike(cl, Ledger(t.PRICE, {"stt": 0.0, "brain": 0.0, "tts": 60.0}, 5.0, 0.0), URL, "utkarsh")
+    a = Namespace(endpoint_id="testep", voice="utkarsh", probe_timeout=0.4, idle=60.0, budget=0.1, out_probe1=str(tmp_path / "p.json"), tenant="mme-test")
+    orig = t.make
+    t.make = lambda args, reserve: (cl, sp)
+    try:
+        rec = await t.run_ulaw_probe(a)
+    finally:
+        t.make = orig
+    assert rec["verdict"] == "timeout" and rec["job_id"] == "j1" and jobs.get("cancelled") is True
+    assert "IN_PROGRESS" in rec["status_first_seen_s"] and "IN_QUEUE" in rec["status_first_seen_s"]
+    assert "job id j1" in capsys.readouterr().out
 
 
 def test_the_listening_files_cannot_be_written_inside_the_repository(tmp_path):

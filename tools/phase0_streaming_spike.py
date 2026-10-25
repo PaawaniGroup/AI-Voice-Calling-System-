@@ -58,10 +58,12 @@ class Spike:
                 t_sub = time.perf_counter()
             r.raise_for_status()
             j = r.json()
+            self.last_id, self.status_log = j.get("id"), {"SUBMITTED": 0.0}       # for diagnosis when a job never answers: its id and when each status was first seen
             if j.get("id"):
                 self.inflight[j["id"]] = (svc, base, hdrs)
             pd = 0.06
             while j.get("status") in ("IN_QUEUE", "IN_PROGRESS"):
+                self.status_log.setdefault(j.get("status"), round(time.perf_counter() - t0, 1))
                 await asyncio.sleep(pd); pd = min(pd * 1.5, poll_cap); polls += 1
                 sr = await cl._http.get(f"{base}/status/{j['id']}", headers=hdrs, timeout=30)
                 sr.raise_for_status(); j = sr.json()
