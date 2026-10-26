@@ -35,6 +35,21 @@ DEFAULT_TTS_VOICE = "utkarsh"   # the voice baked into the TTS worker image (v3)
 _REF_CACHE: dict = {}
 
 
+VOICE_WALL_S = ((3, 2.00), (4, 2.63), (8, 3.39), (12, 4.32))   # MEASURED (TTS re-measurement 25 Oct 2026, ulaw8k + named voice): words -> client wall seconds of one clause
+
+
+def predict_voice_wall_s(words: int) -> float:
+    """Linear interpolation (extrapolation beyond the ends, ESTIMATE) of the measured voice wall time of a clause of `words` words; never below 1 s."""
+    pts = VOICE_WALL_S
+    if words <= pts[0][0]:
+        (x0, y0), (x1, y1) = pts[0], pts[1]
+    elif words >= pts[-1][0]:
+        (x0, y0), (x1, y1) = pts[-2], pts[-1]
+    else:
+        (x0, y0), (x1, y1) = next((a, b) for a, b in zip(pts, pts[1:]) if a[0] <= words <= b[0])
+    return max(1.0, y0 + (y1 - y0) * (words - x0) / (x1 - x0))
+
+
 class AiError(Exception):
     def __init__(self, service: str, kind: str, detail: str = "", *, status_code: int | None = None, body: str | None = None):
         super().__init__(f"{service}:{kind}")
@@ -290,17 +305,83 @@ class ModelClients:
             raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
+        overlap_first = self._first_poll_delay(rec) if (service == "tts" and self.cfg.get("tts_adaptive_poll")) else None   # tenant flag, default OFF
         try:
-            return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06, rec=rec)
+            return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06, rec=rec, overlap_first_s=overlap_first)
         except asyncio.CancelledError:
             if jid:
                 self._spawn(self._cancel_job(service, ep, hdrs, jid))
             raise
 
-    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j, poll_delay: float = 0.1, rec: dict | None = None):
+    def _first_poll_delay(self, rec: dict) -> float:
+        """Flag `tts_adaptive_poll`: when to send the first status poll after the submit returned. The voice wall time of the clause is predicted from its
+        word count (MEASURED table VOICE_WALL_S); polling starts `tts_poll_lead_s` (default 0.5 s, UNVERIFIED) before the predicted end. Unknown length: 0.06 s."""
+        words = rec.get("words")
+        if not isinstance(words, int) or words <= 0:
+            return 0.06
+        lead = max(0.0, float(self.cfg.get("tts_poll_lead_s") or 0.5))
+        elapsed = float(rec.get("submit_ms") or 0.0) / 1000
+        # GUARD: never later than the MEASURED median for this word count. Outside the measured range (3-12 words) the prediction is an extrapolation, so the
+        # nearest measured point is used as the limit: a clause that finishes faster than predicted is then still polled in time.
+        measured_median = predict_voice_wall_s(min(max(words, VOICE_WALL_S[0][0]), VOICE_WALL_S[-1][0]))
+        return max(0.06, min(predict_voice_wall_s(words) - elapsed - lead, measured_median - elapsed))
+
+    async def _poll_overlapped(self, service: str, ep: ServiceEndpoint, hdrs: dict, job_id: str, first_s: float, rec: dict | None):
+        """Overlapping status polls (flag `tts_adaptive_poll`): after `first_s`, start a new GET every `tts_poll_step_s` (default 0.1 s) WITHOUT waiting for the
+        previous one (each GET takes ~0.22 s at the RunPod gateway, MEASURED), at most 4 in flight (<= ~10 per second per job, far below RunPod's `/status` limit of
+        2000 per 10 s per endpoint). The first answer that is not IN_QUEUE/IN_PROGRESS wins; the others are cancelled. Expected saving: the time until a finished job is
+        noticed drops from about half a poll period (~0.14-0.18 s) to about 0.05 s: AT MOST ~0.15 s per job (ESTIMATE, not measured). Errors behave as in the sequential loop,
+        except HTTP 429 (RunPod's rate limit), which is skipped up to 5 times in a row."""
+        step = float(self.cfg.get("tts_poll_step_s") or 0.1)
+        url = f"{ep.url}/status/{job_id}"
+        t_loop = time.monotonic()
+        inflight: set[asyncio.Task] = set()
+        throttled = 0
+
+        async def get_once():
+            t_get = time.monotonic()
+            return await self._http.get(url, headers=hdrs, timeout=30), t_get
+
+        try:
+            await asyncio.sleep(first_s)
+            while True:
+                if self._http.is_closed:
+                    raise AiUnavailable(service, "client_closed")
+                if len(inflight) < 4:
+                    inflight.add(asyncio.ensure_future(get_once()))
+                    if rec is not None:
+                        rec["polls"] += 1
+                done, _ = await asyncio.wait(inflight, timeout=step, return_when=asyncio.FIRST_COMPLETED)
+                for d in done:
+                    inflight.discard(d)
+                    sr, t_get = d.result()
+                    if sr.status_code == 429 and throttled < 5:
+                        throttled += 1
+                        continue
+                    if sr.status_code >= 400:
+                        body_clean = safe_output.scrub(sr.text[:80]).replace("\n", " ").strip()
+                        raise AiError(service, "http_error", str(sr.status_code), status_code=sr.status_code, body=body_clean)
+                    throttled = 0
+                    jj = sr.json()
+                    if not (isinstance(jj, dict) and jj.get("status") in ("IN_QUEUE", "IN_PROGRESS") and jj.get("id")):
+                        if rec is not None:
+                            now = time.monotonic()
+                            rec.update(poll_ms=round((now - t_loop) * 1000, 1), last_get_ms=round((now - t_get) * 1000, 1), response_bytes=len(sr.content),
+                                       adaptive_poll=True, first_poll_s=round(first_s, 3), polls_unanswered=len(inflight))
+                        return jj
+        finally:
+            for t in inflight:
+                t.cancel()
+            if inflight:
+                await asyncio.gather(*inflight, return_exceptions=True)
+
+    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j, poll_delay: float = 0.1, rec: dict | None = None,
+                           overlap_first_s: float | None = None):
         """RunPod `/runsync` stops waiting after ~90 s (cold start) and returns IN_QUEUE/IN_PROGRESS: poll `/status`.
         Adaptive fast polling (100ms -> 400ms) minimizes latency instead of waiting 1s per poll."""
         cap = float(self.cfg.get("runpod_poll_cap_s") or 0.15)   # status polls are free: a tight cap trims the wait after the job finishes
+        if overlap_first_s is not None and isinstance(j, dict) and j.get("status") in ("IN_QUEUE", "IN_PROGRESS") and j.get("id"):
+            j = await self._poll_overlapped(service, ep, hdrs, j["id"], overlap_first_s, rec)      # flag `tts_adaptive_poll`; the loop below is then skipped
         t_loop = time.monotonic()
         while isinstance(j, dict) and j.get("status") in ("IN_QUEUE", "IN_PROGRESS") and j.get("id"):
             await asyncio.sleep(poll_delay)
