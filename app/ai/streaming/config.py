@@ -15,12 +15,18 @@ STREAM_KEYS: dict[str, tuple] = {
     "stream_prefetch_depth": (1, 4),
     "stream_prebuffer_ms": (0, 400),
     "runpod_poll_cap_s": (0.03, 1.0),
+    # clause-size ramp (read only when the tenant flag `stream_ramp` is on)
+    "stream_ramp_first_min_words": (1, 4),
+    "stream_first_max_words": (2, 8),
+    "stream_second_min_words": (2, 20),
+    "stream_second_max_words": (4, 24),
 }
 # Clause sizes from the TTS re-measurement of 25 Oct 2026 (docs/evidence/phase0b_tts_v3.json, ulaw8k + named voice, no reference): wall time per second of audio is
 # 1.52 for 4 words (a first clause cannot be ahead of playout, it only has to be short), 1.21 for 8, 0.99 for 12 and 0.97 for 16: only clauses of 12 words or more
 # are generated as fast as they are played, so later clauses are cut at 12-14 words. Prefetch depth 2 is unchanged until the concurrency probe is run.
 PROVISIONAL = {"stream_first_min_words": 4, "stream_min_words": 12, "stream_max_words": 14, "stream_prefetch_depth": 2, "stream_prebuffer_ms": 150,
-               "runpod_poll_cap_s": 0.15}
+               "runpod_poll_cap_s": 0.15,
+               "stream_ramp_first_min_words": 2, "stream_first_max_words": 4, "stream_second_min_words": 6, "stream_second_max_words": 8}
 
 
 def value(cfg: dict, key: str):
@@ -31,6 +37,14 @@ def value(cfg: dict, key: str):
 def stream_config_from(cfg: dict):
     from app.ai.streaming.turn import StreamConfig
     first, mn, mx = value(cfg, "stream_first_min_words"), value(cfg, "stream_min_words"), value(cfg, "stream_max_words")
-    return StreamConfig(segmenter=SegmenterConfig(first_min_words=first, min_words=min(mn, mx), max_words=mx),
+    ramp = bool((cfg or {}).get("stream_ramp"))               # tenant flag, default OFF: without it the segmenter is exactly as before
+    seg = SegmenterConfig(first_min_words=first, min_words=min(mn, mx), max_words=mx)
+    if ramp:
+        r_first_min, r_first_max = value(cfg, "stream_ramp_first_min_words"), value(cfg, "stream_first_max_words")
+        s_min, s_max = value(cfg, "stream_second_min_words"), value(cfg, "stream_second_max_words")
+        seg = SegmenterConfig(first_min_words=first, min_words=min(mn, mx), max_words=mx, ramp=True,
+                              ramp_first_min_words=min(r_first_min, r_first_max), first_max_words=r_first_max,
+                              second_min_words=min(s_min, s_max), second_max_words=s_max)
+    return StreamConfig(segmenter=seg,
                         playout=PlayoutConfig(prebuffer_ms=value(cfg, "stream_prebuffer_ms")),
-                        prefetch_depth=value(cfg, "stream_prefetch_depth"))
+                        prefetch_depth=value(cfg, "stream_prefetch_depth"), ramp=ramp)

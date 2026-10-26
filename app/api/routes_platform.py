@@ -373,7 +373,12 @@ class AiConfigIn(Strict):
     stream_prefetch_depth: int | None = Field(None, ge=1, le=4)
     stream_prebuffer_ms: int | None = Field(None, ge=0, le=400)
     runpod_poll_cap_s: float | None = Field(None, ge=0.03, le=1.0)
-    trace_evidence: bool | None = None       # numbers-only turn evidence line per turn (also needs MME_TEL_AI_TRACE_EVIDENCE_PATH); default OFF per tenant
+    stream_ramp: bool | None = None          # clause-size ramp (short first clause, Brain opening rule); needs streaming_pipeline; default OFF per tenant
+    stream_ramp_first_min_words: int | None = Field(None, ge=1, le=4)
+    stream_first_max_words: int | None = Field(None, ge=2, le=8)
+    stream_second_min_words: int | None = Field(None, ge=2, le=20)
+    stream_second_max_words: int | None = Field(None, ge=4, le=24)
+    trace_evidence: bool | None = None      # numbers-only turn evidence line per turn (also needs MME_TEL_AI_TRACE_EVIDENCE_PATH); default OFF per tenant
 
 
 @router.get("/ai/config")

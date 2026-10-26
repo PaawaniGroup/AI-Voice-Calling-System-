@@ -89,6 +89,15 @@ class SegmenterConfig:
     min_words: int = 6
     max_words: int = 14           # PROVISIONAL: the final value comes from the TTS re-measurement
     hard_max_factor: float = 2.0  # a protected span may push a clause past max_words, never past max_words * this
+    # Clause-size ramp (tenant flag `stream_ramp`, default OFF: with ramp=False none of the fields below is read and the behaviour is unchanged).
+    # Clause 1 ends at the first boundary after ramp_first_min_words, else at a word boundary at first_max_words (a natural break up to
+    # first_soft_extra_words later is preferred); clause 2 uses second_min/second_max_words; later clauses use min_words/max_words.
+    ramp: bool = False
+    ramp_first_min_words: int = 2
+    first_max_words: int = 4
+    first_soft_extra_words: int = 1
+    second_min_words: int = 6
+    second_max_words: int = 8
 
 
 class ClauseSegmenter:
@@ -120,7 +129,14 @@ class ClauseSegmenter:
 
     # ------------------------------------------------------------------ internals
     def _min(self) -> int:
+        if self.cfg.ramp:
+            return self.cfg.ramp_first_min_words if self.emitted == 0 else (self.cfg.second_min_words if self.emitted == 1 else self.cfg.min_words)
         return self.cfg.first_min_words if self.emitted == 0 else self.cfg.min_words
+
+    def _max(self) -> int:
+        if self.cfg.ramp:
+            return self.cfg.first_max_words if self.emitted == 0 else (self.cfg.second_max_words if self.emitted == 1 else self.cfg.max_words)
+        return self.cfg.max_words
 
     def _drain(self, final: bool) -> list[str]:
         out: list[str] = []
@@ -138,7 +154,7 @@ class ClauseSegmenter:
     def _find_cut(self, final: bool) -> int | None:
         toks = list(re.finditer(r"\S+", self.buf))
         words = 0
-        minw, maxw = self._min(), self.cfg.max_words
+        minw, maxw = self._min(), self._max()
         hard_max = int(maxw * self.cfg.hard_max_factor)
         for i, m in enumerate(toks):
             tok = m.group()
@@ -148,6 +164,8 @@ class ClauseSegmenter:
             if nxt is None:
                 # lookahead is not available yet: the last token is never cut here (a boundary needs one more word to be confirmed)
                 break
+            if self.cfg.ramp and not final and i + 2 == len(toks) and not self.buf[-1].isspace():
+                break                                          # ramp: the next word may still be arriving (its punctuation or the rest of a date/amount): wait for it
             if words < minw:
                 continue
             if no_break_after(tok, nxt):
@@ -161,6 +179,9 @@ class ClauseSegmenter:
                 self._reason = "punct"
                 return m.end()
             if words >= maxw and is_wordlike(tok):
+                if (self.cfg.ramp and self.emitted == 0 and words < maxw + self.cfg.first_soft_extra_words
+                        and nxt[-1] in BOUNDARY_CHARS and is_wordlike(nxt)):
+                    continue                                   # ramp: the NEXT word ends on a boundary: take that natural break instead of cutting here
                 self._reason = "max_words"
                 return m.end()                                 # too long without punctuation: cut at a word boundary (protected spans already skipped)
             if words >= hard_max:

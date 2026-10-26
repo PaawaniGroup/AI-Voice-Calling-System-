@@ -38,6 +38,8 @@ class StreamConfig:
     tts_timeout_s: float = 25.0      # a clause whose TTS takes longer is skipped (its job is cancelled)
     stop_wait_s: float = 1.0         # interrupt(): how long to wait for the tasks to unwind
     max_tool_rounds: int = 2
+    ramp: bool = False               # tenant flag `stream_ramp` (default OFF): short first clause; the 1 s first-clause rewrite is skipped for clauses of ramp_skip_rewrite_words or fewer
+    ramp_skip_rewrite_words: int = 4
     filler_after_s: float = 0.4      # a tool slower than this gets the filler phrase (when one is available)
 
 
@@ -262,8 +264,15 @@ class StreamingTurn:
                 fixed = None
                 if idx == 0 and self.rewrite is not None:
                     self._script["first_ok"] = False
-                    fixed = await self._first_clause_rewrite(clause)
-                    self._script["first_retry_ok"] = fixed is not None
+                    if self.cfg.ramp and len(clause.split()) <= self.cfg.ramp_skip_rewrite_words:
+                        # ramp: a clause this short is not worth the up to 1 s rewrite (it gates the first sound); the verified-lexicon
+                        # conversion below still runs. Every skip is counted (the key exists only when a skip happened).
+                        self._script["first_rewrite_skipped"] = self._script.get("first_rewrite_skipped", 0) + 1
+                        if re.search(r"[A-Za-z]", clause):                         # count only: how many skipped clauses had Roman letters
+                            self._script["first_rewrite_skipped_roman"] = self._script.get("first_rewrite_skipped_roman", 0) + 1
+                    else:
+                        fixed = await self._first_clause_rewrite(clause)
+                        self._script["first_retry_ok"] = fixed is not None
                 if fixed is None:
                     fixed, _, _ = enforce_clause(clause, self.mode)               # verified-lexicon conversion; else unchanged (it logs kinds only)
                     if fixed != clause:

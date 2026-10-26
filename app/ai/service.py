@@ -23,6 +23,7 @@ from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
 from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
 from app.ai.streaming.config import STREAM_KEYS, stream_config_from
+from app.ai.streaming.ramp import apply_to_conversation as apply_ramp_rule
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
 from app.observability import metrics as m
@@ -35,7 +36,7 @@ AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
 
 
-LATENCY_FLAGS = ("trace_evidence",)   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
+LATENCY_FLAGS = ("trace_evidence", "stream_ramp")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
 
 
 @dataclass
@@ -293,6 +294,8 @@ class AiService:
             duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
+        if cfg.get("stream_ramp") and cfg.get("streaming_pipeline"):
+            apply_ramp_rule(conv)                                  # optional Brain block, appended to the system message of THIS call only
         rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")
         self.runtime[session_id] = rt
