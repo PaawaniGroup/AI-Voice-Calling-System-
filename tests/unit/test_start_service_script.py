@@ -7,9 +7,12 @@ Tests that can be validated offline without starting the uvicorn server:
 4. Raw key values are never leaked in stdout or stderr.
 """
 import os
+import shutil
 import subprocess
 import tempfile
 import pytest
+
+pytestmark = pytest.mark.skipif(shutil.which("powershell") is None, reason="needs Windows PowerShell (not on this platform)")
 
 SCRIPT_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "start_service_with_keys.ps1")

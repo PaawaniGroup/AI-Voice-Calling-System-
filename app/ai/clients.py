@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.ai import codec, tts_frontend, turn_trace
+from app.core import safe_output
 from app.core.errors import Unprocessable
 from app.observability import metrics as m
 from config.settings import Settings
@@ -35,9 +36,11 @@ _REF_CACHE: dict = {}
 
 
 class AiError(Exception):
-    def __init__(self, service: str, kind: str, detail: str = ""):
+    def __init__(self, service: str, kind: str, detail: str = "", *, status_code: int | None = None, body: str | None = None):
         super().__init__(f"{service}:{kind}")
         self.service, self.kind, self.detail = service, kind, detail
+        self.status_code = status_code
+        self.body = body
 
 
 class AiUnavailable(AiError):
@@ -239,7 +242,8 @@ class ModelClients:
         if self._runpod_mode() == "runsync":
             r = await self._http.post(ep.url + "/runsync", json=body, headers=hdrs, timeout=ep.timeout)
             if r.status_code >= 400:
-                raise AiError(service, "http_error", str(r.status_code))
+                body_clean = safe_output.scrub(r.text[:80]).replace("\n", " ").strip()
+                raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
             return await self._runpod_wait(service, ep, hdrs, r.json())
         post = asyncio.ensure_future(self._http.post(ep.url + "/run", json=body, headers=hdrs, timeout=ep.timeout))
         try:
@@ -248,7 +252,8 @@ class ModelClients:
             self._spawn(self._cancel_when_submitted(post, service, ep, hdrs))
             raise
         if r.status_code >= 400:
-            raise AiError(service, "http_error", str(r.status_code))
+            body_clean = safe_output.scrub(r.text[:80]).replace("\n", " ").strip()
+            raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
         try:
@@ -269,7 +274,8 @@ class ModelClients:
                 raise AiUnavailable(service, "client_closed")
             sr = await self._http.get(f"{ep.url}/status/{j['id']}", headers=hdrs, timeout=30)
             if sr.status_code >= 400:
-                raise AiError(service, "http_error", str(sr.status_code))
+                body_clean = safe_output.scrub(sr.text[:80]).replace("\n", " ").strip()
+                raise AiError(service, "http_error", str(sr.status_code), status_code=sr.status_code, body=body_clean)
             j = sr.json()
         if isinstance(j, dict) and j.get("status") not in (None, "COMPLETED"):
             raise AiError(service, "runpod_error", f"status={j.get('status')} {str(j.get('error', ''))[:160]}")

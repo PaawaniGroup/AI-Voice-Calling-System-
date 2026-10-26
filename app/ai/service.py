@@ -67,7 +67,7 @@ class AiService:
                 "models": {"stt": self.s.ai_stt_model, "brain": self.s.ai_brain_model, "tts": self.s.ai_tts_model},
                 "timeouts": {"stt": self.s.ai_request_timeout_s, "brain": self.s.ai_request_timeout_s * 2,
                              "tts": self.s.ai_request_timeout_s, "rag": 5.0},
-                "paths": {}, "keys": {}, "languages": LANGS[1:], "default_language": "auto",
+                "paths": {}, "keys": {}, "key_refs": {}, "languages": LANGS[1:], "default_language": "auto",
                 "devanagari_hindi": False, "runpod_mode": "run",
                 "streaming_pipeline": False,   # token-streaming voice pipeline (Plivo calls only); OFF unless a tenant turns it on
                 "tts_ulaw8k": False,           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference audio sent; OFF by default
@@ -84,7 +84,7 @@ class AiService:
                       "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
-            for k in ("models", "timeouts", "paths", "keys"):
+            for k in ("models", "timeouts", "paths", "keys", "key_refs"):
                 cfg[k] = {**cfg.get(k, {}), **doc.get(k, {})}
             cfg["languages"] = doc.get("languages", cfg["languages"])
         return cfg

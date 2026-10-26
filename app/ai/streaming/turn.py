@@ -310,7 +310,11 @@ class StreamingTurn:
             rec["status"] = "timeout" if isinstance(e, asyncio.TimeoutError) else f"error:{getattr(e, 'kind', type(e).__name__)}"
             self.m["tts_errors"] += 1
             self._results[idx] = None
-            log.warning("streaming tts clause failed: %s", rec["status"])
+            code = getattr(e, "status_code", None) or (int(e.detail) if getattr(e, "detail", "").isdigit() else None)
+            body = getattr(e, "body", None)
+            code_str = f" http_status={code}" if code else ""
+            body_str = f" body='{body}'" if body else ""
+            log.warning("streaming tts clause failed: %s%s%s detail=%s", rec["status"], code_str, body_str, getattr(e, "detail", str(e)))
         finally:
             sem.release()
         self._drain_ready()
