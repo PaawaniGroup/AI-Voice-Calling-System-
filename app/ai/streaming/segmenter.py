@@ -164,8 +164,10 @@ class ClauseSegmenter:
             if nxt is None:
                 # lookahead is not available yet: the last token is never cut here (a boundary needs one more word to be confirmed)
                 break
-            if self.cfg.ramp and not final and i + 2 == len(toks) and not self.buf[-1].isspace():
-                break                                          # ramp: the next word may still be arriving (its punctuation or the rest of a date/amount): wait for it
+            if not final and i + 2 == len(toks) and not self.buf[-1].isspace() and (self.cfg.ramp or (_numeric(tok) and not _numeric(nxt))):
+                # The next word may still be arriving. After a NUMBER its first letters decide whether the pair is protected ("30 | Ju" is not yet "30 June",
+                # "5 | la" not yet "5 lakh"): wait for it, in every mode. In ramp mode also wait for its trailing punctuation (the "natural break one word later").
+                break
             if words < minw:
                 continue
             if no_break_after(tok, nxt):
