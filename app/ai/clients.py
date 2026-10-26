@@ -392,18 +392,28 @@ class ModelClients:
             hdrs = self._auth_headers("stt")
             if ep.path.endswith("/runsync"):
                 t_conv = time.perf_counter()
-                wav_bytes = pcm16_to_wav(pcm, rate)
-                b64 = base64.b64encode(wav_bytes).decode("ascii")
-                job = {"audio_pcm_bytes": len(pcm), "audio_s": round(len(pcm) / 2 / rate, 3) if rate else None, "sample_rate": rate,
-                       "wav_b64_chars": len(b64), "convert_ms": round((time.perf_counter() - t_conv) * 1000, 2)}   # conversion = WAV wrap + base64
-                body = {
-                    "input": {
+                lang_hint = {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
+                raw_pcm = bool(self.cfg.get("stt_raw_pcm"))
+                if raw_pcm:
+                    # Tenant flag `stt_raw_pcm` (default OFF; needs a worker that reads `audio_pcm16_b64`, e.g. handler (7): UNVERIFIED which one is live):
+                    # the PCM16 samples as they are, ONE field plus the sample rate. No WAV wrapper, no triple copy; the worker resamples to 16 kHz itself.
+                    b64 = base64.b64encode(pcm).decode("ascii")
+                    fields = {"audio_pcm16_b64": b64, "sample_rate": rate}
+                    if lang_hint:
+                        fields["language"] = lang_hint
+                else:
+                    wav_bytes = pcm16_to_wav(pcm, rate)
+                    b64 = base64.b64encode(wav_bytes).decode("ascii")
+                    fields = {
                         "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
                         "audio": b64,
                         "audio_base64": b64,
-                        "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
+                        "language": lang_hint,
                     }
-                }
+                job = {"audio_pcm_bytes": len(pcm), "audio_s": round(len(pcm) / 2 / rate, 3) if rate else None, "sample_rate": rate, "raw_pcm": raw_pcm,
+                       "audio_b64_chars": len(b64), "audio_fields": sum(1 for k in fields if k.startswith("audio")),
+                       "convert_ms": round((time.perf_counter() - t_conv) * 1000, 2)}   # conversion = (WAV wrap +) base64
+                body = {"input": fields}
                 j = await self._runpod_call("stt", ep, hdrs, body, job=job)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 if isinstance(out, dict):

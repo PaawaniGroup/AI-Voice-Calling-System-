@@ -36,7 +36,7 @@ AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
 
 
-LATENCY_FLAGS = ("trace_evidence", "stream_ramp")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
+LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
 
 
 @dataclass
