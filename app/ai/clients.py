@@ -8,6 +8,7 @@ reachable when this was written: **their actual API shape is UNVERIFIED** and is
 from __future__ import annotations
 
 import asyncio
+import os
 import base64
 import io
 import json
@@ -145,14 +146,46 @@ class ModelClients:
         self._bg: set[asyncio.Task] = set()          # fire-and-forget RunPod cancel calls (kept referenced until they finish)
         self.cancelled_jobs: list[tuple[str, int | str]] = []   # (service, http status | error type) of each RunPod cancel attempt
 
+    def resolve_key(self, service: str | None = None) -> str | None:
+        """Resolve API key for a model service without exposing or logging it.
+
+        Order:
+        1. Indirect environment reference from cfg['key_refs'][service]
+           (if configured and variable is missing/empty, raises AiUnavailable with explicit reason, NO fallback)
+        2. Stored key in cfg['keys'][service] or cfg[f'{service}_api_key']
+        3. Global key from self.s.ai_api_key
+        """
+        if not service:
+            return self.s.ai_api_key.get_secret_value() if self.s.ai_api_key else None
+
+        svc = service.lower()
+        key_refs = self.cfg.get("key_refs")
+        if isinstance(key_refs, dict) and svc in key_refs:
+            env_var_name = key_refs[svc]
+            val = os.environ.get(env_var_name) if env_var_name else None
+            if not val:
+                raise AiUnavailable(
+                    svc,
+                    "missing_key_ref",
+                    f"key_ref environment variable '{env_var_name}' is not set or empty",
+                )
+            return val.strip()
+
+        keys = self.cfg.get("keys")
+        if isinstance(keys, dict) and keys.get(svc):
+            return str(keys[svc]).strip()
+
+        legacy_direct = self.cfg.get(f"{svc}_api_key")
+        if legacy_direct:
+            return str(legacy_direct).strip()
+
+        if self.s.ai_api_key:
+            return self.s.ai_api_key.get_secret_value()
+
+        return None
+
     def _auth_headers(self, service: str | None = None) -> dict:
-        key = None
-        if service and isinstance(self.cfg.get("keys"), dict) and self.cfg["keys"].get(service):
-            key = self.cfg["keys"][service]
-        elif service and self.cfg.get(f"{service}_api_key"):
-            key = self.cfg[f"{service}_api_key"]
-        elif self.s.ai_api_key:
-            key = self.s.ai_api_key.get_secret_value()
+        key = self.resolve_key(service)
         return {"Authorization": f"Bearer {key}"} if key else {}
 
     async def aclose(self) -> None:
