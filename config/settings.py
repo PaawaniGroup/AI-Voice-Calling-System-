@@ -209,7 +209,9 @@ class Settings(BaseSettings):
     ai_max_concurrency: int = F(4, "Max concurrent model requests per process.", ge=1, le=64)
     ai_stt_model: str = F("Oriserve/Whisper-Hindi2Hinglish-Prime", "STT model identifier (informational; the model server owns the weights).")
     ai_brain_model: str = F("Qwen3-30B-A3B-Instruct-2507", "Brain/LLM model identifier.")
-    ai_tts_model: str = F("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "TTS model identifier.")
+    ai_tts_model: str = F("Chatterbox Multilingual V3", "TTS model identifier (Chatterbox Multilingual V3 configured).")
+    ai_default_language: str = F("hinglish-IN", "Default language mode ('en-IN', 'hi-IN', 'hinglish-IN').")
+    ai_auto_language_detection: bool = F(True, "Automatically propose language mode from caller speech.")
     ai_tts_reference_wav: str = F("", "Path to the reference voice WAV sent to RunPod TTS workers (voice cloning; the worker rejects requests without one).")
     ai_tts_normalize: bool = F(True, "Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence.")
     ai_greeting: str = F("Welcome to MME AI Voice Calling Agent.", "Greeting spoken when an inbound call answers before connecting to AI services.")
@@ -219,6 +221,7 @@ class Settings(BaseSettings):
     ai_temperature: float = F(0.3, "Sampling temperature for Brain replies (default 0.3).", ge=0.0, le=2.0)
     ai_script_allowlist_path: str = F("config/script_allowlist_terms.txt", "Path to editable allow-listed English terms file.")
     ai_hint_placement: Literal["user_suffix", "system_message"] = F("user_suffix", "Placement for per-turn mode hint.")
+    ai_store_transcripts: bool = F(True, "Store conversation transcript (heard/reply) in MongoDB ai_sessions and display in dashboard. When false, only character lengths and latencies are recorded.")
 
     @property
     def is_prod_like(self) -> bool:

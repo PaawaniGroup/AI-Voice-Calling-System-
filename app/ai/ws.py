@@ -28,6 +28,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.ai import codec, turn_trace
 from app.ai.clients import pcm16_to_wav, rms
+from app.ai.service import CallSessionState
 from app.core.errors import ApiError
 from app.core.ids import utcnow
 from app.observability import metrics as m
@@ -212,6 +213,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     The item source is `io.next_item(timeout)` when the adapter has one (Plivo), otherwise the raw WebSocket. A gap with no
     frames counts as silence, so an utterance still ends if the transport stops sending when the caller is quiet.
     """
+    if hasattr(rt, "set_state"):
+        rt.set_state(CallSessionState.LISTENING)
+
     local: list[asyncio.Task] = []
     utterances: asyncio.Queue[tuple] = asyncio.Queue(maxsize=3)  # (pcm, t_speech_end, t_endpoint) on the monotonic clock
     st = {
@@ -232,6 +236,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         st["play_until"] = base + duration_s
         st["playing"] = True
         st["play_started_at"] = now
+        if hasattr(rt, "set_state"):
+            rt.set_state(CallSessionState.SPEAKING, {"duration_s": duration_s})
 
     async def play(audio: bytes, src: int, lang: str, uid: int) -> None:
         if not isinstance(io, PlivoIO):  # PlivoIO marks the exact moment its first frame is written to the socket
@@ -250,24 +256,37 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
             turn_trace.start(trace)  # the worker is one long-lived task: each turn simply replaces the previous trace
             recorded = False
+            accumulated_reply = ""
+            current_gen = rt.conversation.generation_id
+            if hasattr(rt, "set_state"):
+                rt.set_state(CallSessionState.THINKING, {"generation_id": current_gen})
             try:
                 async for chunk in rt.conversation.stream_turn(pcm, rate):
-                    if rt.conversation.cancelled:
+                    if rt.conversation.cancelled or (chunk.generation_id and chunk.generation_id != rt.conversation.generation_id):
                         break
+                    if chunk.reply:
+                        accumulated_reply = chunk.reply
                     if first and (chunk.timings_ms or chunk.heard or chunk.reply):
                         chunk.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
                         if not chunk.error:
                             m.AI_TURN_SECONDS.observe(chunk.timings_ms["turn_ms"] / 1000)
-                        await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply, trace_id=trace.trace_id)
+                        t_num = chunk.turn or (len(rt.conversation.turns) + 1)
+                        await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply, trace_id=trace.trace_id, turn_num=t_num)
                         recorded = True
                         first = False
+                    if chunk.sentence and hasattr(rt, "set_state"):
+                        rt.set_state(CallSessionState.GENERATING_TEXT, {"generation_id": current_gen})
                     if chunk.error and chunk.error != "cancelled":
                         m.AI_TURN_ERRORS.labels(chunk.error[:40]).inc()
                         ai.note_error(rt, chunk.error)
+                        if hasattr(rt, "set_state"):
+                            rt.set_state(CallSessionState.ERROR, {"error": chunk.error})
                         if not rt.conversation.cancelled:
                             await io.error(chunk.error)
                         break
-                    if chunk.audio and not rt.conversation.cancelled:
+                    if chunk.audio and not rt.conversation.cancelled and (not chunk.generation_id or chunk.generation_id == rt.conversation.generation_id):
+                        if hasattr(rt, "set_state"):
+                            rt.set_state(CallSessionState.GENERATING_AUDIO, {"generation_id": current_gen})
                         st["uid"] += 1
                         await play(chunk.audio, chunk.sample_rate, chunk.language, st["uid"])
             except asyncio.CancelledError:
@@ -281,7 +300,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 if recorded:
                     trace.mark("t_turn_end")
                     try:
-                        final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
+                        final_reply = accumulated_reply or (rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None)
                         await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
                     except Exception:  # latency bookkeeping must never take the call down
                         log.exception("could not store turn latency trace")
@@ -295,6 +314,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             if utterances.full():  # backpressure: drop the oldest queued utterance
                 utterances.get_nowait()
                 await io.error("inbound_overflow")
+            if hasattr(rt, "set_state"):
+                rt.set_state(CallSessionState.TRANSCRIBING)
             utterances.put_nowait((utt, t_speech_end, t_endpoint))
 
     async def next_item():
@@ -329,6 +350,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 now = time.monotonic()
                 if st["playing"] and now >= st["play_until"]:
                     st["playing"] = False
+                    if hasattr(rt, "set_state"):
+                        rt.set_state(CallSessionState.LISTENING)
                 if st["in_speech"]:
                     st["silence_ms"] += val
                     await flush_if_due()
@@ -355,6 +378,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     if st["speech_ms"] >= BARGE_IN_MS:
                         log.info("barge-in triggered: rms=%.1f >= %.1f for %dms", frame_rms, barge_threshold, st["speech_ms"])
                         rt.conversation.cancel()
+                        if hasattr(rt, "set_state"):
+                            rt.set_state(CallSessionState.INTERRUPTED, {"speech_ms": st["speech_ms"], "rms": frame_rms})
                         st["playing"] = False
                         st["play_until"] = 0.0
                         await io.interrupt()
@@ -381,6 +406,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     st["buf"] += frame
                     await flush_if_due()
     finally:
+        if hasattr(rt, "set_state"):
+            rt.set_state(CallSessionState.ENDED)
         # Bounded: a worker that does not honour cancellation must never keep the socket handler (and the call) alive.
         pending = set(local)
         for wait_s in (WORKER_STOP_S, WORKER_STOP_S / 2):

@@ -65,10 +65,11 @@ def _shrink(v: Any, depth: int = 0, key: str = "") -> Any:
 
 
 class ActivityBus:
-    def __init__(self, size: int = 2000):
+    def __init__(self, size: int = 2000, keep_words: bool = False):
         self._ring: deque[dict] = deque(maxlen=size)
         self._seq = 0
         self._waiters: set[asyncio.Future] = set()
+        self.keep_words = keep_words
 
     @property
     def last_seq(self) -> int:
@@ -81,9 +82,12 @@ class ActivityBus:
             if not tenant_id:
                 return 0
             self._seq += 1
+            payload = data or {}
+            if not self.keep_words:
+                payload = strip_words(payload)
             entry = {"seq": self._seq, "ts": utcnow().isoformat(), "kind": kind[:60], "category": kind.split(".", 1)[0][:20],
                      "level": _level(kind), "call_id": call_id, "session_id": session_id,
-                     "data": _shrink(redact(strip_words(data or {}))), "_tenant": tenant_id}
+                     "data": _shrink(redact(payload)), "_tenant": tenant_id}
             self._ring.append(entry)
             for w in list(self._waiters):
                 if not w.done():

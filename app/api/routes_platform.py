@@ -181,10 +181,17 @@ async def call_session(request: Request, call_id: str, p: Principal = Depends(re
 # ================================================================== transcripts / recording / summary
 @router.get("/calls/{call_id}/transcript")
 async def transcript(request: Request, call_id: str, p: Principal = Depends(require_user)):
-    if not await request.app.state.repos.get_call(call_id, p.tenant_id):
+    call = await request.app.state.repos.get_call(call_id, p.tenant_id)
+    if not call:
         raise NotFound("call not found")
-    raise NotFound("no transcript is stored for this call: transcripts are produced only by an AI session, "
-                   "and persistence of transcripts is not implemented (consent/retention policy pending)", code="transcript_not_available")
+    sid = call.get("session_id")
+    ai = await request.app.state.db["ai_sessions"].find_one({"session_id": sid, "tenant_id": p.tenant_id}) if sid else None
+    if not ai or not ai.get("transcript"):
+        raise NotFound("no transcript is stored for this call", code="transcript_not_available")
+    store_transcripts = getattr(request.app.state.settings, "ai_store_transcripts", True)
+    from app.observability.activity import strip_words
+    tr = ai["transcript"] if store_transcripts else strip_words(ai["transcript"])
+    return {"call_id": call_id, "session_id": sid, "transcript": tr}
 
 
 @router.get("/calls/{call_id}/summary")

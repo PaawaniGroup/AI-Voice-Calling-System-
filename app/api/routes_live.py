@@ -152,11 +152,12 @@ async def build_flows(request: Request, p: Principal) -> list[dict]:
     sess = {x["_id"]: x async for x in db["sessions"].find({"_id": {"$in": sids}, "tenant_id": t})} if sids else {}
     ais = {x["session_id"]: x async for x in db["ai_sessions"].find({"session_id": {"$in": sids}, "tenant_id": t})} if sids else {}
     out = []
+    store_transcripts = getattr(request.app.state.settings, "ai_store_transcripts", True)
     for c in calls:
         co = call_out(c, mask=not full)
         out.append({"call": {k: co.get(k) for k in ("id", "direction", "state", "provider", "from_number", "to_number", "language", "ai_enabled",
                                                        "session_id", "created_at", "answered_at", "ended_at")},
-                    "flow": flow_stages(c, sess.get(c.get("session_id")), ais.get(c.get("session_id"))),
+                    "flow": flow_stages(c, sess.get(c.get("session_id")), ais.get(c.get("session_id")), store_transcripts=store_transcripts),
                     "active": c["state"] in live_states})
     return out
 
@@ -205,7 +206,8 @@ async def call_flow(request: Request, call_id: str, p: Principal = Depends(requi
     sid = c.get("session_id")
     sess = await db["sessions"].find_one({"_id": sid, "tenant_id": p.tenant_id}) if sid else None
     ai = await db["ai_sessions"].find_one({"session_id": sid, "tenant_id": p.tenant_id}) if sid else None
-    return flow_stages(c, sess, ai)
+    store_transcripts = getattr(request.app.state.settings, "ai_store_transcripts", True)
+    return flow_stages(c, sess, ai, store_transcripts=store_transcripts)
 
 
 @router.get("/stream")

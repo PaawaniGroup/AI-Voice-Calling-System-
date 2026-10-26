@@ -24,7 +24,7 @@ def _stage(key: str, label: str, status: str, at: Any = None, detail: str | None
     return {"key": key, "label": label, "status": status, "at": at, "detail": detail}
 
 
-def flow_stages(call: dict, session: dict | None = None, ai: dict | None = None) -> dict:
+def flow_stages(call: dict, session: dict | None = None, ai: dict | None = None, store_transcripts: bool = True) -> dict:
     state = call.get("state", "")
     answered = bool(call.get("answered_at")) or state in CONNECTED or (state == "completed" and bool(call.get("answered_at")))
     ended = state in TERMINAL
@@ -109,11 +109,13 @@ def flow_stages(call: dict, session: dict | None = None, ai: dict | None = None)
         stages.append(_stage("ended", "Ended", "waiting"))
 
     overall = "failed" if state in BAD_END else ("ended" if state == "completed" else "live")
+    last_ex = (ai or {}).get("last_exchange")
+    transcript = (ai or {}).get("transcript", [])
     return {
         "overall": overall,
         "state": state,
         "stages": stages,
         "ai_timings": strip_words((ai or {}).get("timings_ms", {})),
-        "last_exchange": strip_words((ai or {}).get("last_exchange")),   # timings only: no words live
-        "transcript": strip_words((ai or {}).get("transcript", []))
+        "last_exchange": last_ex if store_transcripts else strip_words(last_ex),
+        "transcript": transcript if store_transcripts else strip_words(transcript)
     }

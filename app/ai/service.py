@@ -29,7 +29,20 @@ from config.settings import Settings
 log = logging.getLogger("mme_telephony.ai")
 
 AI_TERMINAL = {"stopped", "failed"}
-LANGS = ["auto", "hi", "en", "hinglish"]
+LANGS = ["auto", "hi", "en", "hinglish", "en-IN", "hi-IN", "hinglish-IN"]
+
+
+class CallSessionState:
+    IDLE = "IDLE"
+    LISTENING = "LISTENING"
+    TRANSCRIBING = "TRANSCRIBING"
+    THINKING = "THINKING"
+    GENERATING_TEXT = "GENERATING_TEXT"
+    GENERATING_AUDIO = "GENERATING_AUDIO"
+    SPEAKING = "SPEAKING"
+    INTERRUPTED = "INTERRUPTED"
+    ERROR = "ERROR"
+    ENDED = "ENDED"
 
 
 @dataclass
@@ -44,6 +57,22 @@ class Runtime:
     watchdog: asyncio.Task | None = None
     tasks: list = field(default_factory=list)
     call_id: str | None = None
+    call_state: str = CallSessionState.IDLE
+    state_history: list[dict] = field(default_factory=list)
+
+    def set_state(self, new_state: str, details: dict | None = None) -> None:
+        """Transitions call session state and records timestamped transition."""
+        self.call_state = new_state
+        entry = {
+            "state": new_state,
+            "timestamp": utcnow().isoformat(),
+        }
+        if details:
+            entry["details"] = details
+        self.state_history.append(entry)
+        if len(self.state_history) > 100:
+            self.state_history = self.state_history[-100:]
+
 
 
 class AiService:
@@ -318,9 +347,12 @@ class AiService:
             return
         set_fields = {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
                       **{f"timings_ms.{k}": v for k, v in nums.items()}}
-        if reply:  # the length only: conversation text is not stored (see record_turn)
+        if reply:
             set_fields["transcript.$[e].reply_chars"] = len(reply)
             set_fields["last_exchange.reply_chars"] = len(reply)
+            if getattr(self.s, "ai_store_transcripts", True):
+                set_fields["transcript.$[e].reply"] = reply
+                set_fields["last_exchange.reply"] = reply
         await self.db["ai_sessions"].update_one(
             {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
             {"$set": set_fields},
@@ -330,16 +362,22 @@ class AiService:
                                   data={"trace_id": trace_id, "reply_chars": len(reply or ""), **nums})
 
     async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None,
-                          trace_id: str | None = None) -> None:
+                          trace_id: str | None = None, turn_num: int | None = None) -> None:
         now = utcnow()
-        turn_num = len(rt.conversation.turns)
-        entry = {   # NO conversation text is stored (privacy): sizes and timings only. `heard` / `reply` are accepted but never written.
+        if turn_num is None:
+            turn_num = len(rt.conversation.turns) or getattr(rt.conversation, "turn_count", 0) or 1
+        entry = {
             "turn": turn_num,
             "heard_chars": len(heard or ""),
             "reply_chars": len(reply or ""),
             "timings_ms": {k: v for k, v in timings.items() if isinstance(v, (int, float))},
             "ts": now.isoformat()
         }
+        if getattr(self.s, "ai_store_transcripts", True):
+            if heard is not None:
+                entry["heard"] = heard
+            if reply is not None:
+                entry["reply"] = reply
         if trace_id:
             entry["trace_id"] = trace_id
         upd: dict = {
@@ -356,15 +394,20 @@ class AiService:
             upd["$inc"] = {"turns": 1}
         await self.db["ai_sessions"].update_one({"session_id": rt.session_id, "tenant_id": rt.tenant_id}, upd)
         if self.activity is not None and count:
-            self.activity.publish(rt.tenant_id, "ai.turn", call_id=rt.call_id, session_id=rt.session_id,
-                                  data={
-                                      "turn": turn_num,
-                                      "stt_ms": timings.get("stt"),
-                                      "brain_ms": timings.get("brain"),
-                                      "tts_ms": timings.get("tts"),
-                                      "turn_ms": timings.get("turn_ms"),
-                                      **{k: v for k, v in timings.items() if isinstance(v, (int, float))}
-                                  })
+            act_data = {
+                "turn": turn_num,
+                "stt_ms": timings.get("stt"),
+                "brain_ms": timings.get("brain"),
+                "tts_ms": timings.get("tts"),
+                "turn_ms": timings.get("turn_ms"),
+                **{k: v for k, v in timings.items() if isinstance(v, (int, float))}
+            }
+            if getattr(self.s, "ai_store_transcripts", True):
+                if heard is not None:
+                    act_data["heard"] = heard
+                if reply is not None:
+                    act_data["reply"] = reply
+            self.activity.publish(rt.tenant_id, "ai.turn", call_id=rt.call_id, session_id=rt.session_id, data=act_data)
 
     def note_error(self, rt: Runtime, code: str) -> None:
         """A turn produced no audio (model timeout, bad reply, ...). Feed only; the metrics counter is incremented by the caller."""
@@ -427,11 +470,14 @@ class AiService:
             bridge = self.bridge
         ready, reason = await bridge.ready()
         cfg = await self.get_config(tenant_id)
+        store_transcripts = getattr(self.s, "ai_store_transcripts", True)
+        last_ex = ai.get("last_exchange") if ai else None
+        transcript_data = ai.get("transcript", []) if ai else []
         out: dict[str, Any] = {"session_id": session_id, "state": ai["state"] if ai else "not_started",
                                "language": ai["language"] if ai else None, "turns": ai["turns"] if ai else 0,
                                "timings_ms": ai.get("timings_ms") if ai else {},
-                               "last_exchange": strip_words(ai.get("last_exchange")) if ai else None,   # timings only: no words live
-                               "transcript": strip_words(ai.get("transcript", [])) if ai else [],
+                               "last_exchange": last_ex if store_transcripts else strip_words(last_ex),
+                               "transcript": transcript_data if store_transcripts else strip_words(transcript_data),
                                "error": ai.get("error") if ai else None,
                                "stop_reason": ai.get("stop_reason") if ai else None,
                                "media": {"connected": bool(ai and ai["media"]["connected"]), "bridge": bridge.name,

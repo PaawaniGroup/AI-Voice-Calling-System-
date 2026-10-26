@@ -160,7 +160,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
                   openapi_url="/openapi.json" if s.docs_enabled else None)
     app.state.settings = s
     app.state.limiter = RateLimiter()
-    app.state.activity = ActivityBus()
+    app.state.activity = ActivityBus(keep_words=getattr(s, "ai_store_transcripts", True))
     app.state.errlog = errlog
     app.state.last_ok = {}
     if s.csv(s.cors_origins):

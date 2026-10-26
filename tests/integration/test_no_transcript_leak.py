@@ -12,6 +12,13 @@ CALLER = "CALLER-SAID-ALPHA-4711"
 ASSISTANT = "ASSISTANT-SAID-BRAVO-4711"
 
 
+@pytest.fixture(autouse=True)
+def privacy_mode(env):
+    env.s.ai_store_transcripts = False
+    env.app.state.settings.ai_store_transcripts = False
+    env.app.state.activity.keep_words = False
+
+
 def _rt(call_id="call_w1", sid="s_w1"):
     return SimpleNamespace(session_id=sid, tenant_id="t1", call_id=call_id,
                            conversation=SimpleNamespace(turns=[{"heard": CALLER, "reply": ASSISTANT}]))

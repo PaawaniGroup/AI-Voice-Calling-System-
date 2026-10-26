@@ -61,8 +61,10 @@ function renderTranscript(transcript, lastExchange, isLive = false) {
     );
   }
   return h('div', { class: 'transcript-card' }, turns.map((ex, idx) => {
-    const turnNum = ex.turn != null ? ex.turn : idx + 1;
+    const turnNum = (ex.turn != null && ex.turn !== 0) ? ex.turn : idx + 1;
     const tim = normTim(ex);
+    const heardText = ex.heard || (ex.heard_chars ? `[${ex.heard_chars} chars heard]` : '—');
+    const replyText = ex.reply || (ex.reply_chars ? `[${ex.reply_chars} chars reply]` : '—');
     return h('div', { class: 'exchange-turn' },
       h('div', { class: 'exchange-header' },
         h('span', { class: 'mono' }, `Turn #${turnNum}${ex.at ? ' · ' + t(ex.at) : ''}`),
@@ -70,11 +72,11 @@ function renderTranscript(transcript, lastExchange, isLive = false) {
       ),
       h('div', { class: 'bubble bubble-user' },
         h('span', { class: 'bubble-sender' }, '👤 Caller / Student'),
-        h('span', { class: 'bubble-text' }, ex.heard || '—')
+        h('span', { class: 'bubble-text' }, heardText)
       ),
       h('div', { class: 'bubble bubble-ai' },
         h('span', { class: 'bubble-sender' }, '🤖 MME AI Counsellor'),
-        h('span', { class: 'bubble-text' }, ex.reply || '—')
+        h('span', { class: 'bubble-text' }, replyText)
       )
     );
   }));
@@ -293,8 +295,8 @@ async function ops(main) {
         flowChips(f.flow),
         timings ? latencyStrip(timings) : null,
         ex ? h('div', { class: 'flow-exchange-preview' },
-          h('div', {}, h('b', {}, '👤 Caller: '), ex.heard || '—'),
-          h('div', {}, h('b', {}, '🤖 AI: '), ex.reply || '—')
+          h('div', {}, h('b', {}, '👤 Caller: '), ex.heard || (ex.heard_chars ? `[${ex.heard_chars} chars]` : '—')),
+          h('div', {}, h('b', {}, '🤖 AI: '), ex.reply || (ex.reply_chars ? `[${ex.reply_chars} chars]` : '—'))
         ) : null
       );
     }) : [h('p', { class: 'muted' }, 'No calls to show. Calls appear here the moment they are created.')]));
@@ -305,10 +307,12 @@ async function ops(main) {
     if (e.kind === 'ai.turn' && e.data) {
       const d = e.data;
       const tim = normTim(d);
+      const heard = d.heard || (d.heard_chars ? `[${d.heard_chars} chars]` : '—');
+      const reply = d.reply || (d.reply_chars ? `[${d.reply_chars} chars]` : '—');
       return h('div', { class: 'col-gap' },
         h('div', {},
           h('b', {}, `Turn ${d.turn != null ? d.turn : ''}: `),
-          h('span', {}, `🗣️ "${d.heard || '—'}" ➔ 🤖 "${d.reply || '—'}"`)
+          h('span', {}, `🗣️ "${heard}" ➔ 🤖 "${reply}"`)
         ),
         latencyStrip(tim)
       );

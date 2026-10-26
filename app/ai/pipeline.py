@@ -99,12 +99,39 @@ def build_system_prompt(counsellor_gender: str = "masculine", counsellor_name: s
 NEW_SYSTEM_PROMPT = build_system_prompt()
 
 
-def system_prompt(devanagari_hindi: bool = False, script_enforcement: bool = False,
-                  counsellor_gender: str = "masculine", counsellor_name: str = "MME AI counsellor") -> str:
-    """Selects the prompt based on configuration.
-    If script_enforcement is True, returns NEW_SYSTEM_PROMPT.
+from app.ai.prompts import (
+    build_system_prompt as build_prompt_central,
+    detect_caller_language_mode,
+    build_turn_hint,
+)
+from app.voice.text_normalizer import (
+    MODE_EN,
+    MODE_HI,
+    MODE_HINGLISH,
+    canonicalize_language_mode,
+    normalize_phrase,
+    normalize_text,
+)
+
+
+def system_prompt(
+    devanagari_hindi: bool = False,
+    script_enforcement: bool = False,
+    counsellor_gender: str = "masculine",
+    counsellor_name: str = "MME AI counsellor",
+    language_mode: str | None = None,
+) -> str:
+    """Selects system prompt based on configuration and language mode.
+    If language_mode is provided, uses centrally managed language-aware template.
+    If script_enforcement is True, returns language-aware or legacy prompt.
     If devanagari_hindi is True (legacy Approach A flag), returns SYSTEM_PROMPT_DEVANAGARI.
     Otherwise returns default OLD_SYSTEM_PROMPT."""
+    if language_mode:
+        return build_prompt_central(
+            language_mode=language_mode,
+            counsellor_gender=counsellor_gender,
+            counsellor_name=counsellor_name,
+        )
     if script_enforcement:
         return build_system_prompt(counsellor_gender=counsellor_gender, counsellor_name=counsellor_name)
     if devanagari_hindi:
@@ -138,6 +165,8 @@ class TurnResult:
     audio: bytes | None = None
     sample_rate: int = 0
     language: str = "auto"
+    language_mode: str = MODE_HINGLISH
+    generation_id: int = 0
     error: str | None = None
     timings_ms: dict = field(default_factory=dict)
     mode: str = "hi"
@@ -152,14 +181,18 @@ class TurnChunk:
     audio: bytes | None = None
     sample_rate: int = 0
     language: str = "auto"
+    language_mode: str = MODE_HINGLISH
+    generation_id: int = 0
     error: str | None = None
     timings_ms: dict = field(default_factory=dict)
     sentence: str | None = None
     is_first: bool = False
     is_last: bool = False
+    turn: int = 0
     mode: str = "hi"
     first_gen_passed: bool = True
     script_check: dict = field(default_factory=dict)
+    normalization: dict = field(default_factory=dict)
 
 
 def clean_for_tts(text: str) -> str:
@@ -209,7 +242,9 @@ class StreamingSentenceExtractor:
         self.min_words = min_words
         self.buffer = ""
         import re
-        self._pattern = re.compile(r'(?<=[।?!\n])\s+|(?<=[a-zA-Z0-9\u0900-\u097F]{2}\.)\s+(?=[A-Z0-9\u0900-\u097F])')
+        self._pattern = re.compile(
+            r'(?<=[।?!\n])\s+|(?<=[a-zA-Z0-9\u0900-\u097F]{2}\.)\s+(?=[A-Z0-9\u0900-\u097F])|(?<=[,;:])\s+(?=[A-Za-z0-9\u0900-\u097F])'
+        )
 
     def feed(self, token: str) -> list[str]:
         if not token:
@@ -240,7 +275,6 @@ class StreamingSentenceExtractor:
         return [remaining] if remaining else []
 
 
-
 def deduplicate_repetitions(text: str) -> str:
     """Collapses repetitive phrases (e.g. Whisper hallucinations like 'haan haan haan...' x40 -> 'haan')."""
     if not text:
@@ -260,27 +294,37 @@ class Conversation:
     def __init__(self, clients: ModelClients | None = None, language: str = "auto", tools: dict | None = None,
                  max_history: int = 12, devanagari_hindi: bool = False,
                  script_enforcement: bool = False, counsellor_gender: str = "masculine",
-                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix"):
+                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix",
+                 language_mode: str | None = None):
         self.clients, self.language = clients, language
         self.tools = tools or {}  # name -> async handler(args: dict) -> str
         self.script_enforcement = script_enforcement
         self.counsellor_gender = counsellor_gender
         self.counsellor_name = counsellor_name
         self.hint_placement = hint_placement
-        self.current_mode = "en" if language == "en" else "hi"
+        # Canonical language mode (en-IN, hi-IN, hinglish-IN)
+        self.language_mode = canonicalize_language_mode(
+            language_mode or (language if language not in ("auto", "") else "hinglish-IN")
+        )
+        self.auto_language_mode = bool(language_mode is None and language in ("auto", "", None))
+        self.current_mode = "en" if self.language_mode == MODE_EN else "hi"
+        self.generation_id = 0
         self.messages: list[dict] = [{"role": "system", "content": system_prompt(
             devanagari_hindi=devanagari_hindi,
             script_enforcement=script_enforcement,
             counsellor_gender=counsellor_gender,
-            counsellor_name=counsellor_name
+            counsellor_name=counsellor_name,
+            language_mode=language_mode,
         )}]
         self.max_history = max_history
         self.turns: list[dict] = []
+        self.turn_count: int = 0
         self.cancelled = False
         self._task: asyncio.Task | None = None
 
     def cancel(self) -> None:
         self.cancelled = True
+        self.generation_id += 1
         if self._task and not self._task.done():
             self._task.cancel()
 
@@ -290,11 +334,12 @@ class Conversation:
 
     async def turn(self, pcm: bytes, rate: int) -> TurnResult:
         """Run one full turn, aggregating streamed sentence chunks into a single result."""
-        res = TurnResult(language=self.language, mode=self.current_mode)
+        res = TurnResult(language=self.language, language_mode=self.language_mode, mode=self.current_mode)
         audios = []
         async for chunk in self.stream_turn(pcm, rate):
             if chunk.error:
                 res.error = chunk.error
+                res.generation_id = chunk.generation_id
                 return res
             if chunk.heard:
                 res.heard = chunk.heard
@@ -302,6 +347,10 @@ class Conversation:
                 res.reply = chunk.reply
             if chunk.language:
                 res.language = chunk.language
+            if chunk.language_mode:
+                res.language_mode = chunk.language_mode
+            if chunk.generation_id:
+                res.generation_id = chunk.generation_id
             if chunk.mode:
                 res.mode = chunk.mode
             if chunk.first_gen_passed is not None:
@@ -330,6 +379,8 @@ class Conversation:
         """Asynchronously stream a turn: STT -> Brain -> split into sentences -> stream synthesize each sentence.
         Yields `TurnChunk` items so playback begins on sentence 1 while sentence 2 is synthesized in background."""
         self.cancelled = False
+        self.generation_id += 1
+        current_gen = self.generation_id
         mark = len(self.messages)
         res_timings: dict = {}
         try:
@@ -341,19 +392,30 @@ class Conversation:
             raw_text = (stt.get("text") or "").strip()
             heard = deduplicate_repetitions(raw_text)
             if not heard:
-                yield TurnChunk(error="no_speech_recognised", timings_ms=res_timings, is_first=True, is_last=True)
+                yield TurnChunk(error="no_speech_recognised", timings_ms=res_timings, is_first=True, is_last=True, generation_id=current_gen)
                 return
+
+            if self.cancelled or self.generation_id != current_gen:
+                yield TurnChunk(error="cancelled", generation_id=current_gen, is_last=True)
+                return
+
+            self.turn_count += 1
+            turn_index = self.turn_count
 
             lang = self.language
             if lang == "auto" and stt.get("language"):
                 lang = stt["language"]
 
-            # Decide per-turn mode
-            if self.script_enforcement:
-                self.current_mode = reply_mode(heard, previous_mode=self.current_mode)
+            # Decide per-turn language mode
+            if self.script_enforcement or self.auto_language_mode or self.language == "auto":
+                self.language_mode = detect_caller_language_mode(
+                    heard, previous_mode=self.language_mode, allow_auto=self.auto_language_mode
+                )
+                self.current_mode = "en" if self.language_mode == MODE_EN else "hi"
                 turn_mode = self.current_mode
             else:
                 turn_mode = "en" if lang == "en" else "hi"
+                self.current_mode = turn_mode
 
             context = []
             if self.clients.cfg.get("rag_url"):
@@ -404,8 +466,8 @@ class Conversation:
             while True:
                 tool_calls_to_run = []
                 async for item in _stream_brain(cur_messages):
-                    if self.cancelled:
-                        yield TurnChunk(error="cancelled", is_last=True)
+                    if self.cancelled or self.generation_id != current_gen:
+                        yield TurnChunk(error="cancelled", generation_id=current_gen, is_last=True)
                         return
 
                     if "tool_calls" in item and item["tool_calls"]:
@@ -422,28 +484,27 @@ class Conversation:
 
                         ready_sentences = extractor.feed(delta)
                         for sentence in ready_sentences:
-                            if self.cancelled:
-                                yield TurnChunk(error="cancelled", is_last=True)
+                            if self.cancelled or self.generation_id != current_gen:
+                                yield TurnChunk(error="cancelled", generation_id=current_gen, is_last=True)
                                 return
 
                             if not first_clause_marked:
                                 turn_trace.mark("t_llm_first_clause")
                                 first_clause_marked = True
 
-                            # Clause script enforcement
-                            if self.script_enforcement:
-                                spoken_clause, clause_passed, clause_problems = enforce_clause(sentence, mode=turn_mode)
-                                if not clause_passed:
-                                    clauses_violated += 1
-                                    for cp in clause_problems:
-                                        if cp.startswith("roman_hindi_word:"):
-                                            found_roman_tokens.append(cp.split(":", 1)[1])
-                            else:
-                                spoken_clause = sentence
+                            # Clause script normalization & enforcement
+                            norm_res = normalize_phrase(sentence, language_mode=self.language_mode, expand_numbers=False)
+                            spoken_clause = norm_res.text
+                            if not norm_res.valid:
+                                clauses_violated += 1
+                                for w in norm_res.validation_warnings:
+                                    if "unconverted_roman_hindi_tokens" in w:
+                                        found_roman_tokens.extend(w.split(":", 1)[1].split(","))
 
                             t_sent = time.perf_counter()
                             turn_trace.mark("t_tts_sent")
-                            audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.script_enforcement else lang)
+                            tts_lang = "en" if self.language_mode == MODE_EN else "hi"
+                            audio, srate = await self.clients.synthesize(spoken_clause, tts_lang)
                             turn_trace.mark("t_tts_first_chunk")
                             sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
                             t_tts_total += sent_tts_ms
@@ -451,13 +512,19 @@ class Conversation:
                             if is_first_chunk:
                                 res_timings["tts"] = sent_tts_ms
 
+                            if self.cancelled or self.generation_id != current_gen:
+                                yield TurnChunk(error="cancelled", generation_id=current_gen, is_last=True)
+                                return
+
                             script_check_info = {
                                 "mode": turn_mode,
+                                "language_mode": self.language_mode,
                                 "first_gen_passed": (clauses_violated == 0),
                                 "clauses_violated": clauses_violated,
                                 "roman_tokens": list(set(found_roman_tokens)),
                                 "retries": 0,
                                 "fallbacks": 0,
+                                "normalization_applied": norm_res.normalization_applied,
                             }
                             yield TurnChunk(
                                 heard=heard if is_first_chunk else None,
@@ -465,13 +532,17 @@ class Conversation:
                                 audio=audio,
                                 sample_rate=srate,
                                 language=lang,
+                                language_mode=self.language_mode,
+                                generation_id=current_gen,
                                 timings_ms=res_timings if is_first_chunk else {},
                                 sentence=spoken_clause,
                                 is_first=is_first_chunk,
                                 is_last=False,
+                                turn=turn_index,
                                 mode=turn_mode,
                                 first_gen_passed=(clauses_violated == 0),
                                 script_check=script_check_info,
+                                normalization={"applied": norm_res.normalization_applied, "metrics": norm_res.metrics},
                             )
                             is_first_chunk = False
 
@@ -496,27 +567,26 @@ class Conversation:
             # Stream finished: process any final sentence in extractor
             final_sentences = extractor.finish()
             for sentence in final_sentences:
-                if self.cancelled:
-                    yield TurnChunk(error="cancelled", is_last=True)
+                if self.cancelled or self.generation_id != current_gen:
+                    yield TurnChunk(error="cancelled", generation_id=current_gen, is_last=True)
                     return
 
                 if not first_clause_marked:
                     turn_trace.mark("t_llm_first_clause")
                     first_clause_marked = True
 
-                if self.script_enforcement:
-                    spoken_clause, clause_passed, clause_problems = enforce_clause(sentence, mode=turn_mode)
-                    if not clause_passed:
-                        clauses_violated += 1
-                        for cp in clause_problems:
-                            if cp.startswith("roman_hindi_word:"):
-                                found_roman_tokens.append(cp.split(":", 1)[1])
-                else:
-                    spoken_clause = sentence
+                norm_res = normalize_phrase(sentence, language_mode=self.language_mode, expand_numbers=False)
+                spoken_clause = norm_res.text
+                if not norm_res.valid:
+                    clauses_violated += 1
+                    for w in norm_res.validation_warnings:
+                        if "unconverted_roman_hindi_tokens" in w:
+                            found_roman_tokens.extend(w.split(":", 1)[1].split(","))
 
                 t_sent = time.perf_counter()
                 turn_trace.mark("t_tts_sent")
-                audio, srate = await self.clients.synthesize(spoken_clause, turn_mode if self.script_enforcement else lang)
+                tts_lang = "en" if self.language_mode == MODE_EN else "hi"
+                audio, srate = await self.clients.synthesize(spoken_clause, tts_lang)
                 turn_trace.mark("t_tts_first_chunk")
                 sent_tts_ms = round((time.perf_counter() - t_sent) * 1000, 1)
                 t_tts_total += sent_tts_ms
@@ -524,13 +594,19 @@ class Conversation:
                 if is_first_chunk:
                     res_timings["tts"] = sent_tts_ms
 
+                if self.cancelled or self.generation_id != current_gen:
+                    yield TurnChunk(error="cancelled", generation_id=current_gen, is_last=True)
+                    return
+
                 script_check_info = {
                     "mode": turn_mode,
+                    "language_mode": self.language_mode,
                     "first_gen_passed": (clauses_violated == 0),
                     "clauses_violated": clauses_violated,
                     "roman_tokens": list(set(found_roman_tokens)),
                     "retries": 0,
                     "fallbacks": 0,
+                    "normalization_applied": norm_res.normalization_applied,
                 }
                 yield TurnChunk(
                     heard=heard if is_first_chunk else None,
@@ -538,20 +614,24 @@ class Conversation:
                     audio=audio,
                     sample_rate=srate,
                     language=lang,
+                    language_mode=self.language_mode,
+                    generation_id=current_gen,
                     timings_ms=res_timings if is_first_chunk else {},
                     sentence=spoken_clause,
                     is_first=is_first_chunk,
                     is_last=False,
+                    turn=turn_index,
                     mode=turn_mode,
                     first_gen_passed=(clauses_violated == 0),
                     script_check=script_check_info,
+                    normalization={"applied": norm_res.normalization_applied, "metrics": norm_res.metrics},
                 )
                 is_first_chunk = False
 
             reply = "".join(streamed_tokens).strip()
             if not reply:
                 del self.messages[mark:]
-                yield TurnChunk(heard=heard, error="empty_reply", timings_ms=res_timings, is_first=True, is_last=True)
+                yield TurnChunk(heard=heard, error="empty_reply", timings_ms=res_timings, is_first=True, is_last=True, generation_id=current_gen)
                 return
 
             self.messages.append({"role": "assistant", "content": reply})
@@ -568,6 +648,7 @@ class Conversation:
 
             script_check_info = {
                 "mode": turn_mode,
+                "language_mode": self.language_mode,
                 "first_gen_passed": first_gen_passed,
                 "clauses_violated": clauses_violated,
                 "roman_tokens": list(set(found_roman_tokens)),
@@ -578,17 +659,23 @@ class Conversation:
             yield TurnChunk(
                 reply=reply,
                 is_last=True,
+                turn=turn_index,
                 timings_ms=res_timings,
                 mode=turn_mode,
+                language_mode=self.language_mode,
+                generation_id=current_gen,
                 first_gen_passed=first_gen_passed,
                 script_check=script_check_info,
             )
 
             turn_record = {
+                "turn": turn_index,
                 "heard": heard,
                 "reply": reply,
                 "timings_ms": res_timings,
                 "mode": turn_mode,
+                "language_mode": self.language_mode,
+                "generation_id": current_gen,
                 "first_gen_passed": first_gen_passed,
                 "clauses_violated": clauses_violated,
                 "roman_tokens": list(set(found_roman_tokens))

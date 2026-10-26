@@ -63,6 +63,9 @@ async def _traced_turns(pv, sid, n, timeout=8):
 
 async def test_end_to_end_mock_call(pv, caplog, capsys):
     caplog.set_level(logging.DEBUG)
+    pv.s.ai_store_transcripts = False
+    pv.app.state.settings.ai_store_transcripts = False
+    pv.app.state.activity.keep_words = False
     pv.models.stt_delay = 0.15                      # a visible STT stage in the mock timings
 
     # ------------------------------------------------------------------ 1. arm: only my number, one call, 180 s
