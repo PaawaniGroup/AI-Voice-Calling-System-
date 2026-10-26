@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Awaitable, Callable
 
-from app.ai import codec
+from app.ai import codec, turn_trace
 from app.ai.script_enforcement import check_reply, enforce_clause, problem_kinds, strip_mode_tag
 from app.ai.streaming.playout import PlayoutConfig, TurnPlayout
 from app.ai.streaming.segmenter import ClauseSegmenter, SegmenterConfig, is_wordlike
@@ -137,6 +137,7 @@ class StreamingTurn:
         self._inflight: set[asyncio.Task] = set()
         self._task: asyncio.Task | None = None
         self._words: dict[int, int] = {}
+        self._reasons: dict[int, str | None] = {}      # clause index -> why the segmenter ended it (trace only)
         self.m: dict = {"t_start": None, "t_first_token": None, "t_first_clause": None, "t_first_tts_sent": None, "t_first_enqueue": None,
                         "brain_chunks": 0, "brain_span_s": 0.0, "clauses": [], "tts_errors": 0, "tool_rounds": 0}
         self._last_chunk_at = None
@@ -247,6 +248,7 @@ class StreamingTurn:
         return new if new and not self._problems(new) else None
 
     async def _emit(self, clause: str, idx: int) -> int:
+        reason = getattr(clause, "reason", None)                                   # why the segmenter ended this clause (a Clause); None for a plain str
         clause = " ".join(strip_mode_tag(clause).split())
         if not clause or not is_wordlike(clause):
             return idx
@@ -271,6 +273,7 @@ class StreamingTurn:
                 self._script["first_ok"] = True
         self.outcome.clause_texts[idx] = text
         self._words[idx] = len(text.split())
+        self._reasons[idx] = reason
         await self._q.put((idx, text))
         return idx + 1
 
@@ -291,8 +294,10 @@ class StreamingTurn:
         self.playout.end_turn(self.gen)
 
     async def _synth(self, idx: int, text: str, sem: asyncio.Semaphore) -> None:
-        rec = {"idx": idx, "words": self._words.get(idx, 0), "chars": len(text), "tts_wall_ms": None, "audio_ms": None, "rtf": None, "status": "ok"}
+        rec = {"idx": idx, "words": self._words.get(idx, 0), "chars": len(text), "tts_wall_ms": None, "audio_ms": None, "rtf": None, "status": "ok",
+               "stop_reason": self._reasons.get(idx)}
         self.m["clauses"].append(rec)
+        turn_trace.job_tag.set({"clause_idx": idx, "stop_reason": self._reasons.get(idx)})     # task-local: tags this clause's voice job in the trace
         t0 = self.clock.now()
         if self.m["t_first_tts_sent"] is None:
             self.m["t_first_tts_sent"] = t0

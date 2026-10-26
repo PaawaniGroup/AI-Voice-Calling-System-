@@ -72,6 +72,17 @@ def _dot_is_not_boundary(tok: str) -> bool:
     return False
 
 
+class Clause(str):
+    """A clause (compares and joins as a plain str) that remembers why it ended: "punct" (a boundary character after the minimum words),
+    "max_words" (no boundary: cut at the maximum), "hard_max" (a protected span pushed it to the hard limit) or "flush" (end of the reply)."""
+    reason: str | None = None
+
+    def __new__(cls, text: str, reason: str | None = None):
+        o = super().__new__(cls, text)
+        o.reason = reason
+        return o
+
+
 @dataclass
 class SegmenterConfig:
     first_min_words: int = 3      # the first clause gates first audio: allowed to be short (PROVISIONAL default, see docs/evidence/phase0)
@@ -85,6 +96,7 @@ class ClauseSegmenter:
         self.cfg = cfg or SegmenterConfig()
         self.buf = ""
         self.emitted = 0
+        self._reason: str | None = None
 
     # ------------------------------------------------------------------ public
     def feed(self, text: str) -> list[str]:
@@ -98,7 +110,7 @@ class ClauseSegmenter:
         rest = " ".join(self.buf.split())
         self.buf = ""
         if rest and is_wordlike(rest):
-            out.append(rest)
+            out.append(Clause(rest, "flush"))
             self.emitted += 1
         return out
 
@@ -119,7 +131,7 @@ class ClauseSegmenter:
             clause = " ".join(self.buf[:cut].split())
             self.buf = self.buf[cut:].lstrip()
             if clause and is_wordlike(clause):
-                out.append(clause)
+                out.append(Clause(clause, self._reason))
                 self.emitted += 1
         return out
 
@@ -146,9 +158,12 @@ class ClauseSegmenter:
                     continue
                 if tok[-1] == "." and not (nxt[:1].isupper() or nxt[:1].isdigit() or "ऀ" <= nxt[:1] <= "ॿ"):
                     continue                                   # "... vs. the ..." / "etc. and": a period before a lowercase word is not a sentence end
+                self._reason = "punct"
                 return m.end()
             if words >= maxw and is_wordlike(tok):
+                self._reason = "max_words"
                 return m.end()                                 # too long without punctuation: cut at a word boundary (protected spans already skipped)
             if words >= hard_max:
+                self._reason = "hard_max"
                 return m.end()
         return None

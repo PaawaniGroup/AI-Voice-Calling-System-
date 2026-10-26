@@ -35,6 +35,9 @@ AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
 
 
+LATENCY_FLAGS = ("trace_evidence",)   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
+
+
 @dataclass
 class Runtime:
     session_id: str
@@ -47,6 +50,7 @@ class Runtime:
     watchdog: asyncio.Task | None = None
     tasks: list = field(default_factory=list)
     call_id: str | None = None
+    trace_evidence: bool = False   # tenant flag `trace_evidence` (and MME_TEL_AI_TRACE_EVIDENCE_PATH set): append the numbers-only turn evidence line
 
 
 class AiService:
@@ -73,6 +77,7 @@ class AiService:
                 "tts_ulaw8k": False,           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference audio sent; OFF by default
                 "tts_voice": None,             # name of the worker's voice for tts_ulaw8k (None = the worker's default, "utkarsh")
                 **{k: None for k in STREAM_KEYS},   # None = the built-in provisional default (set after the TTS re-measurement)
+                **{k: False for k in LATENCY_FLAGS},   # latency-work flags: per tenant, default OFF
                 "full_duplex_input": False,        # listen while the assistant speaks: min voiced time, echo guard, kept speech, hysteresis; OFF by default
                 **{k: None for k in DUPLEX_KEYS}}  # None = the provisional defaults of app/ai/duplex.py (to be tuned on real call recordings)
 
@@ -81,7 +86,7 @@ class AiService:
         cfg = self.default_config(tenant_id)
         if doc:
             for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
-                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *LATENCY_FLAGS, *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
             for k in ("models", "timeouts", "paths", "keys", "key_refs"):
@@ -115,6 +120,9 @@ class AiService:
             cfg["tts_voice"] = v
         if body.get("full_duplex_input") is not None:
             cfg["full_duplex_input"] = bool(body["full_duplex_input"])
+        for flag in LATENCY_FLAGS:
+            if body.get(flag) is not None:
+                cfg[flag] = bool(body[flag])
         for k, (lo, hi) in {**STREAM_KEYS, **DUPLEX_KEYS}.items():
             if k in body and body[k] is not None:
                 v = float(body[k]) if isinstance(lo, float) else int(body[k])
@@ -285,6 +293,7 @@ class AiService:
             duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
+        rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")
         self.runtime[session_id] = rt
         m.AI_RUNTIMES.set(len(self.runtime))

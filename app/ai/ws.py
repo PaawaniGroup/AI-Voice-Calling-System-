@@ -396,6 +396,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     else:
                         final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
                     await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
+                    if getattr(rt, "trace_evidence", False):           # tenant flag AND the env path: otherwise no file is ever written
+                        turn_trace.append_evidence(getattr(ai.s, "ai_trace_evidence_path", ""), trace)
                 except Exception:  # latency bookkeeping must never take the call down
                     log.exception("could not store turn latency trace")
 

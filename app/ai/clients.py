@@ -148,6 +148,7 @@ class ModelClients:
                                        timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0))
         self._bg: set[asyncio.Task] = set()          # fire-and-forget RunPod cancel calls (kept referenced until they finish)
         self.cancelled_jobs: list[tuple[str, int | str]] = []   # (service, http status | error type) of each RunPod cancel attempt
+        self._last_job_end: dict[str, float] = {}               # service -> monotonic time its last RunPod job ended (gap between voice jobs)
 
     def resolve_key(self, service: str | None = None) -> str | None:
         """Resolve API key for a model service without exposing or logging it.
@@ -233,46 +234,87 @@ class ModelClients:
         if jid:
             await self._cancel_job(service, ep, hdrs, jid)
 
-    async def _runpod_call(self, service: str, ep: ServiceEndpoint, hdrs: dict, body: dict):
+    async def _runpod_call(self, service: str, ep: ServiceEndpoint, hdrs: dict, body: dict, *, job: dict | None = None):
         """Submit ONE RunPod job and return its finished result.
 
         run mode (default): POST /run (the job id is known at once), then poll /status. If this task is cancelled (the caller spoke again,
         a hangup, a timeout) the RunPod job is CANCELLED too: it stops billing and frees the single GPU worker for the next request.
-        runsync mode: one blocking POST /runsync; its id is unknown until it ends, so nothing can be cancelled."""
+        runsync mode: one blocking POST /runsync; its id is unknown until it ends, so nothing can be cancelled.
+
+        `job` (optional) is a numbers-only record that the caller may pre-fill (audio bytes, word count); it is registered with the turn trace
+        and filled in here: submit time, POST time, polls, time polling, last result download, RunPod delay/execution, remainder, gap since the
+        previous job of this service. No words ever go in it."""
+        rec = job if job is not None else {}
+        t_sub = time.monotonic()
+        prev_end = self._last_job_end.get(service)
+        rec.update(service=service, status="open", t_submit=t_sub, polls=0, poll_ms=0.0, gap_since_prev_ms=None if prev_end is None else round((t_sub - prev_end) * 1000, 1))
+        turn_trace.note_job(rec)
+        try:
+            out = await self._runpod_call_inner(service, ep, hdrs, body, rec)
+            rec["status"] = "ok"
+            return out
+        except asyncio.CancelledError:
+            rec["status"] = "cancelled"
+            raise
+        except Exception as e:
+            rec["status"] = f"error:{getattr(e, 'kind', type(e).__name__)}"
+            raise
+        finally:
+            t_end = time.monotonic()
+            self._last_job_end[service] = t_end
+            rec["total_ms"] = round((t_end - t_sub) * 1000, 1)
+            d, x = rec.get("delay_ms"), rec.get("exec_ms")
+            rec["remainder_ms"] = round(rec["total_ms"] - d - x, 1) if isinstance(d, (int, float)) and isinstance(x, (int, float)) else None
+
+    async def _runpod_call_inner(self, service: str, ep: ServiceEndpoint, hdrs: dict, body: dict, rec: dict):
         if self._runpod_mode() == "runsync":
+            t0 = time.monotonic()
             r = await self._http.post(ep.url + "/runsync", json=body, headers=hdrs, timeout=ep.timeout)
+            rec["submit_ms"] = round((time.monotonic() - t0) * 1000, 1)
+            rec["request_bytes"] = len(r.request.content)
             if r.status_code >= 400:
                 body_clean = safe_output.scrub(r.text[:80]).replace("\n", " ").strip()
                 raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
-            return await self._runpod_wait(service, ep, hdrs, r.json())
+            return await self._runpod_wait(service, ep, hdrs, r.json(), rec=rec)
+        t0 = time.monotonic()
         post = asyncio.ensure_future(self._http.post(ep.url + "/run", json=body, headers=hdrs, timeout=ep.timeout))
         try:
             r = await asyncio.shield(post)
         except asyncio.CancelledError:
             self._spawn(self._cancel_when_submitted(post, service, ep, hdrs))
             raise
+        rec["submit_ms"] = round((time.monotonic() - t0) * 1000, 1)
+        rec["request_bytes"] = len(r.request.content)
         if r.status_code >= 400:
             body_clean = safe_output.scrub(r.text[:80]).replace("\n", " ").strip()
             raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
         try:
-            return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06)
+            return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06, rec=rec)
         except asyncio.CancelledError:
             if jid:
                 self._spawn(self._cancel_job(service, ep, hdrs, jid))
             raise
 
-    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j, poll_delay: float = 0.1):
+    async def _runpod_wait(self, service: str, ep: ServiceEndpoint, hdrs: dict, j, poll_delay: float = 0.1, rec: dict | None = None):
         """RunPod `/runsync` stops waiting after ~90 s (cold start) and returns IN_QUEUE/IN_PROGRESS: poll `/status`.
         Adaptive fast polling (100ms -> 400ms) minimizes latency instead of waiting 1s per poll."""
         cap = float(self.cfg.get("runpod_poll_cap_s") or 0.15)   # status polls are free: a tight cap trims the wait after the job finishes
+        t_loop = time.monotonic()
         while isinstance(j, dict) and j.get("status") in ("IN_QUEUE", "IN_PROGRESS") and j.get("id"):
             await asyncio.sleep(poll_delay)
             poll_delay = min(poll_delay * 1.5, cap)
             if self._http.is_closed:
                 raise AiUnavailable(service, "client_closed")
+            t_get = time.monotonic()
             sr = await self._http.get(f"{ep.url}/status/{j['id']}", headers=hdrs, timeout=30)
+            if rec is not None:
+                now = time.monotonic()
+                rec["polls"] += 1
+                rec["poll_ms"] = round((now - t_loop) * 1000, 1)
+                rec["last_get_ms"] = round((now - t_get) * 1000, 1)          # the last GET carries the result: its time is the result download
+                rec["response_bytes"] = len(sr.content)
             if sr.status_code >= 400:
                 body_clean = safe_output.scrub(sr.text[:80]).replace("\n", " ").strip()
                 raise AiError(service, "http_error", str(sr.status_code), status_code=sr.status_code, body=body_clean)
@@ -282,6 +324,10 @@ class ModelClients:
         if isinstance(j, dict) and j.get("error"):
             raise AiError(service, "runpod_error", str(j["error"])[:200])
         turn_trace.note_runpod_response(service, j)  # delayTime (queue/cold start) vs executionTime (compute)
+        if rec is not None and isinstance(j, dict):
+            for src, dst in (("delayTime", "delay_ms"), ("executionTime", "exec_ms")):
+                if isinstance(j.get(src), (int, float)):
+                    rec[dst] = float(j[src])
         return j
 
     def _tts_reference_b64(self) -> str | None:
@@ -345,8 +391,11 @@ class ModelClients:
         async def go(ep: ServiceEndpoint):
             hdrs = self._auth_headers("stt")
             if ep.path.endswith("/runsync"):
+                t_conv = time.perf_counter()
                 wav_bytes = pcm16_to_wav(pcm, rate)
                 b64 = base64.b64encode(wav_bytes).decode("ascii")
+                job = {"audio_pcm_bytes": len(pcm), "audio_s": round(len(pcm) / 2 / rate, 3) if rate else None, "sample_rate": rate,
+                       "wav_b64_chars": len(b64), "convert_ms": round((time.perf_counter() - t_conv) * 1000, 2)}   # conversion = WAV wrap + base64
                 body = {
                     "input": {
                         "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
@@ -355,7 +404,7 @@ class ModelClients:
                         "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
                     }
                 }
-                j = await self._runpod_call("stt", ep, hdrs, body)
+                j = await self._runpod_call("stt", ep, hdrs, body, job=job)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 if isinstance(out, dict):
                     text = out.get("transcription") or out.get("text") or ""
@@ -462,6 +511,7 @@ class ModelClients:
         max_tok = int(self.cfg.get("max_tokens", 400))
         temp = float(temperature if temperature is not None else self.cfg.get("temperature", getattr(self.s, "ai_temperature", 0.3)))
         hdrs = self._auth_headers("brain")
+        turn_trace.note_brain_call(messages, bool(self.cfg.get("rag_url")))     # counts only
         if ep.path.endswith("/runsync") and self.cfg.get("streaming_pipeline"):
             # Token streaming over RunPod: the same endpoint's OpenAI-compatible route (the /runsync route only returns whole replies).
             ep = ServiceEndpoint(ep.url, "/openai/v1/chat/completions", ep.timeout)
@@ -620,7 +670,8 @@ class ModelClients:
                     ref = self._tts_reference_b64()
                     if ref:
                         body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
-                j = await self._runpod_call("tts", ep, hdrs, body)
+                job = {"words": len(text.split()), "chars": len(text), "spoken_chars": len(spoken)}
+                j = await self._runpod_call("tts", ep, hdrs, body, job=job)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 if ulaw and isinstance(out, dict) and out.get("error"):
                     # the worker's own message ("Unknown voice: ...", "output_format must be ...": an old worker): its text holds no caller words
@@ -636,8 +687,12 @@ class ModelClients:
                 if ulaw and isinstance(out, dict) and out.get("format") == "ulaw8k":
                     if not raw:
                         raise AiError("tts", "bad_response", "empty audio in output")
-                    return codec.mulaw_to_pcm16(raw), codec.MULAW_RATE     # audioop.ulaw2lin: 8-bit mu-law -> PCM16 at 8 kHz
-                return wav_to_pcm16(raw)                                   # also when a worker answers a WAV despite the request
+                    pcm_out = codec.mulaw_to_pcm16(raw)                    # audioop.ulaw2lin: 8-bit mu-law -> PCM16 at 8 kHz
+                    job["audio_s"] = round(len(pcm_out) / 2 / codec.MULAW_RATE, 3)
+                    return pcm_out, codec.MULAW_RATE
+                pcm_out, rate_out = wav_to_pcm16(raw)                      # also when a worker answers a WAV despite the request
+                job["audio_s"] = round(len(pcm_out) / 2 / rate_out, 3) if rate_out else None
+                return pcm_out, rate_out
             else:
                 body = {"model": model, "input": text, "response_format": "wav", "language": language}
                 r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
