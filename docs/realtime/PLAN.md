@@ -35,3 +35,6 @@ No paid step of Stages 1-4 runs before the Stage 0 report.
 
 ## Open inputs from the operator
 Recordings (the operator's 12 caller lines, a folder outside every repository; none exist yet); balance (above or below $1: not stated, treated as UNKNOWN, no paid step runs); Stage 0 (not decided); the Pod account key later as a REQUEST with minimal permissions.
+
+## Stage 2 status (persistent transport)
+Built offline, behind per-tenant flags default OFF (`rt_transport`, `rt_endpoints`, `rt_secret_env`; global kill `ai_rt_kill`): client `app/ai/rt/`, server `deploy/rt_workers/`, G1 probe `tools/realtime/rt_rtt_probe.py`, design `STAGE2_TRANSPORT.md`. First approved test run (one run) hit a collection error in MY code (worker module loaded without registering in sys.modules, so its dataclass failed); no test body executed; fixed in three loaders; a re-run needs the operator's "APPROVED: run". Gate G1 (round trip p50 <= 40 ms) is judged only for a probe run from the host the service will run on (`--declared-from cloud`). Paid REQUEST order by value (operator, this stage): 1 acknowledgement audio (cap $0.05), then the Pod requests (G1, LLM, voice, concurrency), STT decode needs recordings.

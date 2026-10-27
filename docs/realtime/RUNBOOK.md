@@ -16,3 +16,9 @@ Flags of Stages 2-4 (`rt_transport` and others) are added here with their on/off
 
 ## After every paid step
 State what must be off (Pods, Active workers) and verify it read-only (list Pods at start and end; the console setting for Active workers is the operator's). If a Pod might still be running: "ACTION NEEDED: DELETE POD NOW".
+
+## Stage 2: persistent transport (nothing switched on)
+- Free offline checks (each needs the operator's APPROVED: run): the four `tests/unit/test_rt_*.py` files, `python deploy/rt_workers/selftest.py`, `python tools/realtime/rt_rtt_probe.py --selftest` (SIMULATED).
+- Per tenant (through `AiService.put_config`, verify with `get_config`): `rt_transport` {"tts":"persistent"} etc., `rt_endpoints` {"tts":"wss://..."}, `rt_secret_env` "NAME_OF_ENV_VAR" (the secret itself lives in that environment variable of the service process, never in config).
+- Turn OFF (any one is enough): set the tenant's `rt_transport` values back to "queue" or `{}`; global `ai_rt_kill=true` (settings); calls already in progress keep their clients until they end. The queue path (/run + poll) is always the fallback.
+- Server side (Pod): see `deploy/rt_workers/` and STAGE2_TRANSPORT.md; start/stop of any Pod is a chargeable REQUEST.
