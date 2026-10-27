@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-DEVANAGARI_DIGITS = {0x966 + i: str(i) for i in range(10)}   # Devanagari digit i -> ASCII digit i (the same table as str.maketrans of the two 10-digit strings)
+DEVANAGARI_DIGITS = {0x966 + i: ord(str(i)) for i in range(10)}   # Devanagari digit i -> ASCII digit i (exactly the table str.maketrans builds from the two 10-digit strings)
 
 MONTH_WORDS = {
     "जनवरी", "फ़रवरी", "फरवरी", "मार्च", "अप्रैल", "मई", "जून",
