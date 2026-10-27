@@ -17,6 +17,7 @@ from app.providers.base import MockProvider  # noqa: E402
 from config.settings import Settings  # noqa: E402
 
 MONGO = os.environ.get("MME_TEL_TEST_MONGO_URI", "mongodb://127.0.0.1:27117")
+THROWAWAY_PREFIX = "mme_test_throwaway_"     # the only database name prefix any test may create or drop (never mme_telephony)
 JWT_SECRET = "test-secret-" + "x" * 32
 MASTER = "test-master-" + "y" * 32
 
@@ -46,13 +47,15 @@ def settings_factory():
 
 @pytest_asyncio.fixture
 async def db():
-    s = make_settings(mongo_db=f"mmetel_test_{uuid.uuid4().hex[:10]}")
+    s = make_settings(mongo_db=f"{THROWAWAY_PREFIX}{uuid.uuid4().hex[:10]}")
+    assert s.mongo_db.startswith(THROWAWAY_PREFIX), "a test database must carry the throwaway prefix: never the live database"
     d = Database(s)
     try:
         await d.connect()
     except Exception as e:  # pragma: no cover
         pytest.skip(f"test MongoDB not reachable at {MONGO}: {type(e).__name__} (run scripts/dev_mongo.sh)")
     yield d
+    assert s.mongo_db.startswith(THROWAWAY_PREFIX)                       # only a throwaway database is ever dropped
     await d.client.drop_database(s.mongo_db)
     await d.close()
 
