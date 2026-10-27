@@ -84,7 +84,15 @@ async def rollback_supervised_call(backup_file: Path | None = None, mongo_uri: s
             update_op
         )
         print(f"Rollback completed: {res.modified_count} document modified.")
-        return {"status": "rolled_back", "modified_count": res.modified_count, "backup_used": str(bp) if bp else None}
+        # READ-ONLY check (this script never changes the policy): is the tenant disarmed? Disarming is `plivo_testcall.py disarm --yes` (policy.enabled = False).
+        try:
+            pol = await db["tenant_policies"].find_one({"tenant_id": TENANT_ID})
+            policy_enabled = bool(pol.get("enabled")) if isinstance(pol, dict) else None
+        except Exception:
+            policy_enabled = None
+        state = {True: "ENABLED (STILL ARMED: run `python scripts/plivo_testcall.py disarm --yes`)", False: "DISABLED (disarmed)", None: "UNKNOWN (no policy document readable)"}[policy_enabled]
+        print(f"Tenant policy after the rollback: {state}")
+        return {"status": "rolled_back", "modified_count": res.modified_count, "backup_used": str(bp) if bp else None, "policy_enabled": policy_enabled}
     finally:
         await client.close()
 
@@ -97,7 +105,9 @@ def main():
     args = parser.parse_args()
 
     bp = Path(args.backup) if args.backup else None
-    asyncio.run(rollback_supervised_call(backup_file=bp, mongo_uri=args.mongo_uri, db_name=args.db_name))
+    res = asyncio.run(rollback_supervised_call(backup_file=bp, mongo_uri=args.mongo_uri, db_name=args.db_name))
+    if res.get("policy_enabled") is True:
+        sys.exit(2)                                  # the flags are rolled back, but the tenant is still armed: not a clean end state
 
 
 if __name__ == "__main__":

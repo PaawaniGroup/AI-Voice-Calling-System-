@@ -125,6 +125,15 @@ async def run_checklist(expected_caller: str | None = None, mongo_uri: str | Non
                     failures.append(f"flag {flag} via get_config mismatch: {actual!r} != {expected!r}")
                 if dropped:
                     failures.append(f"flag {flag} is stored but get_config does not return it (allowlist)")
+            # Dependencies between flags: a flag that is on but cannot take effect is a silent failure of the call's purpose
+            if runtime.get("stream_ramp") and not runtime.get("streaming_pipeline"):
+                print("  [FAIL] stream_ramp is ON but streaming_pipeline is OFF: the ramp only works on the streaming path")
+                failures.append("stream_ramp needs streaming_pipeline")
+            if runtime.get("tts_adaptive_poll") and str(runtime.get("runpod_mode") or "run").lower() == "runsync":
+                print("  [FAIL] tts_adaptive_poll is ON but runpod_mode is runsync: the overlapping polls only exist in run mode")
+                failures.append("tts_adaptive_poll needs runpod_mode run")
+            if runtime.get("trace_evidence"):
+                print("  [info] trace_evidence also needs MME_TEL_AI_TRACE_EVIDENCE_PATH in the SERVICE environment (not visible from here)")
             for flag in MUST_BE_OFF:
                 on = bool(runtime.get(flag)) or bool(ai_cfg.get(flag))
                 print(f"  [{'FAIL' if on else 'PASS'}] Flag {flag:20s}: must be OFF -> {'ON' if on else 'off'}")

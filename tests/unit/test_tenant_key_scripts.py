@@ -383,3 +383,76 @@ async def test_checklist_fails_when_a_flag_that_must_stay_off_is_on(capsys):
     ai, pol = _checklist_docs(stt_raw_pcm=True)
     ok, out = await _run_checklist(ai, pol, capsys)
     assert ok is False and "stt_raw_pcm" in out.err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag,bad", [("tts_ulaw8k", False), ("devanagari_hindi", False), ("streaming_pipeline", False), ("full_duplex_input", False),
+                                      ("tts_voice", "other"), ("stream_ramp", False), ("tts_adaptive_poll", False), ("trace_evidence", False),
+                                      ("glossary_correction", False), ("strict_grounding", False)])
+async def test_checklist_requires_each_base_flag_and_each_new_flag_to_be_on(flag, bad, capsys):
+    """The base flags the call needs (streaming_pipeline, tts_ulaw8k, devanagari_hindi, full_duplex_input, tts_voice) and the five new ones: one wrong value fails."""
+    ai, pol = _checklist_docs(**{flag: bad})
+    ok, out = await _run_checklist(ai, pol, capsys)
+    assert ok is False and flag in out.err
+
+
+@pytest.mark.asyncio
+async def test_checklist_fails_on_flag_dependencies(capsys):
+    ai, pol = _checklist_docs(streaming_pipeline=False)                            # stream_ramp stays True
+    ok, out = await _run_checklist(ai, pol, capsys)
+    assert ok is False and "stream_ramp needs streaming_pipeline" in out.err
+    ai, pol = _checklist_docs(runpod_mode="runsync")                               # tts_adaptive_poll stays True
+    ok, out = await _run_checklist(ai, pol, capsys)
+    assert ok is False and "tts_adaptive_poll needs runpod_mode run" in out.err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy,expected", [({"enabled": True}, True), ({"enabled": False}, False), (None, None)])
+async def test_rollback_reports_whether_the_tenant_is_still_armed_and_never_changes_the_policy(tmp_path, policy, expected):
+    bf = tmp_path / "ai_config_mme-test_20261027T000000Z.json"
+    bf.write_text(json.dumps({"tenant_id": "mme-test", "config": {}}), encoding="utf-8")
+    ai, pol = _coll(None), _coll(policy)
+    with patch("scripts.rollback_supervised_call_tenant.AsyncMongoClient") as mc:
+        mc.return_value = MagicMock()
+        mc.return_value.__getitem__.return_value = _db_with({"ai_config": ai, "tenant_policies": pol})
+        mc.return_value.close = AsyncMock()
+        res = await rollback_supervised_call(backup_file=bf)
+    assert res["policy_enabled"] is expected
+    pol.update_one.assert_not_called()                                              # the rollback only READS the policy
+
+
+@pytest.mark.asyncio
+async def test_disarm_then_rollback_on_a_throwaway_database_leaves_the_tenant_disarmed_and_the_flags_gone(tmp_path):
+    """The S11 order: disarm (plivo_testcall) -> flag rollback -> verify. Real pymongo, throwaway database (dropped)."""
+    import uuid
+    from scripts.plivo_testcall import disarm
+    from scripts.prepare_supervised_call_tenant import prepare_supervised_call
+    uri = "mongodb://127.0.0.1:27117"
+    c = await _mongo_or_skip(uri)
+    name = f"mme_throwaway_{uuid.uuid4().hex[:10]}"
+    try:
+        db = c[name]
+        await db["ai_config"].insert_one({"tenant_id": "mme-test", "enabled": True, "tts_voice": "default"})
+        await db["tenant_policies"].insert_one({"tenant_id": "mme-test", "enabled": True, "allowed_callers": ["+000000000000"], "max_duration_s": 180})
+        with patch("scripts.backup_ai_config.get_default_backup_dir", return_value=tmp_path):
+            res = await prepare_supervised_call(apply=True, mongo_uri=uri, db_name=name)
+
+        async def hangup(call):
+            return None
+        # rollback WITHOUT disarming first: flags are restored, but the script says the tenant is still armed
+        early = await rollback_supervised_call(backup_file=Path(res["backup"]), mongo_uri=uri, db_name=name)
+        assert early["policy_enabled"] is True
+        with patch("scripts.backup_ai_config.get_default_backup_dir", return_value=tmp_path):
+            await prepare_supervised_call(apply=True, mongo_uri=uri, db_name=name)    # flags on again, then the real order (backup stays in tmp_path)
+        await disarm(db, "mme-test", hangup)
+        done = await rollback_supervised_call(backup_file=Path(res["backup"]), mongo_uri=uri, db_name=name)
+        assert done["policy_enabled"] is False
+        pol = await db["tenant_policies"].find_one({"tenant_id": "mme-test"})
+        assert pol["enabled"] is False
+        cfg = await db["ai_config"].find_one({"tenant_id": "mme-test"})
+        for f in ("stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding", "streaming_pipeline", "tts_ulaw8k"):
+            assert f not in cfg, f
+        assert cfg["tts_voice"] == "default" and cfg["enabled"] is True
+    finally:
+        await c.drop_database(name)
+        await c.close()
