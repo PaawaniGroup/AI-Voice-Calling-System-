@@ -19,7 +19,7 @@ import time
 from app.ai import codec, tts_frontend, turn_trace
 from app.ai.clients import AiError, ModelClients, ServiceEndpoint
 from app.ai.rt import protocol as P
-from app.ai.rt.connection import Connector, PersistentConnection, RtConfig, RtError, websockets_connector
+from app.ai.rt.connection import Connector, PersistentConnection, RtConfig, RtError, make_websockets_connector
 from app.ai.rt.resilience import ReadinessTracker, breaker_for
 
 log = logging.getLogger("mme_telephony.ai.rt")
@@ -27,13 +27,15 @@ RT_SERVICES = ("stt", "tts", "brain")
 
 
 class RtModelClients(ModelClients):
-    def __init__(self, s, cfg: dict, transport=None, *, connector: Connector | None = None, rt_cfg: RtConfig | None = None, resolvers: dict | None = None):
+    def __init__(self, s, cfg: dict, transport=None, *, connector: Connector | None = None, rt_cfg: RtConfig | None = None, resolvers: dict | None = None, unsafe_allow_plain_ws: bool = False):
         super().__init__(s, cfg, transport)
+        self._unsafe_plain = unsafe_allow_plain_ws                       # code only: a tenant cannot switch encryption off, and no environment variable does either
+        self._rt_pins: dict = cfg.get("rt_pins") or {}
         self._resolvers = resolvers or {}                                 # per service: async () -> current wss:// URL (Pod port/IP rediscovery)
         rt = cfg.get("rt_transport") or {}
         self._rt = {svc: rt.get(svc) == "persistent" for svc in RT_SERVICES}
         self._rt_urls: dict = cfg.get("rt_endpoints") or {}
-        self._connector = connector or websockets_connector
+        self._connector = connector                                       # None = the real connector, built per service (certificate pin)
         self._rt_cfg = rt_cfg or RtConfig()
         self._conns: dict[str, PersistentConnection] = {}
         self._brain_rt = False
@@ -62,7 +64,8 @@ class RtModelClients(ModelClients):
 
     def _conn(self, svc: str) -> PersistentConnection:
         if svc not in self._conns:
-            self._conns[svc] = PersistentConnection(svc, self._rt_urls[svc], self.call_id, self._secret, self._connector, self._rt_cfg, resolver=self._resolvers.get(svc))
+            self._conns[svc] = PersistentConnection(svc, self._rt_urls[svc], self.call_id, self._secret, self._connector or make_websockets_connector(self._rt_pins.get(svc)), self._rt_cfg,
+                                                   resolver=self._resolvers.get(svc), unsafe_allow_plain_ws=self._unsafe_plain)
         return self._conns[svc]
 
     async def aclose(self) -> None:

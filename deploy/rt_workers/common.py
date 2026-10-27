@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 
@@ -41,7 +42,43 @@ def _closed(exc: BaseException) -> bool:
     return isinstance(exc, (EOFError, ConnectionError)) or "ConnectionClosed" in type(exc).__name__
 
 
-async def serve_connection(ws, *, service: str, engine, secret: bytes, limits: Limits | None = None, global_sem: asyncio.Semaphore | None = None, clock=time.monotonic) -> dict:
+_REPLAY = P.ReplayCache()               # process-wide: a token captured on the wire works once, on this server, until it would have expired anyway
+
+
+def _loopback(host: str) -> bool:
+    return host in ("localhost", "::1") or host.startswith("127.")
+
+
+def check_bind(host: str, tls_ctx, unsafe_plain: bool = False) -> None:
+    """A server reachable from outside must speak TLS: refuse to start otherwise (only a loopback bind, e.g. behind a private tunnel, may be plain)."""
+    if tls_ctx is None and not _loopback(host) and not unsafe_plain:
+        raise SystemExit("refused: a non-loopback bind needs TLS (RT_TLS_CERT and RT_TLS_KEY); plain only on 127.0.0.1 behind a private tunnel")
+
+
+def tls_context_from_env():
+    cert, key = os.environ.get("RT_TLS_CERT"), os.environ.get("RT_TLS_KEY")
+    if not cert or not key:
+        return None
+    import ssl
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(cert, key)
+    return ctx
+
+
+async def serve_forever(handler, argv=None) -> None:
+    """Start the WebSocket listener. RT_BIND (default 127.0.0.1), PORT, RT_TLS_CERT/RT_TLS_KEY; `--unsafe-plain` (a command-line flag, never an environment default) allows plain
+    sockets on a non-loopback bind: only for a test inside a closed network."""
+    import sys
+    import websockets
+    host, ctx = os.environ.get("RT_BIND", "127.0.0.1"), tls_context_from_env()
+    check_bind(host, ctx, "--unsafe-plain" in (sys.argv[1:] if argv is None else argv))
+    async with websockets.serve(handler, host, int(os.environ.get("PORT", "8000")), ssl=ctx, max_size=2 ** 22, ping_interval=None, open_timeout=5):
+        await asyncio.Future()
+
+
+async def serve_connection(ws, *, service: str, engine, secret: bytes, limits: Limits | None = None, global_sem: asyncio.Semaphore | None = None, clock=time.monotonic,
+                           replay: "P.ReplayCache | None" = None) -> dict:
     """Serve one connection until it closes. Returns counters (numbers only). `ws` needs `send(str|bytes)`, `recv()`, `close()`."""
     limits = limits or Limits()
     sem = global_sem or asyncio.Semaphore(limits.max_global)
@@ -68,7 +105,7 @@ async def serve_connection(ws, *, service: str, engine, secret: bytes, limits: L
         await fail(None, "bad_hello")
         await _quiet(ws.close())
         return stats
-    bad = P.verify_token(secret, str(first.get("token", "")), str(first.get("call", "")))
+    bad = P.verify_token(secret, str(first.get("token", "")), str(first.get("call", "")), replay=replay if replay is not None else _REPLAY)
     if bad:
         stats["auth_failures"] += 1
         await fail(None, bad)

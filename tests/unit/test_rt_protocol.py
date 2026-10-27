@@ -115,3 +115,39 @@ def test_readiness_is_the_last_completed_request_not_a_health_listing():
     assert not r.ready("tts")                                                         # too old
     r.record("tts", False, None)
     assert not r.ready("stt")
+
+
+# ---- security: single-use tokens and the URL policy
+def test_a_token_works_once_with_a_replay_cache_and_a_replayed_one_is_refused():
+    cache = P.ReplayCache()
+    tok = P.make_token(SECRET, "call-1", ttl_s=60, now=1000.0)
+    assert P.verify_token(SECRET, tok, "call-1", now=1001.0, replay=cache) is None
+    assert P.verify_token(SECRET, tok, "call-1", now=1002.0, replay=cache) == "replayed_token"
+    assert P.verify_token(SECRET, P.make_token(SECRET, "call-1", now=1000.0), "call-1", now=1002.0, replay=cache) is None       # a fresh token has a fresh nonce
+
+
+def test_two_tokens_for_the_same_call_differ_and_a_changed_nonce_breaks_the_signature():
+    a, b = P.make_token(SECRET, "c", now=5.0), P.make_token(SECRET, "c", now=5.0)
+    assert a != b
+    head, nonce, sig = a.rsplit(".", 2)
+    assert P.verify_token(SECRET, f"{head}.{'0' * len(nonce)}.{sig}", "c", now=6.0) == "bad_signature"
+
+
+def test_the_replay_cache_is_bounded_and_forgets_only_expired_nonces():
+    cache = P.ReplayCache(max_entries=4)
+    for i in range(2):
+        assert cache.first_use(f"n{i}", exp=100, now=0.0)
+    assert cache.first_use("n2", exp=100, now=0.0) and cache.first_use("n3", exp=100, now=0.0)
+    assert not cache.first_use("n4", exp=100, now=1.0)                  # full of live tokens: refuse, never forget one (that would let a replay through)
+    assert cache.first_use("n4", exp=300, now=200.0)                    # after the old ones expired there is room again
+    assert not cache.first_use("n4", exp=300, now=201.0)
+
+
+def test_url_policy_wss_always_plain_ws_only_for_loopback_unless_the_code_says_unsafe():
+    assert P.check_url("wss://host.example/ws") is None and P.check_url("wss://203.0.113.7:13007/ws") is None
+    for ok in ("ws://127.0.0.1:8000/ws", "ws://localhost/ws", "ws://[::1]:9/ws"):
+        assert P.check_url(ok) is None
+    for bad in ("ws://203.0.113.7:13007/ws", "ws://host.example/ws", "ws://10.0.0.5/ws"):
+        assert P.check_url(bad) == "plain_ws_to_non_loopback" and P.check_url(bad, unsafe_allow_plain=True) is None
+    for junk in ("http://host/ws", "https://host", "ftp://x", "wss://", "ws://", "", "host.example/ws", "ws:///ws"):
+        assert P.check_url(junk) == "bad_url"

@@ -2,6 +2,7 @@
 NOT built into any live image. Same protocol and tests as the voice server (common.py).
 
   RT_SECRET   the signing secret of the call tokens;  MODEL_ID, MODEL_REVISION, WHISPER_LANGUAGE as in docs/worker_stt/handler.py;  PORT, RT_MAX_GLOBAL
+  RT_BIND (default 127.0.0.1), RT_TLS_CERT, RT_TLS_KEY: the server terminates TLS itself and refuses a non-loopback bind without a certificate
 
 The request carries `lang` (hi|en|auto) and an optional `prompt` (<= 200 characters, UNVERIFIED with this model: see docs/worker_stt/README.md); neither is ever logged.
 Rolling-window decoding (Stage 3 STT gate) will stream `partial` messages from here; until that gate has passed only `final` is sent.
@@ -14,7 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import Limits, serve_connection              # noqa: E402
+from common import Limits, serve_connection, serve_forever   # noqa: E402
 
 
 class WhisperEngine:
@@ -47,7 +48,6 @@ class WhisperEngine:
 
 
 async def main() -> None:
-    import websockets
     secret = os.environ["RT_SECRET"].encode()
     limits = Limits(max_global=int(os.environ.get("RT_MAX_GLOBAL", "2")))
     sem = asyncio.Semaphore(limits.max_global)
@@ -56,8 +56,7 @@ async def main() -> None:
     async def handler(ws):
         await serve_connection(ws, service="stt", engine=engine, secret=secret, limits=limits, global_sem=sem)
 
-    async with websockets.serve(handler, "0.0.0.0", int(os.environ.get("PORT", "8000")), max_size=2 ** 22, ping_interval=None):
-        await asyncio.Future()
+    await serve_forever(handler)                                  # TLS required on any non-loopback bind (common.check_bind)
 
 
 if __name__ == "__main__":

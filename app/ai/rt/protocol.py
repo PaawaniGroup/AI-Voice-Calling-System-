@@ -12,13 +12,15 @@ client -> server                                         server -> client
   end      {seq}
   cancel   {seq}                                           cancelled {seq}       (the work is stopped; a closed socket stops it too)
                                                            error {seq?, code}
-The token is `call.exp.sig` with sig = HMAC-SHA256(secret, "call.exp"), short-lived, bound to the call id.
+The token is `call.exp.nonce.sig` with sig = HMAC-SHA256(secret, "call.exp.nonce"), short-lived, bound to the call id, single-use (the server keeps a ReplayCache).
+Transport security: `wss://` (certificate verified or pinned) or a loopback-only `ws://` behind a private tunnel; see check_url and docs/realtime/STAGE2_TRANSPORT.md.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
+import secrets
 import struct
 import time
 
@@ -43,16 +45,35 @@ def sign(secret: bytes, payload: str) -> str:
 
 
 def make_token(secret: bytes, call_id: str, ttl_s: float = 120.0, now: float | None = None) -> str:
+    """`call.exp.nonce.sig`: bound to the call id, short-lived, and single-use (the server remembers the nonce until `exp`)."""
     exp = int((time.time() if now is None else now) + ttl_s)
-    payload = f"{call_id}.{exp}"
+    payload = f"{call_id}.{exp}.{secrets.token_hex(8)}"
     return f"{payload}.{sign(secret, payload)}"
 
 
-def verify_token(secret: bytes, token: str, call_id: str, now: float | None = None) -> str | None:
-    """None = valid; otherwise the reason code (never the token)."""
+class ReplayCache:
+    """Nonces already used, kept until their token would have expired anyway; bounded, so a flood of valid tokens cannot grow it without limit."""
+
+    def __init__(self, max_entries: int = 10000):
+        self.max_entries, self._seen = max_entries, {}
+
+    def first_use(self, nonce: str, exp: int, now: float) -> bool:
+        if len(self._seen) >= self.max_entries // 2:
+            self._seen = {n: e for n, e in self._seen.items() if e >= now}
+        if nonce in self._seen:
+            return False
+        if len(self._seen) >= self.max_entries:                          # full of live tokens: refuse rather than forget one (a replay would then pass)
+            return False
+        self._seen[nonce] = exp
+        return True
+
+
+def verify_token(secret: bytes, token: str, call_id: str, now: float | None = None, replay: "ReplayCache | None" = None) -> str | None:
+    """None = valid; otherwise the reason code (never the token). With a `replay` cache a token works once."""
     try:
         payload, sig = token.rsplit(".", 1)
-        call, exp = payload.rsplit(".", 1)
+        rest, nonce = payload.rsplit(".", 1)
+        call, exp = rest.rsplit(".", 1)
         exp_i = int(exp)
     except (ValueError, AttributeError):
         return "malformed_token"
@@ -60,9 +81,30 @@ def verify_token(secret: bytes, token: str, call_id: str, now: float | None = No
         return "bad_signature"
     if call != call_id:
         return "call_mismatch"
-    if (time.time() if now is None else now) > exp_i:
+    t = time.time() if now is None else now
+    if t > exp_i:
         return "expired_token"
+    if replay is not None and not replay.first_use(nonce, exp_i, t):
+        return "replayed_token"
     return None
+
+
+def check_url(url: str, unsafe_allow_plain: bool = False) -> str | None:
+    """None = acceptable; else a reason. `wss://` is always acceptable (the certificate is verified or pinned by the connector). Plain `ws://` only to a LOOPBACK host
+    (a local forward of a private tunnel), or when the caller passes `unsafe_allow_plain=True` in code: never from tenant config, never from an environment default."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(url)
+        host = (u.hostname or "").lower()
+    except ValueError:
+        return "bad_url"
+    if u.scheme == "wss" and host:
+        return None
+    if u.scheme == "ws" and host:
+        if host == "localhost" or host == "::1" or host.startswith("127."):
+            return None
+        return None if unsafe_allow_plain else "plain_ws_to_non_loopback"
+    return "bad_url"
 
 
 def dumps(msg: dict) -> str:

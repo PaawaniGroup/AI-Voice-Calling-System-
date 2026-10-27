@@ -1,8 +1,9 @@
 """Voice server: a standing WebSocket in front of the Chatterbox model on an ALWAYS-ON host (a Pod or a RunPod load-balancing endpoint). NOT built into any live image.
 
-  python tts_server.py            serves ws://0.0.0.0:$PORT/ws (the TLS and the public name come from the host: a Pod TCP port or the load-balancing endpoint)
+  python tts_server.py            serves wss://$RT_BIND:$PORT with the certificate RT_TLS_CERT / RT_TLS_KEY. A raw Pod TCP port has NO TLS of its own: the server terminates TLS itself
+                                  and refuses to start on a non-loopback address without a certificate (plain only on 127.0.0.1 behind a private tunnel)
   RT_SECRET   the signing secret of the call tokens (an environment variable of the server; never logged)
-  PORT, PORT_HEALTH, RT_MAX_GLOBAL
+  RT_BIND (default 127.0.0.1), PORT, RT_TLS_CERT, RT_TLS_KEY, RT_MAX_GLOBAL
 
 The model: `ChatterboxEngine.synth_stream` is the integration point of the chunked-synthesis spike (tools/phase3/chunked_tts_spike.py: a generator version of T3 plus
 windowed S3Gen rendering, first audio chunk before the whole utterance exists). UNVERIFIED until the Stage 3 voice gate has passed: until then `synth_stream` renders the
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import Limits, serve_connection              # noqa: E402
+from common import Limits, serve_connection, serve_forever   # noqa: E402
 
 
 class ChatterboxEngine:
@@ -53,7 +54,6 @@ class ChatterboxEngine:
 
 
 async def main() -> None:
-    import websockets
     secret = os.environ["RT_SECRET"].encode()
     limits = Limits(max_global=int(os.environ.get("RT_MAX_GLOBAL", "2")))
     sem = asyncio.Semaphore(limits.max_global)
@@ -62,8 +62,7 @@ async def main() -> None:
     async def handler(ws):
         await serve_connection(ws, service="tts", engine=engine, secret=secret, limits=limits, global_sem=sem)
 
-    async with websockets.serve(handler, "0.0.0.0", int(os.environ.get("PORT", "8000")), max_size=2 ** 22, ping_interval=None):
-        await asyncio.Future()
+    await serve_forever(handler)                                  # TLS required on any non-loopback bind (common.check_bind)
 
 
 if __name__ == "__main__":

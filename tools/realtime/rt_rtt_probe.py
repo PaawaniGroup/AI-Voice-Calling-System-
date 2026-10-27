@@ -82,7 +82,7 @@ async def run_selftest(n: int) -> dict:
         a, b = make_pair()
         asyncio.ensure_future(W.serve_connection(b, service="tts", engine=NoEngine(), secret=secret))
         return a
-    return evidence("SIMULATED", await probe(connector, "ws://selftest", secret, n, 0.0), "selftest")
+    return evidence("SIMULATED", await probe(connector, "ws://127.0.0.1/selftest", secret, n, 0.0), "selftest")
 
 
 def main(argv=None) -> int:
@@ -95,6 +95,7 @@ def main(argv=None) -> int:
     ap.add_argument("--declared-from", choices=("pc", "cloud"), default="")
     ap.add_argument("--approved", default="")
     ap.add_argument("--evidence", default="")
+    ap.add_argument("--pin-sha256", default="", help="hex SHA-256 of the server's certificate (a self-signed certificate on a Pod's TCP port); without it the certificate chain is verified")
     a = ap.parse_args(argv)
     if a.selftest:
         ev = asyncio.run(run_selftest(min(a.n, 100)))
@@ -105,12 +106,15 @@ def main(argv=None) -> int:
         if not a.url.startswith(("wss://", "ws://")) or not a.declared_from:
             print("refused: --url wss://... and --declared-from pc|cloud are required")
             return 2
+        if P.check_url(a.url):
+            print("refused: plain ws:// is accepted only for a loopback address (use wss:// with --pin-sha256, or a private tunnel forwarded to 127.0.0.1)")
+            return 2
         secret = os.environ.get(a.secret_env, "").strip().encode()
         if not secret:
             print("refused: the secret environment variable is empty")
             return 2
-        from app.ai.rt.connection import websockets_connector
-        ev = evidence("MEASURED", asyncio.run(probe(websockets_connector, a.url, secret, a.n, a.interval_ms / 1000.0)), a.declared_from)
+        from app.ai.rt.connection import make_websockets_connector
+        ev = evidence("MEASURED", asyncio.run(probe(make_websockets_connector(a.pin_sha256 or None), a.url, secret, a.n, a.interval_ms / 1000.0)), a.declared_from)
     if a.evidence:
         Path(a.evidence).write_text(json.dumps(ev, indent=1), encoding="utf-8")
     print(json.dumps({"tag": ev["tag"], "measured_from": ev["scenario"]["measured_from"], "summary": ev["summary"]}))

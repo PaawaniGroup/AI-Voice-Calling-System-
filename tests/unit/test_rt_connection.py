@@ -56,21 +56,58 @@ class FakeSTT:
         return {"text": self.text, "language": lang or "auto"}
 
 
-def connector_for(engine, service="tts", secret=SECRET, limits=None, sem=None):
-    servers = []
+class ServerSide:
+    """The server's end of an in-memory socket, recording the `cancel` messages it RECEIVES (a server-side counter: what reached the server, not what the client claims to have sent).
+    `drop_cancel` (False; the mutation check sets it) makes the server ignore cancel messages, as a broken server would."""
+    drop_cancel = False
+
+    def __init__(self, ws):
+        self.ws, self.cancels, self.hello_tokens = ws, [], []
+
+    async def send(self, data):
+        await self.ws.send(data)
+
+    async def recv(self):
+        while True:
+            m = await self.ws.recv()
+            if isinstance(m, str) and '"type":"hello"' in m:
+                self.hello_tokens.append(P.parse(m).get("token"))             # kept in memory for the single-use check; never printed
+            if isinstance(m, str) and '"type":"cancel"' in m:
+                self.cancels.append(P.parse(m).get("seq"))
+                if ServerSide.drop_cancel:
+                    continue
+            return m
+
+    async def close(self):
+        await self.ws.close()
+
+
+def connector_for(engine, service="tts", secret=SECRET, limits=None, sem=None, replay=None):
+    servers, sides = [], []
 
     async def connector(url):
         a, b = make_pair()
-        servers.append(asyncio.ensure_future(W.serve_connection(b, service=service, engine=engine, secret=secret, limits=limits, global_sem=sem)))
+        side = ServerSide(b)
+        sides.append(side)
+        servers.append(asyncio.ensure_future(W.serve_connection(side, service=service, engine=engine, secret=secret, limits=limits, global_sem=sem, replay=replay)))
         return a
-    connector.servers = servers
+    connector.servers, connector.sides = servers, sides
     return connector
+
+
+def assert_cancelled_by_message(conn, eng, connector, seq):
+    """The cancel went through the FAST path, inside the grace period: the server received the cancel for THAT request id, acknowledged it, its engine was closed (not finished),
+    no abort was needed, and the socket is still alive for the next request. (Closing the socket would also stop the engine, but only after `cancel_grace_s`: that is the fallback.)"""
+    assert connector.sides[0].cancels == [seq]
+    assert eng.closed == 1 and eng.finished == 0
+    assert conn.counters["cancel_aborts"] == 0 and conn.counters["cancels"] == 1
+    assert conn._ws is not None and not conn._dead and not conn._ws.closed
 
 
 def conn_for(connector, service="tts", call="call-1", secret=SECRET, **cfg):
     base = dict(hb_interval_s=5.0, hb_timeout_s=12.0, cancel_grace_s=0.3, request_timeout_s=3.0, hello_timeout_s=1.0, connect_timeout_s=1.0)
     base.update(cfg)
-    return PersistentConnection(service, "ws://test/ws", call, lambda: secret, connector, RtConfig(**base))
+    return PersistentConnection(service, "ws://127.0.0.1/ws", call, lambda: secret, connector, RtConfig(**base))
 
 
 async def collect(conn, msg, **kw):
@@ -106,7 +143,7 @@ async def test_no_secret_at_all_is_an_auth_error_before_any_connection():
 
     async def connector(url):
         called.append(url)
-    conn = PersistentConnection("tts", "ws://x", "c", lambda: None, connector, RtConfig())
+    conn = PersistentConnection("tts", "ws://127.0.0.1/x", "c", lambda: None, connector, RtConfig())
     with pytest.raises(RtError) as e:
         await conn.ensure_ready()
     assert e.value.kind == "auth" and called == []
@@ -122,7 +159,7 @@ async def test_a_connection_that_cannot_be_made_is_retried_with_backoff_then_fai
 
     async def fake_sleep(s):
         slept.append(s)
-    conn = PersistentConnection("tts", "ws://x", "c", lambda: SECRET, refusing, RtConfig(max_connect_attempts=3), sleep=fake_sleep)
+    conn = PersistentConnection("tts", "ws://127.0.0.1/x", "c", lambda: SECRET, refusing, RtConfig(max_connect_attempts=3), sleep=fake_sleep)
     with pytest.raises(RtError) as e:
         await conn.ensure_ready()
     assert e.value.kind == "connect" and len(attempts) == 3 and len(slept) == 2 and slept[1] > slept[0] * 1.2          # exponential, jittered
@@ -130,31 +167,36 @@ async def test_a_connection_that_cannot_be_made_is_retried_with_backoff_then_fai
 
 async def test_leaving_a_request_early_cancels_it_and_the_engine_is_really_stopped():
     eng = FakeTTS(chunks=50, size=3200, delay=0.01)
-    conn = conn_for(connector_for(eng))
+    cn = connector_for(eng)
+    conn = conn_for(cn, cancel_grace_s=0.5)
     agen = conn.request(SYNTH)
     seen = []
     async for kind, d in agen:
         seen.append(kind)
         if kind == "frame":
             break
+    seq = conn._seq
     await agen.aclose()                                              # the consumer walks away: the client sends cancel and waits for the acknowledgement
-    await asyncio.sleep(0.05)
-    assert eng.started == 1 and eng.finished == 0 and eng.closed == 1       # the generator was CLOSED: that is what stops the GPU work
-    assert conn.counters["cancels"] == 1 and conn.counters["cancel_aborts"] == 0
+    await asyncio.sleep(0.05)                                        # well inside cancel_grace_s (0.5 s)
+    assert eng.started == 1
+    assert_cancelled_by_message(conn, eng, cn, seq)                  # the generator was CLOSED by the cancel message: that is what stops the GPU work
     assert len(await collect(conn, SYNTH)) > 2                       # the same connection serves the next request
     await conn.close()
 
 
 async def test_cancelling_the_awaiting_task_cancels_the_request_on_the_server():
+    """The call-level cancel (barge-in: the caller speaks over the reply and the awaiting task is cancelled)."""
     eng = FakeTTS(chunks=100, size=1600, delay=0.01)
-    conn = conn_for(connector_for(eng))
+    cn = connector_for(eng)
+    conn = conn_for(cn, cancel_grace_s=0.5)
     task = asyncio.ensure_future(collect(conn, SYNTH))
     await asyncio.sleep(0.08)
+    seq = conn._seq
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    await asyncio.sleep(0.1)
-    assert eng.closed == 1 and eng.finished == 0
+    await asyncio.sleep(0.15)                                        # less than cancel_grace_s: only the cancel MESSAGE can have stopped the engine by now
+    assert_cancelled_by_message(conn, eng, cn, seq)
     await conn.close()
 
 
@@ -233,17 +275,19 @@ async def test_closing_the_socket_stops_the_engine_on_the_server_side():
 
 async def test_a_slow_consumer_fails_that_request_as_stalled_instead_of_blocking_the_socket():
     eng = FakeTTS(chunks=300, size=3200, delay=0.01)                     # still producing (about 3 s of work) when the stall is detected
-    conn = conn_for(connector_for(eng), queue_max=2, stall_s=0.1)
+    cn = connector_for(eng)
+    conn = conn_for(cn, queue_max=2, stall_s=0.1, cancel_grace_s=0.5)
     agen = conn.request(SYNTH)
     first = await agen.__anext__()
     assert first[0] == "audio_start"
-    await asyncio.sleep(0.4)                                         # the consumer does not read: the bounded queue fills and the reader gives up on it
+    seq = conn._seq
+    await asyncio.sleep(0.2)                                         # the consumer does not read: the bounded queue fills and the reader gives up on it (stall at about 0.13 s)
     with pytest.raises(RtError) as e:
         async for _ in agen:
             pass
     assert e.value.kind == "stalled"
-    await asyncio.sleep(0.2)
-    assert eng.closed == 1 and eng.finished == 0 and conn.counters["cancels"] == 1      # the server was told to stop producing for a consumer that is not there
+    await asyncio.sleep(0.15)                                        # about 0.35 s after the start, less than stall + cancel_grace_s: only the cancel MESSAGE can have stopped the engine
+    assert_cancelled_by_message(conn, eng, cn, seq)                  # the server was told to stop producing for a consumer that is not there
     await conn.close()
 
 
@@ -402,7 +446,7 @@ async def test_warmup_is_answered_without_model_work():
 # ---- a Pod reset changes its external TCP port (and, on Community Cloud, its IP): the client must find it again, not retry a dead address
 def _reset_world():
     """A mock of the Pod's address book: only `live` accepts connections; every other address refuses, as the old port does after a reset."""
-    world = {"live": "ws://pod.example:13007/ws", "dialled": []}
+    world = {"live": "wss://pod.example:13007/ws", "dialled": []}
     good = connector_for(FakeTTS(chunks=2, size=1600))
 
     async def connector(url):
@@ -422,11 +466,11 @@ async def test_after_a_pod_reset_the_client_rediscovers_the_new_address_and_reco
                                 sleep=lambda s: asyncio.sleep(0), resolver=resolver)
     assert len(await collect(conn, SYNTH)) > 2 and conn.counters["rediscovered"] == 0
     await conn._ws.close()                                           # the Pod resets: the connection drops ...
-    world["live"] = "ws://pod.example:13999/ws"                      # ... and comes back on a different external port
+    world["live"] = "wss://pod.example:13999/ws"                      # ... and comes back on a different external port
     await asyncio.sleep(0.05)
     assert len(await collect(conn, SYNTH)) > 2
-    assert conn.url == "ws://pod.example:13999/ws" and conn.counters["rediscovered"] == 1 and conn.counters["connects"] == 2
-    assert world["dialled"][-1] == "ws://pod.example:13999/ws"
+    assert conn.url == "wss://pod.example:13999/ws" and conn.counters["rediscovered"] == 1 and conn.counters["connects"] == 2
+    assert world["dialled"][-1] == "wss://pod.example:13999/ws"
     await conn.close()
 
 
@@ -435,11 +479,11 @@ async def test_without_a_resolver_the_old_address_is_retried_and_the_request_fal
     conn = PersistentConnection("tts", world["live"], "call-1", lambda: SECRET, connector, RtConfig(max_connect_attempts=2), sleep=lambda s: asyncio.sleep(0))
     await collect(conn, SYNTH)
     await conn._ws.close()
-    world["live"] = "ws://pod.example:13999/ws"
+    world["live"] = "wss://pod.example:13999/ws"
     await asyncio.sleep(0.05)
     with pytest.raises(RtError) as e:
         await collect(conn, SYNTH)
-    assert e.value.kind == "connect" and conn.url == "ws://pod.example:13007/ws"
+    assert e.value.kind == "connect" and conn.url == "wss://pod.example:13007/ws"
     await conn.close()
 
 
@@ -455,16 +499,128 @@ async def test_a_failing_or_nonsense_resolver_keeps_the_old_address_and_never_ra
         await collect(conn, SYNTH)
         await conn._ws.close()
         await asyncio.sleep(0.05)
-        assert len(await collect(conn, SYNTH)) > 2 and conn.url == "ws://pod.example:13007/ws" and conn.counters["rediscovered"] == 0
+        assert len(await collect(conn, SYNTH)) > 2 and conn.url == "wss://pod.example:13007/ws" and conn.counters["rediscovered"] == 0
         await conn.close()
 
 
 async def test_the_address_is_also_rediscovered_between_attempts_of_one_failing_connect():
     world, connector = _reset_world()
-    world["live"] = "ws://pod.example:13999/ws"                      # the configured address was already stale at the first connect
+    world["live"] = "wss://pod.example:13999/ws"                      # the configured address was already stale at the first connect
 
     async def resolver():
         return world["live"]
-    conn = PersistentConnection("tts", "ws://pod.example:13007/ws", "c", lambda: SECRET, connector, RtConfig(max_connect_attempts=2), sleep=lambda s: asyncio.sleep(0), resolver=resolver)
+    conn = PersistentConnection("tts", "wss://pod.example:13007/ws", "c", lambda: SECRET, connector, RtConfig(max_connect_attempts=2), sleep=lambda s: asyncio.sleep(0), resolver=resolver)
     assert len(await collect(conn, SYNTH)) > 2 and conn.counters["connect_failures"] == 1 and conn.counters["rediscovered"] == 1
+    await conn.close()
+
+# ---- security: what a stranger who reaches the port (or the wire) can and cannot do
+async def _stranger(engine, first_message, secret=SECRET):
+    """Connect to the real worker protocol server WITHOUT the client class, send `first_message` (or nothing), and return (what the server sent back, whether it closed)."""
+    a, b = make_pair()
+    task = asyncio.ensure_future(W.serve_connection(b, service="tts", engine=engine, secret=secret, limits=W.Limits(hello_timeout_s=0.2)))
+    if first_message is not None:
+        await a.send(first_message if isinstance(first_message, (str, bytes)) else P.dumps(first_message))
+    out = []
+    try:
+        while True:
+            out.append(P.parse(await asyncio.wait_for(a.recv(), 1.0)))
+    except (EOFError, asyncio.TimeoutError):
+        pass
+    await a.close()                                                      # a genuine session stays open until the client leaves; a refused one is already closed by the server
+    stats = await asyncio.wait_for(task, 1.0)
+    return out, stats
+
+
+async def test_plain_ws_to_a_public_address_is_refused_before_any_byte_is_sent_unless_the_code_says_unsafe():
+    dialled = []
+
+    async def connector(url):
+        dialled.append(url)
+        raise ConnectionRefusedError()
+    for url in ("ws://203.0.113.7:13007/ws", "ws://host.example/ws"):
+        with pytest.raises(RtError) as e:
+            PersistentConnection("tts", url, "c", lambda: SECRET, connector, RtConfig())
+        assert e.value.kind == "connect" and e.value.detail == "plain_ws_to_non_loopback"
+    PersistentConnection("tts", "wss://host.example/ws", "c", lambda: SECRET, connector, RtConfig())               # TLS: accepted
+    PersistentConnection("tts", "ws://127.0.0.1:9/ws", "c", lambda: SECRET, connector, RtConfig())                # loopback (a private tunnel's local end): accepted
+    PersistentConnection("tts", "ws://203.0.113.7/ws", "c", lambda: SECRET, connector, RtConfig(), unsafe_allow_plain_ws=True)    # an explicit argument in code only
+    assert dialled == []
+    assert "unsafe" not in RtConfig.__dataclass_fields__ and "plain" not in RtConfig.__dataclass_fields__        # nothing in the (config-derived) RtConfig can switch it on
+
+
+async def test_a_resolver_cannot_move_the_client_to_a_plain_public_address():
+    async def resolver():
+        return "ws://203.0.113.7:13999/ws"
+    conn = PersistentConnection("tts", "wss://pod.example:13007/ws", "c", lambda: SECRET, connector_for(FakeTTS()), RtConfig(), resolver=resolver)
+    await conn._rediscover()
+    assert conn.url == "wss://pod.example:13007/ws" and conn.counters["rediscovered"] == 0
+
+
+async def test_a_stranger_who_sends_requests_without_a_hello_gets_an_error_and_is_dropped_and_no_engine_runs():
+    eng = FakeTTS()
+    for first in ({"type": "synth", "seq": 1, "text": "w1 w2 w3,", "voice": "v", "format": "ulaw8k"}, {"type": "ping"}, {"type": "warmup", "seq": 1}):
+        out, stats = await _stranger(eng, first)
+        assert [m["type"] for m in out] == ["error"] and out[0]["code"] == "bad_hello" and stats["auth_failures"] == 1
+    assert eng.started == 0
+
+
+async def test_a_stranger_with_garbage_binary_oversize_or_no_message_at_all_gets_nothing_and_no_engine_runs():
+    eng = FakeTTS()
+    for first in ("not json", b"\x00\x00\x00\x01xx", "x" * 5000, None):
+        out, stats = await _stranger(eng, first)
+        assert all(m["type"] == "error" for m in out) and stats["auth_failures"] == 1           # at most one error, then the socket is closed (the 0.2 s hello timeout for silence)
+    assert eng.started == 0
+
+
+async def test_a_hello_without_a_valid_token_is_rejected_whatever_is_wrong_with_it():
+    eng = FakeTTS()
+    good = P.make_token(SECRET, "call-1")
+    other_call = P.make_token(SECRET, "call-2")
+    expired = P.make_token(SECRET, "call-1", ttl_s=-5)
+    wrong_secret = P.make_token(b"another-secret", "call-1")
+    for token, code in ((good[:-1] + ("0" if good[-1] != "0" else "1"), "bad_signature"), (other_call, "call_mismatch"), (expired, "expired_token"), (wrong_secret, "bad_signature"), ("", "malformed_token"), ("a.b", "malformed_token")):
+        out, stats = await _stranger(eng, {"type": "hello", "v": P.VERSION, "service": "tts", "call": "call-1", "token": token})
+        assert [m["type"] for m in out] == ["error"] and out[0]["code"] == code and stats["auth_failures"] == 1
+    assert eng.started == 0
+    out, stats = await _stranger(eng, {"type": "hello", "v": P.VERSION, "service": "tts", "call": "call-1", "token": good})        # the genuine one is still accepted
+    assert out[0]["type"] == "ready" and stats["auth_failures"] == 0
+
+
+async def test_a_token_captured_on_the_wire_cannot_be_replayed_on_a_new_connection():
+    eng = FakeTTS()
+    replay = P.ReplayCache()
+    tok = P.make_token(SECRET, "call-1")
+    hello = {"type": "hello", "v": P.VERSION, "service": "tts", "call": "call-1", "token": tok}
+    results = []
+    for _ in range(2):
+        a, b = make_pair()
+        task = asyncio.ensure_future(W.serve_connection(b, service="tts", engine=eng, secret=SECRET, limits=W.Limits(hello_timeout_s=0.5), replay=replay))
+        await a.send(P.dumps(hello))
+        results.append(P.parse(await asyncio.wait_for(a.recv(), 1.0)))
+        await a.close()
+        await asyncio.wait_for(task, 1.0)
+    assert results[0]["type"] == "ready" and results[1]["type"] == "error" and results[1]["code"] == "replayed_token"
+
+
+async def test_the_server_refuses_to_listen_on_a_public_address_without_tls():
+    with pytest.raises(SystemExit):
+        W.check_bind("0.0.0.0", None)
+    with pytest.raises(SystemExit):
+        W.check_bind("203.0.113.7", None)
+    W.check_bind("127.0.0.1", None)                                      # behind a private tunnel
+    W.check_bind("0.0.0.0", object())                                    # with a TLS context
+    W.check_bind("0.0.0.0", None, unsafe_plain=True)                     # only by an explicit command-line flag (serve_forever reads "--unsafe-plain" from argv, never the environment)
+
+async def test_a_reconnect_after_a_dropped_connection_succeeds_with_a_fresh_single_use_token():
+    """The server keeps a replay cache (single-use tokens): a client that reconnects must send a NEW token, not the one the dropped connection used."""
+    replay = P.ReplayCache()
+    cn = connector_for(FakeTTS(chunks=2, size=1600), replay=replay)
+    conn = conn_for(cn)
+    assert len(await collect(conn, SYNTH)) > 2
+    await conn._ws.close()                                           # the network drops
+    await asyncio.sleep(0.05)
+    assert len(await collect(conn, SYNTH)) > 2 and conn.counters["connects"] == 2
+    tokens = [t for side in cn.sides for t in side.hello_tokens]
+    assert len(tokens) == 2 and tokens[0] != tokens[1]               # two connections, two different tokens, both accepted by a server that refuses replays
+    assert P.verify_token(SECRET, tokens[0], "call-1", replay=replay) == "replayed_token"      # and the first one cannot be used again
     await conn.close()

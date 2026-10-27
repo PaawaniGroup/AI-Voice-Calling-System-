@@ -39,10 +39,33 @@ class WsLike(Protocol):
 Connector = Callable[[str], Awaitable[WsLike]]
 
 
+def make_websockets_connector(pin_sha256: str | None = None) -> Connector:
+    """The real connector (websockets >= 13, `websockets.asyncio.client`). Its own ping is off: the heartbeats of this module are the liveness check.
+    wss:// : the certificate chain and host name are VERIFIED, unless `pin_sha256` (hex SHA-256 of the server certificate, DER) is given: then the certificate must match the pin
+    (the way to trust a self-signed certificate on a Pod's raw TCP port); a mismatch closes the socket and is an `auth` error. Plain ws:// is only reachable for loopback (see PersistentConnection)."""
+    pin = (pin_sha256 or "").lower() or None
+
+    async def connect_ws(url: str) -> WsLike:
+        import hashlib
+        import ssl
+        from websockets.asyncio.client import connect
+        kw = {}
+        if url.startswith("wss://") and pin:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE        # trust is the pin, checked below; nothing else is trusted
+            kw["ssl"] = ctx
+        ws = await connect(url, open_timeout=None, ping_interval=None, max_size=2 ** 22, **kw)
+        if url.startswith("wss://") and pin:
+            der = ws.transport.get_extra_info("ssl_object").getpeercert(binary_form=True)
+            if not der or hashlib.sha256(der).hexdigest() != pin:
+                await ws.close()
+                raise RtError("auth", "pin_mismatch")
+        return ws
+    return connect_ws
+
+
 async def websockets_connector(url: str) -> WsLike:
-    """The real connector (websockets >= 13, `websockets.asyncio.client`). Its own ping is off: the heartbeats of this module are the liveness check."""
-    from websockets.asyncio.client import connect
-    return await connect(url, open_timeout=None, ping_interval=None, max_size=2 ** 22)
+    return await make_websockets_connector()(url)
 
 
 @dataclass
@@ -66,7 +89,11 @@ class _Req:
 
 class PersistentConnection:
     def __init__(self, service: str, url: str, call_id: str, secret_provider: Callable[[], "bytes | None"], connector: Connector, cfg: RtConfig | None = None, *,
-                 clock=time.monotonic, sleep=asyncio.sleep, backoff: Backoff | None = None, resolver=None):
+                 clock=time.monotonic, sleep=asyncio.sleep, backoff: Backoff | None = None, resolver=None, unsafe_allow_plain_ws: bool = False):
+        bad = P.check_url(url, unsafe_allow_plain_ws)
+        if bad:
+            raise RtError("connect", bad)                                    # plain ws:// to a non-loopback address is refused before any byte is sent
+        self.unsafe_allow_plain_ws = unsafe_allow_plain_ws                    # a code argument: NOT settable from tenant config, NOT an environment default
         self.service, self.url, self.call_id, self.secret_provider, self.connector = service, url, call_id, secret_provider, connector
         self.resolver = resolver              # async () -> current ws(s):// URL or None: a Pod's external TCP port (and, on Community Cloud, its IP) changes when the Pod resets
         self.cfg, self.clock, self._sleep = cfg or RtConfig(), clock, sleep
@@ -146,7 +173,7 @@ class PersistentConnection:
             new = await asyncio.wait_for(self.resolver(), self.cfg.connect_timeout_s)
         except Exception:
             return
-        if isinstance(new, str) and new.startswith(("wss://", "ws://")) and new != self.url:
+        if isinstance(new, str) and P.check_url(new, self.unsafe_allow_plain_ws) is None and new != self.url:
             self.url = new
             self.counters["rediscovered"] += 1
 

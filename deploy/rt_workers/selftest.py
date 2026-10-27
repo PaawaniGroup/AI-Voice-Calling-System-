@@ -55,7 +55,7 @@ def conn(engine, secret=SECRET, sem=None, **kw):
         a, b = make_pair()
         asyncio.ensure_future(W.serve_connection(b, service="tts", engine=engine, secret=SECRET, global_sem=sem))
         return a
-    return PersistentConnection("tts", "ws://selftest", "call-1", lambda: secret, connector, RtConfig(request_timeout_s=3.0, cancel_grace_s=0.3, **kw))
+    return PersistentConnection("tts", "ws://127.0.0.1/selftest", "call-1", lambda: secret, connector, RtConfig(request_timeout_s=3.0, cancel_grace_s=0.3, **kw))
 
 
 SYNTH = {"type": "synth", "text": "w1 w2 w3,", "voice": "v", "format": "ulaw8k", "lang": "hi"}
