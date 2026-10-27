@@ -49,6 +49,9 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
     if not heard:
         res.error = "no_speech_recognised"
         return res
+    if getattr(conv, "glossary_correction", False):                     # streaming path: after the STT text, before the mode, the retrieval and the Brain
+        from app.ai.glossary_correction import correct_glossary
+        heard = correct_glossary(heard)
     res.heard = heard
     lang = conv.language
     if lang == "auto" and stt.get("language"):

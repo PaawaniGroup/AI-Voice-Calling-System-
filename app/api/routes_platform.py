@@ -373,6 +373,8 @@ class AiConfigIn(Strict):
     stream_prefetch_depth: int | None = Field(None, ge=1, le=4)
     stream_prebuffer_ms: int | None = Field(None, ge=0, le=400)
     runpod_poll_cap_s: float | None = Field(None, ge=0.03, le=1.0)
+    glossary_correction: bool | None = None  # phonetic normalisation of the caller's text before the Brain (quality-work); default OFF per tenant
+    strict_grounding: bool | None = None    # strict grounding rules appended to the system prompt (quality-work); default OFF per tenant
     stream_ramp: bool | None = None          # clause-size ramp (short first clause, Brain opening rule); needs streaming_pipeline; default OFF per tenant
     tts_adaptive_poll: bool | None = None    # voice jobs: overlapping status polls from the predicted end (saves at most ~0.15 s per job, ESTIMATE); default OFF per tenant
     stt_raw_pcm: bool | None = None         # send the caller's audio to the STT worker as ONE raw PCM16 field + sample rate (needs a worker that reads audio_pcm16_b64); default OFF per tenant

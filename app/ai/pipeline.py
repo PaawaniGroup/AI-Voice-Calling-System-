@@ -27,6 +27,24 @@ OLD_SYSTEM_PROMPT = (
 )
 SYSTEM_PROMPT = OLD_SYSTEM_PROMPT
 
+# Tenant flag `strict_grounding` (default OFF; ported from quality-work 9cdb32b, same text). With the flag on, the base sentence that offers a callback is replaced
+# (the rules below forbid promising one: the strict rules win) and the rules are appended. Prompt-only: no FAQ lookup, no other code path. The unconditional
+# rewording of the base prompt that quality-work also made is NOT ported: with the flag off the prompts are exactly as before.
+_CALLBACK_BASE = "say you will check and offer a counsellor callback."
+_CALLBACK_STRICT = "say: 'सही जानकारी हमारे काउंसलर से पक्की करनी होगी'."
+STRICT_GROUNDING_RULES = (
+    "\n\nSTRICT GROUNDING & NO-PROMISE RULES:\n"
+    "- If the caller speaks a term that is unrecognized, ambiguous, or garbled, politely ask them to clarify it.\n"
+    "- NEVER state specific fees, percentage rules, cut-offs, dates, or whether an application is open unless that exact fact is explicitly present in the provided CONTEXT.\n"
+    "- If facts are missing from CONTEXT, say: 'सही जानकारी हमारे काउंसलर से पक्की करनी होगी'.\n"
+    "- NEVER promise a callback, contact, or any action the system cannot take.\n"
+    "- Keep replies short (1-2 sentences) and conversational."
+)
+
+
+def _strict(prompt_text: str) -> str:
+    return prompt_text.replace(_CALLBACK_BASE, _CALLBACK_STRICT) + STRICT_GROUNDING_RULES
+
 # Approach A of the pronunciation task, first version of the rule (kept for comparison/regression)
 SCRIPT_RULE_V1 = (
     " SCRIPT RULE for Hindi and Hinglish replies: write every Hindi word in Devanagari, never in Roman letters. Keep English words, course and college names, "
@@ -50,7 +68,7 @@ SYSTEM_PROMPT_DEVANAGARI = OLD_SYSTEM_PROMPT + SCRIPT_RULE
 SCRIPT_RETRY_TIMEOUT_S = 1.0   # the one "rewrite in Devanagari" retry gets this long; past it the reply is spoken as it is
 
 
-def build_system_prompt(counsellor_gender: str = "masculine", counsellor_name: str = "MME AI counsellor") -> str:
+def build_system_prompt(counsellor_gender: str = "masculine", counsellor_name: str = "MME AI counsellor", strict_grounding: bool = False) -> str:
     """Rewritten system prompt enforcing strict script policy, short conversational speech,
     digits for amounts/dates/numbers, and few-shot examples (including Roman-in -> Devanagari-out)."""
     gender_rule = (
@@ -59,7 +77,7 @@ def build_system_prompt(counsellor_gender: str = "masculine", counsellor_name: s
         else "Use feminine Hindi verb forms for yourself (e.g. 'बताऊँ', 'कर सकती हूँ', 'समझाती हूँ', 'मदद करूँगी')."
     )
 
-    return (
+    prompt_text = (
         f"You are the {counsellor_name} for Make My Education, helping students with courses, colleges, admissions, "
         "eligibility and fees. Use only the provided CONTEXT for facts about fees, eligibility and admissions; if the "
         "context does not contain the answer, say you will check and offer a counsellor callback. Never invent fees or deadlines. "
@@ -107,22 +125,22 @@ def build_system_prompt(counsellor_gender: str = "masculine", counsellor_name: s
         "Caller: Haan\n"
         "Assistant: जी, तो क्या आप B.Tech में admission के लिए documents के बारे में जानना चाहते हैं?"
     )
+    return _strict(prompt_text) if strict_grounding else prompt_text
 
 
 NEW_SYSTEM_PROMPT = build_system_prompt()
 
 
 def system_prompt(devanagari_hindi: bool = False, script_enforcement: bool = False,
-                  counsellor_gender: str = "masculine", counsellor_name: str = "MME AI counsellor") -> str:
+                  counsellor_gender: str = "masculine", counsellor_name: str = "MME AI counsellor", strict_grounding: bool = False) -> str:
     """Selects the prompt based on configuration.
     If script_enforcement is True, returns NEW_SYSTEM_PROMPT.
     If devanagari_hindi is True (legacy Approach A flag), returns SYSTEM_PROMPT_DEVANAGARI.
     Otherwise returns default OLD_SYSTEM_PROMPT."""
     if script_enforcement:
-        return build_system_prompt(counsellor_gender=counsellor_gender, counsellor_name=counsellor_name)
-    if devanagari_hindi:
-        return SYSTEM_PROMPT_DEVANAGARI
-    return OLD_SYSTEM_PROMPT
+        return build_system_prompt(counsellor_gender=counsellor_gender, counsellor_name=counsellor_name, strict_grounding=strict_grounding)
+    base = SYSTEM_PROMPT_DEVANAGARI if devanagari_hindi else OLD_SYSTEM_PROMPT
+    return _strict(base) if strict_grounding else base
 
 
 # Approved business tools. Handlers are registered by the deployment; an unregistered tool call is refused.
@@ -275,8 +293,11 @@ class Conversation:
     def __init__(self, clients: ModelClients | None = None, language: str = "auto", tools: dict | None = None,
                  max_history: int = 12, devanagari_hindi: bool = False,
                  script_enforcement: bool = False, counsellor_gender: str = "masculine",
-                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix", streaming=None, duplex=None):
+                 counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix", streaming=None, duplex=None,
+                 glossary_correction: bool = False, strict_grounding: bool = False):
         self.clients, self.language = clients, language
+        self.glossary_correction = glossary_correction   # tenant flag, default OFF: phonetic normalisation of the caller's text before the Brain (app/ai/glossary_correction.py)
+        self.strict_grounding = strict_grounding         # tenant flag, default OFF: the strict grounding rules are appended to the system prompt
         # Full-duplex input handling (per tenant, flag `full_duplex_input`, default OFF = None): a DuplexConfig used only by the shared serve_loop in
         # app/ai/ws.py (barge-in rule, echo guard, kept speech, end-of-speech hysteresis). With None the old rules run unchanged.
         self.duplex = duplex
@@ -302,7 +323,8 @@ class Conversation:
             devanagari_hindi=devanagari_hindi,
             script_enforcement=script_enforcement and not devanagari_hindi,
             counsellor_gender=counsellor_gender,
-            counsellor_name=counsellor_name
+            counsellor_name=counsellor_name,
+            strict_grounding=strict_grounding
         )}]
         self.max_history = max_history
         self.turns: list[dict] = []
@@ -442,6 +464,9 @@ class Conversation:
             if not heard:
                 yield TurnChunk(error="no_speech_recognised", timings_ms=res_timings, is_first=True, is_last=True)
                 return
+            if getattr(self, "glossary_correction", False):          # legacy path: after the STT text, before the mode, the retrieval and the Brain
+                from app.ai.glossary_correction import correct_glossary
+                heard = correct_glossary(heard)
 
             lang = self.language
             if lang == "auto" and stt.get("language"):

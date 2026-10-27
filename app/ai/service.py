@@ -36,7 +36,9 @@ AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
 
 
-LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
+# Per-tenant booleans, all OFF by default and ALL in the one allowlist used by default_config, get_config and update_config (the dropped key_refs bug was an allowlist):
+# latency work (trace_evidence, stream_ramp, stt_raw_pcm, tts_adaptive_poll) and the quality work ported from quality-work 9cdb32b (glossary_correction, strict_grounding).
+LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll", "glossary_correction", "strict_grounding")
 
 
 @dataclass
@@ -290,6 +292,8 @@ class AiService:
             counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
             devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
+            glossary_correction=bool(cfg.get("glossary_correction")),   # per tenant, default OFF (quality-work)
+            strict_grounding=bool(cfg.get("strict_grounding")),         # per tenant, default OFF (quality-work)
             streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
             duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
