@@ -12,8 +12,8 @@ CASES = {
     "percent": (FILL + " 12 percent discount milega abhi", "12 percent"),
     "devanagari_unit": (FILL + " 10 बजे aana hoga office mein", "10 बजे"),
     # controls that were never split (protected by the first character of the next word or by the complete token):
-    "phone": (FILL + " 98765 43210 par call kijiye abhi", "98765 43210"),
-    "plus_phone": (FILL + " +91 98765 43210 par call kijiye", "+91 98765 43210"),
+    "phone": (FILL + " 00000 00000 par call kijiye abhi", "00000 00000"),
+    "plus_phone": (FILL + " +00 00000 00000 par call kijiye", "+00 00000 00000"),
     "rupee_amount": (FILL + " Rs. 1,25,000 lagenge saal ke liye", "Rs. 1,25,000"),
     "acronym": (FILL + " M.B.A. course ke liye apply karein", "M.B.A. course"),
 }

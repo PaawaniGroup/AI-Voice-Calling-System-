@@ -75,7 +75,7 @@ def test_devanagari_and_mixed_first_clauses(text, first):
 # ------------------------------------------------------------------ protected spans
 @pytest.mark.parametrize("text,first", [
     ("Fees hai Rs. 1,25,000 per year hai aur hostel alag hai", "Fees hai Rs. 1,25,000"),               # the amount stays whole
-    ("Call me at 98765 43210 now please for details", "Call me at 98765 43210"),                         # a phone number stays whole
+    ("Call me at 00000 00000 now please for details", "Call me at 00000 00000"),                         # a phone-shaped number (digits only) stays whole
     ("Apply before 30 June 2025 please and submit the form soon", "Apply before 30 June 2025"),         # a date stays whole
     ("Please apply on 30 June 2025 now and then", "Please apply on 30 June 2025"),
     ("Hum M.B.A. course ke liye aapki help kar sakte hain", "Hum M.B.A. course ke"),                      # a dotted acronym is one word
@@ -87,7 +87,7 @@ def test_a_cut_is_never_inside_an_amount_date_phone_number_or_acronym(text, firs
 TEXTS = [
     "Ji bilkul, aap B.Tech ke baare mein jaanna chahte hain, kaunsa college chahiye aapko abhi tak?",
     "Please apply on 30 June 2025 now and then",
-    "Call me at 98765 43210 now please for details",
+    "Call me at 00000 00000 now please for details",
     "आप इस कोर्स के लिए आवेदन कर सकते हैं और फीस भी पूछ सकते हैं",
     "Fees hai Rs. 1,25,000 per year hai aur hostel alag hai, bilkul theek hai?",
     "Sure जी, आप B.Tech के लिए apply कर सकते हैं।",
