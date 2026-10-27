@@ -214,6 +214,8 @@ class Settings(BaseSettings):
     ai_tts_normalize: bool = F(True, "Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence.")
     ai_trace_evidence_path: str = F("", "File to which each finished turn appends ONE numbers-only JSON line (job timings, counts; never words). Empty = off. Used for supervised latency calls.")
     ai_rt_kill: bool = F(False, "Global kill switch of the persistent real-time transport (app/ai/rt): True sends every service of every tenant back to the queue path at once. Default False (tenants decide).")
+    ai_ack_dir: str = F("", "Directory OUTSIDE the repository with the cached acknowledgement clips (manifest.json + raw 8 kHz mu-law files, see app/ai/streaming/ack.py). "
+                            "Used only by tenants with ai_config.ack_enabled; empty or missing files = the feature is silently unavailable.")
     ai_greeting: str = F("Welcome to MME AI Voice Calling Agent.", "Greeting spoken when an inbound call answers before connecting to AI services.")
     ai_script_enforcement: bool = F(False, "Enforce script policy: Hindi/Hinglish in Devanagari, English in Latin. Default False.")
     ai_counsellor_gender: Literal["masculine", "feminine"] = F("masculine", "Gender for Hindi verb forms in counsellor replies ('masculine' or 'feminine').")

@@ -3,6 +3,7 @@ queue path; no network, no GPU, no RunPod. Covers the fallback, the kill switche
 survives AiService.get_config and is validated on put."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import itertools
 import json
@@ -19,7 +20,7 @@ from app.ai.rt.connection import RtConfig
 from app.ai.service import RT_KEYS, AiService
 from app.core.errors import Unprocessable
 from config.settings import Settings
-from tests.unit.test_rt_connection import FakeSTT, FakeTTS, connector_for
+from tests.unit.test_rt_connection import FakeSTT, FakeTTS, assert_cancelled_by_message, connector_for
 
 _ids = itertools.count(1)
 QUEUE_TTS_BYTES = b"\xff" * 800
@@ -237,8 +238,8 @@ def _svc(doc=None, allowed="rt.example.invalid"):
 async def test_the_defaults_are_off_and_every_new_key_survives_get_config():
     svc, _ = _svc(None)
     cfg = await svc.get_config("t")
-    assert cfg["rt_transport"] == {} and cfg["rt_endpoints"] == {} and cfg["rt_secret_env"] is None
-    doc = {"tenant_id": "t", "rt_transport": {"tts": "persistent"}, "rt_endpoints": {"tts": "wss://rt.example.invalid/ws"}, "rt_secret_env": "MY_RT_SECRET"}
+    assert cfg["rt_transport"] == {} and cfg["rt_endpoints"] == {} and cfg["rt_secret_env"] is None and cfg["rt_pins"] == {}
+    doc = {"tenant_id": "t", "rt_transport": {"tts": "persistent"}, "rt_endpoints": {"tts": "wss://rt.example.invalid/ws"}, "rt_secret_env": "MY_RT_SECRET", "rt_pins": {"tts": "ab" * 32}}
     svc2, _ = _svc(dict(doc))
     cfg2 = await svc2.get_config("t")
     assert all(cfg2[k] == doc[k] for k in RT_KEYS), "a key of the allowlist was dropped between the document and the runtime config"
@@ -279,3 +280,40 @@ def test_the_config_route_model_accepts_the_new_fields_and_rejects_unknown_ones(
     assert ok.rt_transport == {"tts": "persistent"}
     with pytest.raises(ValidationError):
         AiConfigIn(rt_transport_typo={"tts": "persistent"})
+
+
+async def test_barge_in_cancels_the_voice_request_by_message_inside_the_grace_period():
+    """The call-level path through RtModelClients: the caller speaks over the reply, the awaiting synthesize() task is cancelled; the server must RECEIVE the cancel for that request
+    and stop its engine within the grace period (0.2 s here), the socket survives, and the trace job says cancelled."""
+    eng = FakeTTS(chunks=300, size=1600, delay=0.01)
+    cn = connector_for(eng)
+    tr = turn_trace.TurnTrace(t_speech_end=0.0)
+    turn_trace.start(tr)
+    rc = make(connector=cn)
+    task = asyncio.ensure_future(rc.synthesize("w1 w2 w3,", "hi"))
+    await asyncio.sleep(0.08)
+    seq = rc._conns["tts"]._seq
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.1)                                                       # less than cancel_grace_s (0.2 s)
+    assert_cancelled_by_message(rc._conns["tts"], eng, cn, seq)
+    assert tr.jobs[0]["status"] == "cancelled"
+    await rc.aclose()
+
+async def test_plain_ws_to_a_public_address_cannot_be_configured_and_a_certificate_pin_is_validated():
+    svc, _ = _svc({"tenant_id": "t"})
+    for bad in ({"rt_endpoints": {"tts": "ws://rt.example.invalid/ws"}},                       # plain ws:// to a non-loopback host
+                {"rt_pins": {"tts": "not-hex"}}, {"rt_pins": {"tts": "ab" * 31}}, {"rt_pins": {"brain": "ab" * 32}}, {"rt_pins": ["ab" * 32]}):
+        with pytest.raises(Unprocessable):
+            await svc.put_config("t", bad, "op")
+    saved = await svc.put_config("t", {"rt_pins": {"tts": ("AB" * 32)}}, "op")
+    assert saved["rt_pins"] == {"tts": "ab" * 32}
+
+
+async def test_a_plain_ws_endpoint_that_got_into_the_config_anyway_is_refused_by_the_client_and_the_call_uses_the_queue_path():
+    q = QueueSide()
+    rc = make(connector=connector_for(FakeTTS()), queue=q, rt_endpoints={"tts": "ws://public.example.invalid/ws"})
+    pcm, rate = await rc.synthesize("w1 w2 w3,", "hi")
+    assert rate == 8000 and len(pcm) == 2 * len(QUEUE_TTS_BYTES) and q.runs == 1 and rc.rt_counters["rt_fallback"] == 1          # nothing was sent to the plain endpoint
+    await rc.aclose()
