@@ -57,7 +57,8 @@ EXPECTED_AI_FLAGS = {
     "strict_grounding": True,
 }
 # Must NOT be on for the call (absent counts as off). reply_guard has no flag in this tree.
-MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled", "tts_keepalive")
+MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled", "tts_keepalive", "stt_adaptive_poll", "utterance_cap_raise")
+ALLOWABLE_ON = ("stt_adaptive_poll", "utterance_cap_raise")      # off unless the operator says so for THIS call (--allow-on NAME); stt_raw_pcm, tts_keepalive, rt_transport can never be allowed here
 
 
 def rt_transport_is_off(value) -> bool:
@@ -80,13 +81,15 @@ def extract_endpoint_id(url: str | None) -> str:
     return clean.split("/")[-1]
 
 
-async def run_checklist(expected_caller: str | None = None, mongo_uri: str | None = None, db_name: str | None = None, expect_ack: bool = False, ack_dir: str | None = None) -> bool:
+async def run_checklist(expected_caller: str | None = None, mongo_uri: str | None = None, db_name: str | None = None, expect_ack: bool = False, ack_dir: str | None = None,
+                        allow_on: tuple = ()) -> bool:
     uri = mongo_uri or "mongodb://127.0.0.1:27117"
     expected_flags = dict(EXPECTED_AI_FLAGS)
-    must_be_off = MUST_BE_OFF
+    allow_on = tuple(f for f in allow_on if f in ALLOWABLE_ON)         # anything else is ignored: the always-off flags cannot be allowed
+    must_be_off = tuple(f for f in MUST_BE_OFF if f not in allow_on)
     if expect_ack:                                                    # the operator said the acknowledgement is part of this call
         expected_flags["ack_enabled"] = True
-        must_be_off = tuple(f for f in MUST_BE_OFF if f != "ack_enabled")
+        must_be_off = tuple(f for f in must_be_off if f != "ack_enabled")
     dbname = db_name or "mme_telephony"
     client = AsyncMongoClient(uri)
     db = client[dbname]
@@ -153,6 +156,10 @@ async def run_checklist(expected_caller: str | None = None, mongo_uri: str | Non
             print(f"  [{'FAIL' if rt_on else 'PASS'}] Flag {'rt_transport':20s}: must be OFF (all services on the queue path) -> {'ON' if rt_on else 'off'}")
             if rt_on:
                 failures.append("flag rt_transport must be OFF for this call")
+            for flag in allow_on:                                            # allowed by the operator for this call: shown, with the value that matters
+                print(f"  [info] {flag} is ALLOWED ON for this call (--allow-on): via get_config={runtime.get(flag)!r}")
+            print(f"  [info] utterance_max_s: {runtime.get('utterance_max_s') if runtime.get('utterance_max_s') is not None else 'None (6.0 s, today)'}"
+                  f" (read only with utterance_cap_raise, which is {'ON' if runtime.get('utterance_cap_raise') else 'off'})")
             # The acknowledgement: its wait and the clip set, always shown (numbers and a reason code only: no path content, no phrase)
             from app.ai.streaming.ack import AckSet
             ack_set, ack_why = AckSet.load(ack_dir if ack_dir is not None else Settings(_env_file=None).ai_ack_dir)
@@ -233,9 +240,10 @@ def main():
     parser.add_argument("--mongo-uri", help="Optional MongoDB URI override")
     parser.add_argument("--db-name", help="Optional MongoDB database name override")
     parser.add_argument("--expect-ack", action="store_true", help="the acknowledgement is part of this call: ack_enabled must be ON and the clip set must load 'ok'")
+    parser.add_argument("--allow-on", action="append", default=[], choices=ALLOWABLE_ON, help="a flag that is allowed to be ON for this call because the operator said so (repeatable)")
     args = parser.parse_args()
 
-    ok = asyncio.run(run_checklist(expected_caller=args.caller, mongo_uri=args.mongo_uri, db_name=args.db_name, expect_ack=args.expect_ack))
+    ok = asyncio.run(run_checklist(expected_caller=args.caller, mongo_uri=args.mongo_uri, db_name=args.db_name, expect_ack=args.expect_ack, allow_on=tuple(args.allow_on)))
     sys.exit(0 if ok else 1)
 
 

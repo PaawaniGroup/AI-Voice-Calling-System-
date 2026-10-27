@@ -512,7 +512,7 @@ async def test_disarm_then_rollback_on_a_throwaway_database_leaves_the_tenant_di
 
 
 # ====================================================================== call build: the acknowledgement in the supervised-call scripts, and one survival test per flag
-CALL_FLAGS = ("stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding", "ack_enabled")
+CALL_FLAGS = ("stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding", "ack_enabled", "stt_adaptive_poll", "utterance_cap_raise")
 KEY_REFS = {"stt": "RUNPOD_STT_KEY", "brain": "RUNPOD_BRAIN_KEY", "tts": "RUNPOD_TTS_KEY"}
 
 
@@ -649,3 +649,53 @@ async def test_checklist_keeps_the_persistent_transport_keepalive_and_raw_pcm_of
     assert ok is passes
     if not passes:
         assert next(iter(over)) in out.err
+
+
+# ---- the new flags (stt_adaptive_poll, utterance_cap_raise, utterance_max_s): off by default, never written by prepare, rolled back, off in the checklist unless the operator allows one
+@pytest.mark.asyncio
+async def test_utterance_max_s_survives_get_config_and_defaults_to_none():
+    assert (await _runtime_cfg({"tenant_id": "mme-test", "utterance_max_s": 9.5}))["utterance_max_s"] == 9.5
+    assert (await _runtime_cfg(None))["utterance_max_s"] is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_never_writes_the_new_flags_but_lists_them(capsys):
+    from scripts.prepare_supervised_call_tenant import LISTED_NOT_SET, SUPERVISED_FLAGS
+    for f in ("stt_adaptive_poll", "utterance_cap_raise", "utterance_max_s", "stt_raw_pcm", "tts_keepalive", "rt_transport"):
+        assert f in LISTED_NOT_SET and f not in SUPERVISED_FLAGS
+
+
+@pytest.mark.asyncio
+async def test_rollback_restores_or_unsets_the_new_flags(tmp_path):
+    bf = tmp_path / "ai_config_mme-test_20261027T000000Z.json"
+    bf.write_text(json.dumps({"tenant_id": "mme-test", "config": {"utterance_cap_raise": False}}), encoding="utf-8")
+    coll = _coll(None)
+    with patch("scripts.rollback_supervised_call_tenant.AsyncMongoClient") as mc:
+        mc.return_value = MagicMock()
+        mc.return_value.__getitem__.return_value = _db_with({"ai_config": coll})
+        mc.return_value.close = AsyncMock()
+        await rollback_supervised_call(backup_file=bf)
+    op = coll.update_one.call_args[0][1]
+    assert op["$set"] == {"utterance_cap_raise": False} and "stt_adaptive_poll" in op["$unset"] and "utterance_max_s" in op["$unset"]
+    from scripts.rollback_supervised_call_tenant import ONE_LINE_ROLLBACK
+    assert all(k in ONE_LINE_ROLLBACK for k in ("stt_adaptive_poll", "utterance_cap_raise", "utterance_max_s"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", ["stt_adaptive_poll", "utterance_cap_raise", "stt_raw_pcm", "tts_keepalive"])
+async def test_checklist_fails_when_one_of_these_is_on_by_default(flag, capsys):
+    ai, pol = _checklist_docs(**{flag: True})
+    ok, out = await _run_checklist(ai, pol, capsys)
+    assert ok is False and flag in out.err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag,allowed", [("stt_adaptive_poll", True), ("utterance_cap_raise", True), ("stt_raw_pcm", False), ("tts_keepalive", False)])
+async def test_allow_on_permits_only_the_two_allowable_flags(flag, allowed, capsys):
+    ai, pol = _checklist_docs(**{flag: True})
+    ok, out = await _run_checklist(ai, pol, capsys, allow_on=(flag,))
+    assert ok is allowed
+    if allowed:
+        assert "ALLOWED ON" in out.out and "utterance_max_s" in out.out
+    else:
+        assert flag in out.err                                                     # the always-off flags cannot be allowed

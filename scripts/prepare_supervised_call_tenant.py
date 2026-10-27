@@ -48,7 +48,10 @@ SUPERVISED_FLAGS = {
 # Flags that stay as they are: shown, never written. reply_guard has no flag (module not wired).
 LISTED_NOT_SET = {"stt_raw_pcm": "default OFF", "faq_grounding": "default OFF (module not in this tree)", "ack_enabled": "default OFF; set only with --with-ack",
                   "tts_keepalive": "must stay OFF (not in this build)", "keepalive_enabled": "must stay OFF (not in this tree)",
-                  "rt_transport": "must stay OFF (the persistent transport is not in this build)", "reply_guard": "no tenant flag exists; nothing to set"}
+                  "rt_transport": "must stay OFF (the persistent transport is not in this build)", "reply_guard": "no tenant flag exists; nothing to set",
+                  "stt_adaptive_poll": "default OFF; never written here (the operator turns it on for a call by saying so)",
+                  "utterance_cap_raise": "default OFF; never written here (the operator turns it on for a call by saying so)",
+                  "utterance_max_s": "never written here; None = 6.0 s (today); read only with utterance_cap_raise"}
 ACK_FLAGS = {"ack_enabled": True}
 
 
