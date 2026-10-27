@@ -57,7 +57,12 @@ EXPECTED_AI_FLAGS = {
     "strict_grounding": True,
 }
 # Must NOT be on for the call (absent counts as off). reply_guard has no flag in this tree.
-MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled")
+MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled", "tts_keepalive")
+
+
+def rt_transport_is_off(value) -> bool:
+    """The persistent transport is OFF when nothing is set, or every service is "queue"."""
+    return not value or (isinstance(value, dict) and all(v == "queue" for v in value.values()))
 
 
 def mask_number(num: str | None) -> str:
@@ -75,8 +80,13 @@ def extract_endpoint_id(url: str | None) -> str:
     return clean.split("/")[-1]
 
 
-async def run_checklist(expected_caller: str | None = None, mongo_uri: str | None = None, db_name: str | None = None) -> bool:
+async def run_checklist(expected_caller: str | None = None, mongo_uri: str | None = None, db_name: str | None = None, expect_ack: bool = False, ack_dir: str | None = None) -> bool:
     uri = mongo_uri or "mongodb://127.0.0.1:27117"
+    expected_flags = dict(EXPECTED_AI_FLAGS)
+    must_be_off = MUST_BE_OFF
+    if expect_ack:                                                    # the operator said the acknowledgement is part of this call
+        expected_flags["ack_enabled"] = True
+        must_be_off = tuple(f for f in MUST_BE_OFF if f != "ack_enabled")
     dbname = db_name or "mme_telephony"
     client = AsyncMongoClient(uri)
     db = client[dbname]
@@ -115,7 +125,7 @@ async def run_checklist(expected_caller: str | None = None, mongo_uri: str | Non
 
             # 2. Flags AS THE RUNTIME SEES THEM: through AiService.get_config (its allowlist silently drops any field it does not list: the key_refs bug)
             runtime = await AiService(db, None, Settings(_env_file=None), None).get_config(TENANT_ID)
-            for flag, expected in EXPECTED_AI_FLAGS.items():
+            for flag, expected in expected_flags.items():
                 actual = runtime.get(flag)
                 match = (actual == expected)
                 dropped = ai_cfg.get(flag) != actual                       # stored in the document but not what get_config returns
@@ -134,11 +144,29 @@ async def run_checklist(expected_caller: str | None = None, mongo_uri: str | Non
                 failures.append("tts_adaptive_poll needs runpod_mode run")
             if runtime.get("trace_evidence"):
                 print("  [info] trace_evidence also needs MME_TEL_AI_TRACE_EVIDENCE_PATH in the SERVICE environment (not visible from here)")
-            for flag in MUST_BE_OFF:
+            for flag in must_be_off:
                 on = bool(runtime.get(flag)) or bool(ai_cfg.get(flag))
                 print(f"  [{'FAIL' if on else 'PASS'}] Flag {flag:20s}: must be OFF -> {'ON' if on else 'off'}")
                 if on:
                     failures.append(f"flag {flag} must be OFF for this call")
+            rt_on = not rt_transport_is_off(ai_cfg.get("rt_transport")) or not rt_transport_is_off(runtime.get("rt_transport"))
+            print(f"  [{'FAIL' if rt_on else 'PASS'}] Flag {'rt_transport':20s}: must be OFF (all services on the queue path) -> {'ON' if rt_on else 'off'}")
+            if rt_on:
+                failures.append("flag rt_transport must be OFF for this call")
+            # The acknowledgement: its wait and the clip set, always shown (numbers and a reason code only: no path content, no phrase)
+            from app.ai.streaming.ack import AckSet
+            ack_set, ack_why = AckSet.load(ack_dir if ack_dir is not None else Settings(_env_file=None).ai_ack_dir)
+            wait = runtime.get("ack_after_ms")
+            print(f"  [info] ack_after_ms: {wait if wait is not None else 'None (the built-in default 1500 ms applies)'}")
+            print(f"  [info] ack clip set (this process's MME_TEL_AI_ACK_DIR; the SERVICE reads its own copy at its start): {ack_why}"
+                  + (f", languages {ack_set.langs}" if ack_set is not None else ""))
+            if expect_ack:
+                if ack_why != "ok":
+                    print("  [FAIL] --expect-ack: the clip set does not load")
+                    failures.append(f"ack clip set status {ack_why}, expected ok")
+                if not runtime.get("streaming_pipeline"):
+                    print("  [FAIL] ack_enabled needs streaming_pipeline")
+                    failures.append("ack_enabled needs streaming_pipeline")
 
             # 3. key_refs (through get_config too)
             key_refs = runtime.get("key_refs")
@@ -204,9 +232,10 @@ def main():
     parser.add_argument("--caller", help="Expected caller phone number to verify")
     parser.add_argument("--mongo-uri", help="Optional MongoDB URI override")
     parser.add_argument("--db-name", help="Optional MongoDB database name override")
+    parser.add_argument("--expect-ack", action="store_true", help="the acknowledgement is part of this call: ack_enabled must be ON and the clip set must load 'ok'")
     args = parser.parse_args()
 
-    ok = asyncio.run(run_checklist(expected_caller=args.caller, mongo_uri=args.mongo_uri, db_name=args.db_name))
+    ok = asyncio.run(run_checklist(expected_caller=args.caller, mongo_uri=args.mongo_uri, db_name=args.db_name, expect_ack=args.expect_ack))
     sys.exit(0 if ok else 1)
 
 

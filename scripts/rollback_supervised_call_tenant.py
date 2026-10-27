@@ -20,7 +20,7 @@ from scripts.backup_ai_config import get_default_backup_dir
 
 TENANT_ID = "mme-test"
 SUPERVISED_KEYS = ("tts_ulaw8k", "devanagari_hindi", "streaming_pipeline", "full_duplex_input", "tts_voice",
-                   "stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding")
+                   "stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding", "ack_enabled", "ack_after_ms")
 
 # Corrected one-line rollback command restoring previous unconfigured state (ONLY for a tenant that had none of these fields before; the script above restores the
 # previous values from the backup):
@@ -30,7 +30,7 @@ ONE_LINE_ROLLBACK = (
     ".update_one({'tenant_id': 'mme-test'}, "
     "{'$unset': {'tts_ulaw8k': '', 'devanagari_hindi': '', 'streaming_pipeline': '', "
     "'full_duplex_input': '', 'tts_voice': '', 'stream_ramp': '', 'tts_adaptive_poll': '', 'trace_evidence': '', "
-    "'glossary_correction': '', 'strict_grounding': ''}}))\""
+    "'glossary_correction': '', 'strict_grounding': '', 'ack_enabled': '', 'ack_after_ms': ''}}))\""
 )
 
 
