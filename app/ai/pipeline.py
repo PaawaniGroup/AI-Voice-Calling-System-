@@ -306,6 +306,7 @@ class Conversation:
         self.streaming = streaming
         self._stream = None          # the StreamingTurn in progress (if any)
         self.last_stream = None      # the TurnOutcome of the last streaming turn (numbers and in-memory text; never stored or logged)
+        self.ack = None                         # AckSet (app/ai/streaming/ack.py): cached neutral acknowledgement of this call; None = flag `ack_enabled` OFF or files missing
         self.filler_pcm8: bytes | None = None   # short "one moment" audio for slow tool calls (8 kHz PCM16), when the deployment has one
         self.tools = tools or {}  # name -> async handler(args: dict) -> str
         self.script_enforcement = script_enforcement

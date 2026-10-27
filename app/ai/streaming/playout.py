@@ -32,6 +32,7 @@ class ClauseAccount:
     start: int = -1       # index of its first sample in the sent stream (silence frames included)
     sent: int = 0
     played_est: int = 0
+    real: bool = True     # False for the cached acknowledgement: audio that is not part of the answer
 
 
 @dataclass
@@ -88,7 +89,10 @@ class TurnPlayout:
         self._ended = False                                              # the producer will deliver no more clauses
         self._wake = asyncio.Event()
         self._ref_rms: float | None = None
-        self.t_first = None                                              # clock time of the first frame sent
+        self.t_first = None                                              # clock time of the first frame sent (of any kind)
+        self.t_first_real = None                                         # clock time of the first frame that carries a real clause (not the cached acknowledgement)
+        self.sending_real = True                                         # kind of the frame being handed to the sink right now (read by the sink's callbacks)
+        self.on_first_real = None                                        # called once, right after the first real frame was handed to the sink
         self.t_last_send = None
         self._seg_t0 = 0.0                                               # a segment = audio sent without the far end running dry in between
         self._seg_pos0 = 0
@@ -99,13 +103,14 @@ class TurnPlayout:
         self.reason: str | None = None
 
     # ------------------------------------------------------------------ producer side
-    def enqueue(self, gen: int, idx: int, pcm: bytes, words: int = 0) -> bool:
-        """Add a clause (PCM16 at cfg.rate). Stale audio (another generation, or after cancel/finish) is dropped and counted."""
+    def enqueue(self, gen: int, idx: int, pcm: bytes, words: int = 0, real: bool = True) -> bool:
+        """Add a clause (PCM16 at cfg.rate). Stale audio (another generation, or after cancel/finish) is dropped and counted.
+        `real=False` is the cached acknowledgement: it is faded but neither level-matched nor used as the turn's loudness reference."""
         if self.closed or gen != self.gen or not pcm:
             self.dropped_stale += 1
             return False
-        pcm = self._process(pcm)
-        acct = ClauseAccount(idx=idx, words=words, samples=len(pcm) // 2)
+        pcm = self._process(pcm, real)
+        acct = ClauseAccount(idx=idx, words=words, samples=len(pcm) // 2, real=real)
         self.accounts[idx] = acct
         self._q.append([acct, bytearray(pcm)])
         self._wake.set()
@@ -116,10 +121,10 @@ class TurnPlayout:
             self._ended = True
             self._wake.set()
 
-    def _process(self, pcm: bytes) -> bytes:
+    def _process(self, pcm: bytes, real: bool = True) -> bytes:
         pcm = pcm[: len(pcm) // 2 * 2]
         c = self.cfg
-        if c.normalize:
+        if c.normalize and real:
             r = voiced_rms(pcm, c.rate)
             if self._ref_rms is None:
                 if r > 0:
@@ -139,10 +144,11 @@ class TurnPlayout:
     def _buffered(self) -> int:
         return sum(len(b) // 2 for _, b in self._q)
 
-    def _take(self, n: int) -> tuple[bytes, int]:
-        """Up to n samples from the queue (spanning clause joins); updates per-clause sent counts. Returns (pcm, samples)."""
+    def _take(self, n: int) -> tuple[bytes, int, bool]:
+        """Up to n samples from the queue (spanning clause joins); updates per-clause sent counts. Returns (pcm, samples, carries a real clause)."""
         out = bytearray()
         got = 0
+        real = False
         while got < n and self._q:
             acct, buf = self._q[0]
             if acct.start < 0:
@@ -152,9 +158,10 @@ class TurnPlayout:
             del buf[: take * 2]
             acct.sent += take
             got += take
+            real = real or acct.real
             if not buf:
                 self._q.popleft()
-        return bytes(out), got
+        return bytes(out), got, real
 
     async def run(self) -> dict:
         """Send the turn's audio on the 20 ms timeline. Returns when the producer has ended and the audio is out, on cancel, or on max_wait_s."""
@@ -191,7 +198,7 @@ class TurnPlayout:
                     await asyncio.sleep(0)
                 if self.closed:
                     break
-                pcm, got = self._take(self.frame)
+                pcm, got, real = self._take(self.frame)
                 if got == 0:
                     await self._flush()                                    # a sink that batches frames must not hold audio back while we wait
                     if self._ended:
@@ -217,13 +224,14 @@ class TurnPlayout:
                         break                                              # ended while waiting
                     now = self.clock.now()
                     if now - dry_at > frame_s / 2:                         # the far end really ran dry: an audible gap, and a fresh timeline
-                        self.gaps.append(Gap(at_ms=(dry_at - self.t_first) * 1000, length_ms=(now - dry_at) * 1000, before_clause=self._next_idx()))
+                        if self.t_first_real is not None:                  # waiting for the FIRST real clause after the cached acknowledgement is not an underrun
+                            self.gaps.append(Gap(at_ms=(dry_at - self.t_first) * 1000, length_ms=(now - dry_at) * 1000, before_clause=self._next_idx()))
                         self._played_base += self.stream_pos - self._seg_pos0
                         self._seg_t0, self._seg_pos0, k = now, self.stream_pos, 0
                     continue
                 if got < self.frame:                                       # tail of a clause: pad the frame (<20 ms of silence, inside the fade-out)
                     pcm += b"\x00\x00" * (self.frame - got)
-                await self._send(pcm)
+                await self._send(pcm, real)
                 k += 1
             self.reason = self.reason or ("cancelled" if self.cancelled else "done")
             await self._flush()
@@ -239,11 +247,16 @@ class TurnPlayout:
         if flush is not None and not self.closed:
             await flush()
 
-    async def _send(self, pcm: bytes) -> None:
+    async def _send(self, pcm: bytes, real: bool = True) -> None:
+        self.sending_real = real
         await self.sink.send(self.gen, pcm)
         self.stream_pos += len(pcm) // 2
         self.frames_sent += 1
         self.t_last_send = self.clock.now()
+        if real and self.t_first_real is None:
+            self.t_first_real = self.t_last_send
+            if self.on_first_real is not None:
+                self.on_first_real()
 
     # ------------------------------------------------------------------ control and accounting
     def cancel(self) -> dict:
@@ -269,11 +282,11 @@ class TurnPlayout:
         for idx in sorted(self.accounts):
             a = self.accounts[idx]
             a.played_est = 0 if a.start < 0 else max(0, min(a.sent, played - a.start))
-            clauses.append({"idx": a.idx, "words": a.words, "samples": a.samples, "sent": a.sent, "played_est": a.played_est})
+            clauses.append({"idx": a.idx, "words": a.words, "samples": a.samples, "sent": a.sent, "played_est": a.played_est, "real": a.real})
         rate = self.cfg.rate
         return {"gen": self.gen, "reason": self.reason, "clauses": clauses, "frames_sent": self.frames_sent,
                 "sent_ms": round(self.stream_pos / rate * 1000, 1), "played_est_ms": round(played / rate * 1000, 1),
                 "lead_ms": round((self.stream_pos - played) / rate * 1000, 1),
                 "underruns": len(self.gaps), "gaps": [{"at_ms": round(g.at_ms, 1), "length_ms": round(g.length_ms, 1), "before_clause": g.before_clause} for g in self.gaps],
                 "silence_ms": round(sum(g.length_ms for g in self.gaps), 1), "dropped_stale": self.dropped_stale,
-                "t_first": self.t_first, "t_last_send": self.t_last_send}
+                "t_first": self.t_first, "t_first_real": self.t_first_real, "t_last_send": self.t_last_send}
