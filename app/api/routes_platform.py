@@ -183,8 +183,15 @@ async def call_session(request: Request, call_id: str, p: Principal = Depends(re
 async def transcript(request: Request, call_id: str, p: Principal = Depends(require_user)):
     if not await request.app.state.repos.get_call(call_id, p.tenant_id):
         raise NotFound("call not found")
-    raise NotFound("no transcript is stored for this call: transcripts are produced only by an AI session, "
-                   "and persistence of transcripts is not implemented (consent/retention policy pending)", code="transcript_not_available")
+    cfg = await request.app.state.ai.get_config(p.tenant_id)
+    store_words = bool(cfg.get("store_transcripts", getattr(request.app.state.settings, "ai_store_transcripts", False)))
+    if not store_words:
+        raise NotFound("no transcript is stored for this call: transcripts are produced only by an AI session, "
+                       "and persistence of transcripts is not implemented (consent/retention policy pending)", code="transcript_not_available")
+    sess = await request.app.state.db["ai_sessions"].find_one({"call_id": call_id, "tenant_id": p.tenant_id})
+    if not sess or not sess.get("transcript"):
+        return {"call_id": call_id, "turns": 0, "transcript": []}
+    return {"call_id": call_id, "turns": len(sess.get("transcript", [])), "transcript": sess.get("transcript", [])}
 
 
 @router.get("/calls/{call_id}/summary")
@@ -367,12 +374,22 @@ class AiConfigIn(Strict):
     duplex_pre_roll_ms: int | None = Field(None, ge=0, le=1000)
     tts_ulaw8k: bool | None = None           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference sent; default OFF per tenant
     tts_voice: str | None = Field(None, max_length=40)   # the worker's voice name (validated in the service: letters, digits, _ and -)
+    voice_studio: bool | None = None         # Voice Studio page and /v1/voices (previews only); default OFF per tenant
     stream_first_min_words: int | None = Field(None, ge=1, le=8)
     stream_min_words: int | None = Field(None, ge=1, le=20)
     stream_max_words: int | None = Field(None, ge=6, le=40)
     stream_prefetch_depth: int | None = Field(None, ge=1, le=4)
     stream_prebuffer_ms: int | None = Field(None, ge=0, le=400)
     runpod_poll_cap_s: float | None = Field(None, ge=0.03, le=1.0)
+    ack_enabled: bool | None = None            # cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
+    ack_after_ms: int | None = Field(None, ge=0, le=3000)
+    keepalive_enabled: bool | None = None      # keep-alive ping of the voice endpoint during a call; default OFF per tenant (not measured yet)
+    keepalive_interval_s: float | None = Field(None, ge=2.0, le=30.0)
+    keepalive_max_s: float | None = Field(None, ge=30.0, le=900.0)
+    store_transcripts: bool | None = None   # per-tenant transcript text persistence in DB/feed
+    glossary_correction: bool | None = None # per-tenant phonetic normalisation
+    strict_grounding: bool | None = None    # per-tenant strict prompt grounding
+    faq_grounding: bool | None = None       # per-tenant local FAQ retrieval
 
 
 @router.get("/ai/config")

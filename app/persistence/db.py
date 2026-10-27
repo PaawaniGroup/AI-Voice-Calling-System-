@@ -18,7 +18,7 @@ SCHEMA_VERSION = 4
 COLLECTIONS = [
     "calls", "call_events", "idempotency", "recordings", "audit", "tenant_policies",
     "inbound_routes", "webhook_endpoints", "webhook_deliveries", "provider_dedup", "sessions", "ai_sessions", "ai_config",
-    "users", "_schema",
+    "users", "_schema", "voices", "voice_usage", "voice_spend",
 ]
 
 
@@ -130,6 +130,12 @@ class Database:
         await self["ai_config"].create_index([("tenant_id", ASCENDING)], name="tenant", unique=True)
         await self["users"].create_index([("username", ASCENDING)], name="username", unique=True)
         await self["users"].create_index([("tenant_id", ASCENDING)], name="tenant")
+        # Voice Studio (additive indexes only, no schema version bump)
+        await self["voices"].create_index([("tenant_id", ASCENDING), ("name_lower", ASCENDING)], name="uniq_tenant_name", unique=True)
+        await self["voices"].create_index([("tenant_id", ASCENDING), ("created_at", DESCENDING)], name="tenant_created")
+        await self["voice_usage"].create_index([("tenant_id", ASCENDING), ("kind", ASCENDING), ("ts", DESCENDING)], name="tenant_kind_ts")
+        await self["voice_usage"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)
+        await self["voice_spend"].create_index([("tenant_id", ASCENDING), ("period", ASCENDING)], name="uniq_tenant_period", unique=True)
         await self["_schema"].update_one(
             {"_id": "version"}, {"$set": {"v": SCHEMA_VERSION, "updated_at": utcnow()}}, upsert=True)
         log.info("schema ready v%s", SCHEMA_VERSION)

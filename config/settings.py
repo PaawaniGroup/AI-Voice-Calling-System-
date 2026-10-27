@@ -212,6 +212,10 @@ class Settings(BaseSettings):
     ai_tts_model: str = F("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "TTS model identifier.")
     ai_tts_reference_wav: str = F("", "Path to the reference voice WAV sent to RunPod TTS workers (voice cloning; the worker rejects requests without one).")
     ai_tts_normalize: bool = F(True, "Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence.")
+    ai_store_transcripts: bool = F(False, "Store caller and assistant conversation text in MongoDB and dashboard feed. Default False (privacy compliance).")
+    ai_faq_path: str = F("", "Path outside repository to the JSON FAQ knowledge base for local retrieval. If empty, falls back to data/faq_sample_fake.json.")
+    ai_ack_dir: str = F("", "Directory OUTSIDE the repository with the cached acknowledgement clips (manifest.json + raw 8 kHz mu-law files, see app/ai/streaming/ack.py). "
+                            "Used only by tenants with ai_config.ack_enabled; empty or missing files = the feature is silently unavailable.")
     ai_greeting: str = F("Welcome to MME AI Voice Calling Agent.", "Greeting spoken when an inbound call answers before connecting to AI services.")
     ai_script_enforcement: bool = F(False, "Enforce script policy: Hindi/Hinglish in Devanagari, English in Latin. Default False.")
     ai_counsellor_gender: Literal["masculine", "feminine"] = F("masculine", "Gender for Hindi verb forms in counsellor replies ('masculine' or 'feminine').")
@@ -219,6 +223,20 @@ class Settings(BaseSettings):
     ai_temperature: float = F(0.3, "Sampling temperature for Brain replies (default 0.3).", ge=0.0, le=2.0)
     ai_script_allowlist_path: str = F("config/script_allowlist_terms.txt", "Path to editable allow-listed English terms file.")
     ai_hint_placement: Literal["user_suffix", "system_message"] = F("user_suffix", "Placement for per-turn mode hint.")
+
+    # ---- Voice Studio (per-tenant flag ai_config.voice_studio, default OFF; docs/VOICE_STUDIO_DESIGN.md) -----------------------------
+    voice_studio_max_upload_bytes: int = F(8_000_000, "Largest accepted voice clip upload (multipart body).", ge=100_000, le=20_000_000)
+    voice_studio_text_max_chars: int = F(300, "Longest text of one preview.", ge=1, le=300)
+    voice_studio_previews_per_hour: int = F(20, "Previews per tenant per hour.", ge=1)
+    voice_studio_uploads_per_day: int = F(20, "Clip uploads (accepted or refused) per tenant per day.", ge=1)
+    voice_studio_max_voices: int = F(10, "Voices (active or disabled) a tenant may hold.", ge=1)
+    voice_studio_max_running: int = F(2, "Previews of one tenant that may run at the same time.", ge=1, le=10)
+    voice_studio_job_deadline_s: float = F(180.0, "Deadline of one preview job (cold start included); at the deadline the worker job is cancelled.", ge=0.05, le=900)
+    voice_studio_poll_s: float = F(1.0, "Seconds between status polls of a preview's worker job.", ge=0.01, le=10)
+    voice_studio_result_ttl_s: float = F(600.0, "How long a finished preview's audio is kept in memory.", ge=0.05, le=3600)
+    voice_studio_spend_cap_usd: float = F(5.0, "Hard cap of preview spend per tenant per UTC month (an ESTIMATE from the price below). 0 blocks every preview.", ge=0)
+    voice_studio_gpu_usd_per_s: float = F(0.0005, "PLACEHOLDER price of one GPU second used for the spend estimate: set it from your RunPod bill.", ge=0)
+    voice_studio_est_cold_start_s: float = F(60.0, "GPU seconds reserved per preview for a possible cold start (estimate, not measured).", ge=0)
 
     @property
     def is_prod_like(self) -> bool:

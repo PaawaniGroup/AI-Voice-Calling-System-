@@ -63,18 +63,19 @@ function renderTranscript(transcript, lastExchange, isLive = false) {
   return h('div', { class: 'transcript-card' }, turns.map((ex, idx) => {
     const turnNum = ex.turn != null ? ex.turn : idx + 1;
     const tim = normTim(ex);
+    const tsStr = ex.ts || ex.at;
     return h('div', { class: 'exchange-turn' },
       h('div', { class: 'exchange-header' },
-        h('span', { class: 'mono' }, `Turn #${turnNum}${ex.at ? ' · ' + t(ex.at) : ''}`),
+        h('span', { class: 'mono' }, `Turn #${turnNum}${tsStr ? ' · ' + t(tsStr) : ''}`),
         latencyStrip(tim)
       ),
       h('div', { class: 'bubble bubble-user' },
-        h('span', { class: 'bubble-sender' }, '👤 Caller / Student'),
-        h('span', { class: 'bubble-text' }, ex.heard || '—')
+        h('span', { class: 'bubble-sender' }, '👤 Caller / Student (STT Input)'),
+        h('span', { class: 'bubble-text' }, ex.heard || (ex.heard_chars ? `(${ex.heard_chars} chars heard)` : '—'))
       ),
       h('div', { class: 'bubble bubble-ai' },
-        h('span', { class: 'bubble-sender' }, '🤖 MME AI Counsellor'),
-        h('span', { class: 'bubble-text' }, ex.reply || '—')
+        h('span', { class: 'bubble-sender' }, '🤖 MME AI Counsellor (LLM Response)'),
+        h('span', { class: 'bubble-text' }, ex.reply || (ex.reply_chars ? `(${ex.reply_chars} chars replied)` : '—'))
       )
     );
   }));
@@ -124,7 +125,7 @@ $('#login-form').addEventListener('submit', async (ev) => {
 $('#logout').addEventListener('click', logout);
 window.addEventListener('hashchange', route);
 
-const pages = { overview, ops, live, call: callDetail, sessions, session: sessionDetail, controls, recordings, ai: aiPage, logs, users };
+const pages = { overview, ops, live, call: callDetail, sessions, session: sessionDetail, controls, recordings, ai: aiPage, voices, logs, users };
 let renderSeq = 0;
 function route() {
   if (!me) return;
@@ -551,6 +552,112 @@ async function aiPage(main) {
       [['STT', cfg.models.stt, cfg.stt_url, hl.services.stt], ['Brain', cfg.models.brain, cfg.brain_url, hl.services.brain], ['TTS', cfg.models.tts, cfg.tts_url, hl.services.tts], ['RAG', '—', cfg.rag_url, hl.services.rag]]),
     admin ? h('div', { class: 'card' }, h('h2', {}, 'Edit'), h('div', { class: 'row' }, h('label', {}, 'STT URL', f.stt), h('label', {}, 'Brain URL', f.brain), h('label', {}, 'TTS URL', f.tts), h('label', {}, 'RAG URL', f.rag),
       h('label', {}, 'Default language', f.lang), h('label', {}, 'Enable AI for tenant', f.en)), h('p', { class: 'muted' }, 'URLs must use hosts listed in AI_ALLOWED_HOSTS. API keys are server-side environment settings and are never shown here.'), h('button', { onclick: save }, 'Save'), msg) : h('p', { class: 'muted' }, 'Only administrators can change AI settings.'));
+}
+
+// ---------------------------------------------------------------- Voice Studio (admin; per-tenant flag voice_studio, default OFF)
+const VS_STATES = { queued: 'Queued...', warming: 'Warming up the voice server. This can take about a minute...', speaking: 'Speaking...', done: 'Ready. Press play.', error: 'The preview failed.' };
+const VS_SCOPES = { preview_only: 'Previews only (not for calls)', preview_and_calls: 'Previews and calls' };
+
+function vsReport(r) {
+  if (!r) return null;
+  const rows = [['Length after trimming', r.duration_s != null ? r.duration_s + ' s' : '-'], ['Original length', r.original_duration_s != null ? r.original_duration_s + ' s' : '-'],
+    ['Loudest point', r.peak_dbfs != null ? r.peak_dbfs + ' dBFS' : '-'], ['Background noise', r.noise_floor_dbfs != null ? r.noise_floor_dbfs + ' dBFS' : '-'],
+    ['Speech in the first 6 s', r.speech_s_first_6s != null ? r.speech_s_first_6s + ' s' : '-'], ['Speech in the first 10 s', r.speech_s_first_10s != null ? r.speech_s_first_10s + ' s' : '-'],
+    ['Distorted samples', r.clipped_fraction != null ? (r.clipped_fraction * 100).toFixed(2) + ' %' : '-'], ['Signal to noise', r.snr_db != null ? r.snr_db + ' dB' : '-']];
+  return h('div', { class: 'card' }, h('div', { class: 'kv' }, rows.flatMap(([k, v]) => [h('div', {}, k), h('div', {}, v)])),
+    (r.warnings || []).map((w) => h('p', { class: 'vs-warn' }, 'Note: ' + w.message)));
+}
+
+async function voices(main) {
+  if (!isRole('admin')) return main.replaceChildren(h('p', { class: 'err' }, 'Administrator role required.'));
+  let d;
+  try { d = await api('/v1/voices'); } catch (e) {
+    if (e.code === 'voice_studio_disabled') {
+      return main.replaceChildren(h('h1', {}, 'Voice Studio'), h('div', { class: 'banner' }, 'Voice Studio is switched off for this tenant. An administrator can turn it on with the tenant setting voice_studio (AI configuration API). Nothing here is used by calls.'));
+    }
+    throw e;
+  }
+  const lim = d.limits, use = d.usage;
+  const active = d.items.filter((v) => v.status === 'active');
+  let stopped = false;
+  stopLive = () => { stopped = true; };
+
+  // ---- upload
+  const f = { file: h('input', { type: 'file', accept: '.wav,audio/wav,audio/x-wav' }), name: h('input', { placeholder: 'e.g. asha_1', maxlength: 40, pattern: '[A-Za-z0-9_\\-]{1,40}' }),
+    speaker: h('input', { placeholder: 'speaker full name', maxlength: 80 }), scope: h('select', {}, Object.entries(VS_SCOPES).map(([k, v]) => h('option', { value: k }, v))),
+    consent: h('input', { type: 'checkbox' }) };
+  const upMsg = h('p'), upReport = h('div'), upBtn = h('button', { type: 'submit' }, 'Upload and check');
+  const upload = h('form', { class: 'card', onsubmit: async (ev) => {
+    ev.preventDefault(); upMsg.className = ''; upMsg.textContent = ''; upReport.replaceChildren();
+    if (!f.file.files[0]) { upMsg.className = 'err'; upMsg.textContent = 'Choose a WAV recording first.'; return; }
+    if (!f.consent.checked) { upMsg.className = 'err'; upMsg.textContent = 'The consent box must be ticked.'; return; }
+    const fd = new FormData();
+    fd.append('file', f.file.files[0]); fd.append('name', f.name.value); fd.append('speaker_name', f.speaker.value); fd.append('consent', 'true'); fd.append('consent_scope', f.scope.value);
+    upBtn.disabled = true; upMsg.textContent = 'Uploading and checking the recording...';
+    try {
+      const v = await api('/v1/voices', { method: 'POST', body: fd });
+      upMsg.textContent = 'Voice "' + v.name + '" saved. Quality report:'; upReport.replaceChildren(vsReport(v.report));
+      setTimeout(() => { if (!stopped) route(); }, 4000);
+    } catch (e) {
+      upMsg.className = 'err'; upMsg.textContent = e.message + (e.code ? ' (' + e.code + ')' : '');
+      upBtn.disabled = false;
+    }
+  } },
+  h('h2', {}, 'Add a voice'),
+  h('p', { class: 'muted' }, 'Upload about 10 seconds of ONE person speaking clearly in a quiet room (' + (d.decoder.accepted) + '). The recording is checked, trimmed and stored on this server; the original file is not kept.'),
+  h('div', { class: 'row' }, h('label', {}, 'Recording', f.file), h('label', {}, 'Voice name', f.name), h('label', {}, 'Speaker', f.speaker), h('label', {}, 'Allowed use', f.scope)),
+  h('label', { class: 'inline' }, f.consent, 'I confirm that the speaker named above has agreed that a synthetic copy of their voice is made from this recording and used as selected.'),
+  upBtn, upMsg, upReport);
+
+  // ---- list
+  const list = table([{ h: 'Name', f: (v) => v.name }, { h: 'Speaker', f: (v) => (v.consent_ref ? v.consent_ref.speaker_name : '-') }, { h: 'Allowed use', f: (v) => (v.consent_ref ? VS_SCOPES[v.consent_ref.scope] || v.consent_ref.scope : '-') },
+    { h: 'Length', f: (v) => (v.duration_s != null ? v.duration_s + ' s' : '-') }, { h: 'Status', f: (v) => pill(v.status) }, { h: 'Added', f: (v) => t(v.created_at) },
+    { h: '', f: (v) => h('span', { class: 'row tight' },
+      v.status === 'active' ? h('button', { class: 'ghost', onclick: async () => { if (confirm('Disable "' + v.name + '"? It can no longer be used.')) { await api('/v1/voices/' + encodeURIComponent(v.id) + '/disable', { method: 'POST' }); route(); } } }, 'Disable') : null,
+      h('button', { class: 'danger', onclick: async () => { if (confirm('Delete "' + v.name + '" and erase its recording?')) { await api('/v1/voices/' + encodeURIComponent(v.id), { method: 'DELETE' }); route(); } } }, 'Delete')) }], d.items);
+
+  // ---- speak
+  const sp = { voice: h('select', {}, active.map((v) => h('option', { value: v.id }, v.name))), text: h('textarea', { class: 'vs-text', rows: 4, maxlength: lim.text_max_chars, placeholder: 'Type what the voice should say' }),
+    lang: h('select', {}, d.languages.map((x) => h('option', { value: x }, x))), phone: h('input', { type: 'checkbox' }) };
+  const count = h('span', { class: 'muted' }, '0 / ' + lim.text_max_chars), state = h('p', { class: 'vs-state' }), err = h('p', { class: 'err' }), player = h('audio', { controls: true, class: 'vs-player' });
+  let objectUrl = null;
+  const speak = h('button', { disabled: !active.length }, 'Speak');
+  sp.text.addEventListener('input', () => { count.textContent = sp.text.value.length + ' / ' + lim.text_max_chars; });
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  speak.addEventListener('click', async () => {
+    err.textContent = ''; state.textContent = ''; player.removeAttribute('src');
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    if (!sp.text.value.trim()) { err.textContent = 'Type some text first.'; return; }
+    speak.disabled = true;
+    try {
+      let job = await api('/v1/voices/' + encodeURIComponent(sp.voice.value) + '/preview', { method: 'POST', body: { text: sp.text.value, language: sp.lang.value, phone_quality: sp.phone.checked } });
+      while (!stopped && job.status !== 'done' && job.status !== 'error') {
+        state.textContent = job.detail || VS_STATES[job.status] || job.status;
+        await sleep(1500);
+        job = await api('/v1/voices/previews/' + encodeURIComponent(job.job_id));
+      }
+      if (stopped) return;
+      if (job.status === 'error') { state.textContent = VS_STATES.error; err.textContent = job.error.message + ' (' + job.error.code + ')'; }
+      else {
+        const r = await fetch(job.audio.url, { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) throw new Error('The audio could not be loaded.');
+        objectUrl = URL.createObjectURL(await r.blob());
+        player.src = objectUrl; state.textContent = VS_STATES.done + ' (' + job.audio.duration_s + ' s, took ' + job.elapsed_s + ' s)';
+        player.play().catch(() => { /* the browser may require a click: the controls are there */ });
+      }
+    } catch (e) { state.textContent = ''; err.textContent = e.message + (e.code ? ' (' + e.code + ')' : ''); }
+    finally { if (!stopped) speak.disabled = !active.length; }
+  });
+  const speakCard = h('div', { class: 'card' }, h('h2', {}, 'Speak'),
+    active.length ? null : h('p', { class: 'muted' }, 'Add a voice above first.'),
+    h('div', { class: 'row' }, h('label', {}, 'Voice', sp.voice), h('label', {}, 'Language', sp.lang), h('label', { class: 'inline' }, sp.phone, 'Phone quality (8 kHz, as a caller hears it)')),
+    h('label', {}, 'Text', sp.text), h('div', { class: 'row tight' }, count), h('div', { class: 'row' }, speak), state, err, player,
+    h('p', { class: 'muted' }, 'The first preview after a pause can take about a minute while the voice server starts. Previews are kept for a few minutes only.'));
+
+  main.replaceChildren(h('h1', {}, 'Voice Studio'),
+    h('p', { class: 'muted' }, 'Previews only: voices made here are not used on calls. Previews this hour ' + use.previews_last_hour + ' of ' + lim.previews_per_hour + ' - uploads today ' + use.uploads_last_day + ' of ' + lim.uploads_per_day
+      + ' - estimated spend this month $' + use.spend_usd_this_month + ' of a $' + use.spend_cap_usd + ' cap.'),
+    upload, h('h2', {}, 'Voices'), list, speakCard);
 }
 
 // ---------------------------------------------------------------- logs & system

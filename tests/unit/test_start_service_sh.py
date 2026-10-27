@@ -66,11 +66,20 @@ def test_start_service_sh_empty_file(key_dir):
     assert "STT key file is empty" in res.stderr
 
 
+def get_free_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 def test_start_service_sh_dry_run_success_and_masked(key_dir):
+    port = get_free_port()
     res = run_bash([
         "--stt-key-file", str(key_dir["stt"]),
         "--brain-key-file", str(key_dir["brain"]),
         "--tts-key-file", str(key_dir["tts"]),
+        "--port", str(port),
         "--dry-run"
     ])
     assert res.returncode == 0

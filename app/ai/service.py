@@ -22,7 +22,9 @@ from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
 from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
-from app.ai.streaming.config import STREAM_KEYS, stream_config_from
+from app.ai.keepalive import KeepAlive
+from app.ai.streaming.ack import AckSet
+from app.ai.streaming.config import STREAM_KEYS, stream_config_from, value
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
 from app.observability import metrics as m
@@ -47,9 +49,18 @@ class Runtime:
     watchdog: asyncio.Task | None = None
     tasks: list = field(default_factory=list)
     call_id: str | None = None
+    keepalive: Any = None   # KeepAlive of this call (flag `keepalive_enabled`), started when the media connects, stopped with the media / the session
 
 
 class AiService:
+    async def _tenant_store_transcripts(self, tenant_id: str) -> bool:
+        try:
+            cfg = await self.get_config(tenant_id)
+            if "store_transcripts" in cfg:
+                return bool(cfg["store_transcripts"])
+        except Exception:
+            pass
+        return bool(getattr(self.s, "ai_store_transcripts", False))
     def __init__(self, db, repos, s: Settings, sessions, emitter=None, bridge: MediaBridge | None = None,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.db, self.repos, self.s, self.sessions, self.emitter = db, repos, s, sessions, emitter
@@ -67,11 +78,16 @@ class AiService:
                 "models": {"stt": self.s.ai_stt_model, "brain": self.s.ai_brain_model, "tts": self.s.ai_tts_model},
                 "timeouts": {"stt": self.s.ai_request_timeout_s, "brain": self.s.ai_request_timeout_s * 2,
                              "tts": self.s.ai_request_timeout_s, "rag": 5.0},
-                "paths": {}, "keys": {}, "languages": LANGS[1:], "default_language": "auto",
+                "paths": {}, "keys": {}, "key_refs": {}, "languages": LANGS[1:], "default_language": "auto",
                 "devanagari_hindi": False, "runpod_mode": "run",
+                "store_transcripts": False, "glossary_correction": False, "strict_grounding": False, "faq_grounding": False,
+                "glossary_correction": False, "strict_grounding": False,
                 "streaming_pipeline": False,   # token-streaming voice pipeline (Plivo calls only); OFF unless a tenant turns it on
                 "tts_ulaw8k": False,           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference audio sent; OFF by default
                 "tts_voice": None,             # name of the worker's voice for tts_ulaw8k (None = the worker's default, "utkarsh")
+                "voice_studio": False,         # Voice Studio page + /v1/voices (clone a voice from an uploaded clip, previews only); OFF by default
+                "ack_enabled": False,          # cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); OFF by default
+                "keepalive_enabled": False,    # keep-alive ping of the voice endpoint during a call; OFF by default (not measured yet)
                 **{k: None for k in STREAM_KEYS},   # None = the built-in provisional default (set after the TTS re-measurement)
                 "full_duplex_input": False,        # listen while the assistant speaks: min voiced time, echo guard, kept speech, hysteresis; OFF by default
                 **{k: None for k in DUPLEX_KEYS}}  # None = the provisional defaults of app/ai/duplex.py (to be tuned on real call recordings)
@@ -81,10 +97,10 @@ class AiService:
         cfg = self.default_config(tenant_id)
         if doc:
             for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
-                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "voice_studio", "full_duplex_input", "ack_enabled", "keepalive_enabled", "store_transcripts", "glossary_correction", "strict_grounding", "faq_grounding", "glossary_correction", "strict_grounding", *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
-            for k in ("models", "timeouts", "paths", "keys"):
+            for k in ("models", "timeouts", "paths", "keys", "key_refs"):
                 cfg[k] = {**cfg.get(k, {}), **doc.get(k, {})}
             cfg["languages"] = doc.get("languages", cfg["languages"])
         return cfg
@@ -113,8 +129,19 @@ class AiService:
             if v is not None and not (isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", v)):
                 raise Unprocessable("tts_voice must be 1-40 letters, digits, '_' or '-'", code="invalid_config")
             cfg["tts_voice"] = v
+        if body.get("voice_studio") is not None:
+            cfg["voice_studio"] = bool(body["voice_studio"])
         if body.get("full_duplex_input") is not None:
             cfg["full_duplex_input"] = bool(body["full_duplex_input"])
+        for flag in ("ack_enabled", "keepalive_enabled"):
+            if body.get(flag) is not None:
+                cfg[flag] = bool(body[flag])
+        for flag in ("store_transcripts", "glossary_correction", "strict_grounding", "faq_grounding"):
+            if body.get(flag) is not None:
+                cfg[flag] = bool(body[flag])
+        for flag in ("glossary_correction", "strict_grounding"):
+            if body.get(flag) is not None:
+                cfg[flag] = bool(body[flag])
         for k, (lo, hi) in {**STREAM_KEYS, **DUPLEX_KEYS}.items():
             if k in body and body[k] is not None:
                 v = float(body[k]) if isinstance(lo, float) else int(body[k])
@@ -281,10 +308,20 @@ class AiService:
             counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
             devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
+            glossary_correction=bool(cfg.get("glossary_correction")),
+            strict_grounding=bool(cfg.get("strict_grounding")),
             streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
             duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
+        if cfg.get("ack_enabled") and cfg.get("streaming_pipeline"):
+            conv.ack, why = AckSet.load(self.s.ai_ack_dir)          # None when the files are missing or not neutral: the call goes on without it
+            log.info("ack: enabled=%s reason=%s", conv.ack is not None, why)
         rt = Runtime(session_id, tenant_id, conv, clients)
+        rt.store_transcripts = bool(cfg.get("store_transcripts", getattr(self.s, "ai_store_transcripts", False)))
+        rt.faq_grounding = bool(cfg.get("faq_grounding", False))
+        if cfg.get("keepalive_enabled") and "/runsync" in (cfg.get("tts_url") or ""):
+            rt.keepalive = KeepAlive(clients.ping_tts, interval_s=value(cfg, "keepalive_interval_s"), max_s=value(cfg, "keepalive_max_s"),
+                                     busy_since=lambda: clients.last_tts_at)
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")
         self.runtime[session_id] = rt
         m.AI_RUNTIMES.set(len(self.runtime))
@@ -338,9 +375,13 @@ class AiService:
         if sess:
             await self.sessions.transition(sess, "active", source="ai")
         m.AI_SESSIONS.labels("active").inc()
+        if rt.keepalive is not None:
+            rt.keepalive.start()
         await self._emit(rt.tenant_id, "ai.session.started", rt.session_id)
 
     async def media_disconnected(self, rt: Runtime) -> None:
+        if rt.keepalive is not None:
+            await rt.keepalive.stop("media_lost")             # no pings while the caller's media is away
         r = await self.db["ai_sessions"].update_one(
             {"session_id": rt.session_id, "tenant_id": rt.tenant_id, "state": "active"},
             {"$set": {"state": "media_disconnected", "media.connected": False}})
@@ -353,30 +394,45 @@ class AiService:
         nums = {k: v for k, v in trace_ms.items() if isinstance(v, (int, float))}
         if not nums and not reply:
             return
+        store_words = getattr(rt, "store_transcripts", None)
+        if store_words is None:
+            store_words = bool(getattr(self.s, "ai_store_transcripts", False))
         set_fields = {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
                       **{f"timings_ms.{k}": v for k, v in nums.items()}}
-        if reply:  # the length only: conversation text is not stored (see record_turn)
+        if reply:
             set_fields["transcript.$[e].reply_chars"] = len(reply)
             set_fields["last_exchange.reply_chars"] = len(reply)
+            if store_words:
+                set_fields["transcript.$[e].reply"] = reply
+                set_fields["last_exchange.reply"] = reply
         await self.db["ai_sessions"].update_one(
             {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
             {"$set": set_fields},
             array_filters=[{"e.trace_id": trace_id}])
         if self.activity is not None:
+            data = {"trace_id": trace_id, "reply_chars": len(reply or ""), **nums}
+            if store_words and reply:
+                data["reply"] = reply
             self.activity.publish(rt.tenant_id, "ai.turn_latency", call_id=rt.call_id, session_id=rt.session_id,
-                                  data={"trace_id": trace_id, "reply_chars": len(reply or ""), **nums})
+                                  data=data)
 
     async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None,
                           trace_id: str | None = None) -> None:
         now = utcnow()
         turn_num = len(rt.conversation.turns)
-        entry = {   # NO conversation text is stored (privacy): sizes and timings only. `heard` / `reply` are accepted but never written.
+        store_words = getattr(rt, "store_transcripts", None)
+        if store_words is None:
+            store_words = bool(getattr(self.s, "ai_store_transcripts", False))
+        entry = {
             "turn": turn_num,
             "heard_chars": len(heard or ""),
             "reply_chars": len(reply or ""),
             "timings_ms": {k: v for k, v in timings.items() if isinstance(v, (int, float))},
             "ts": now.isoformat()
         }
+        if store_words:
+            entry["heard"] = heard or ""
+            entry["reply"] = reply or ""
         if trace_id:
             entry["trace_id"] = trace_id
         upd: dict = {
@@ -393,15 +449,22 @@ class AiService:
             upd["$inc"] = {"turns": 1}
         await self.db["ai_sessions"].update_one({"session_id": rt.session_id, "tenant_id": rt.tenant_id}, upd)
         if self.activity is not None and count:
+            payload = {
+                "turn": turn_num,
+                "stt_ms": timings.get("stt"),
+                "brain_ms": timings.get("brain"),
+                "tts_ms": timings.get("tts"),
+                "turn_ms": timings.get("turn_ms"),
+                "heard_chars": len(heard or ""),
+                "reply_chars": len(reply or ""),
+                "ts": now.isoformat(),
+                **{k: v for k, v in timings.items() if isinstance(v, (int, float))}
+            }
+            if store_words:
+                payload["heard"] = heard or ""
+                payload["reply"] = reply or ""
             self.activity.publish(rt.tenant_id, "ai.turn", call_id=rt.call_id, session_id=rt.session_id,
-                                  data={
-                                      "turn": turn_num,
-                                      "stt_ms": timings.get("stt"),
-                                      "brain_ms": timings.get("brain"),
-                                      "tts_ms": timings.get("tts"),
-                                      "turn_ms": timings.get("turn_ms"),
-                                      **{k: v for k, v in timings.items() if isinstance(v, (int, float))}
-                                  })
+                                  data=payload)
 
     def note_error(self, rt: Runtime, code: str) -> None:
         """A turn produced no audio (model timeout, bad reply, ...). Feed only; the metrics counter is incremented by the caller."""
@@ -424,6 +487,8 @@ class AiService:
         rt = self.runtime.pop(session_id, None)
         m.AI_RUNTIMES.set(len(self.runtime))
         if rt:  # cancel inference + playback, release resources
+            if rt.keepalive is not None:
+                await rt.keepalive.stop("session_ended")      # first: nothing may keep a worker busy after the call
             rt.conversation.cancel()
             if rt.fs_uuid and hasattr(self.bridge, "end"):
                 await self.bridge.end(rt.fs_uuid)  # stop media bug + playback on FreeSWITCH
@@ -464,11 +529,14 @@ class AiService:
             bridge = self.bridge
         ready, reason = await bridge.ready()
         cfg = await self.get_config(tenant_id)
+        store_words = bool(cfg.get("store_transcripts", getattr(self.s, "ai_store_transcripts", False)))
+        last_ex = ai.get("last_exchange") if ai else None
+        raw_tr = ai.get("transcript", []) if ai else []
         out: dict[str, Any] = {"session_id": session_id, "state": ai["state"] if ai else "not_started",
                                "language": ai["language"] if ai else None, "turns": ai["turns"] if ai else 0,
                                "timings_ms": ai.get("timings_ms") if ai else {},
-                               "last_exchange": strip_words(ai.get("last_exchange")) if ai else None,   # timings only: no words live
-                               "transcript": strip_words(ai.get("transcript", [])) if ai else [],
+                               "last_exchange": last_ex if store_words else strip_words(last_ex),
+                               "transcript": raw_tr if store_words else strip_words(raw_tr),
                                "error": ai.get("error") if ai else None,
                                "stop_reason": ai.get("stop_reason") if ai else None,
                                "media": {"connected": bool(ai and ai["media"]["connected"]), "bridge": bridge.name,

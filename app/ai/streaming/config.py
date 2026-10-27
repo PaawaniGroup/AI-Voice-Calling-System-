@@ -15,12 +15,15 @@ STREAM_KEYS: dict[str, tuple] = {
     "stream_prefetch_depth": (1, 4),
     "stream_prebuffer_ms": (0, 400),
     "runpod_poll_cap_s": (0.03, 1.0),
+    "ack_after_ms": (0, 3000),                  # cached acknowledgement (flag `ack_enabled`): wait after the speech-to-text final before it plays
+    "keepalive_interval_s": (2.0, 30.0),        # keep-alive ping of the voice endpoint during a call (flag `keepalive_enabled`)
+    "keepalive_max_s": (30.0, 900.0),           # a keep-alive stops by itself after this long, whatever else happens
 }
 # Clause sizes from the TTS re-measurement of 25 Oct 2026 (docs/evidence/phase0b_tts_v3.json, ulaw8k + named voice, no reference): wall time per second of audio is
 # 1.52 for 4 words (a first clause cannot be ahead of playout, it only has to be short), 1.21 for 8, 0.99 for 12 and 0.97 for 16: only clauses of 12 words or more
 # are generated as fast as they are played, so later clauses are cut at 12-14 words. Prefetch depth 2 is unchanged until the concurrency probe is run.
 PROVISIONAL = {"stream_first_min_words": 4, "stream_min_words": 12, "stream_max_words": 14, "stream_prefetch_depth": 2, "stream_prebuffer_ms": 150,
-               "runpod_poll_cap_s": 0.15}
+               "runpod_poll_cap_s": 0.15, "ack_after_ms": 300, "keepalive_interval_s": 5.0, "keepalive_max_s": 300.0}
 
 
 def value(cfg: dict, key: str):
@@ -33,4 +36,5 @@ def stream_config_from(cfg: dict):
     first, mn, mx = value(cfg, "stream_first_min_words"), value(cfg, "stream_min_words"), value(cfg, "stream_max_words")
     return StreamConfig(segmenter=SegmenterConfig(first_min_words=first, min_words=min(mn, mx), max_words=mx),
                         playout=PlayoutConfig(prebuffer_ms=value(cfg, "stream_prebuffer_ms")),
-                        prefetch_depth=value(cfg, "stream_prefetch_depth"))
+                        prefetch_depth=value(cfg, "stream_prefetch_depth"),
+                        ack_after_s=value(cfg, "ack_after_ms") / 1000)

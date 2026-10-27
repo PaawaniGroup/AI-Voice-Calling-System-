@@ -1,5 +1,9 @@
 """MME TTS worker for RunPod Serverless (Chatterbox Multilingual).
 
+Voice Studio (offline change, not built, not deployed; the GPU paths are UNVERIFIED): task "register_voice" (name, reference_audio_base64: a 3-30 s WAV; prepared once, cached by
+name and checksum, least-recently-used cap MAX_REGISTERED_VOICES), task "voices" (list the names) and, for a synth request that names an unknown voice, the structured answer
+{"error": "needs_reference", "code": "needs_reference", ...} instead of a crash. ALLOW_REQUEST_REF stays off by default. See docs/VOICE_STUDIO_DESIGN.md.
+
 What changed against the previous handler:
   * The voice is prepared ONCE per worker, at start-up, and kept by NAME (the baked /app/ref_voice.wav as DEFAULT_VOICE, plus any /app/voices/<name>.wav).
     A request picks it with {"input": {"voice": "<name>"}}; no reference audio is read, hashed or prepared per request.
@@ -13,19 +17,26 @@ Request:  {"input": {"text": "...", "language": "hi", "voice": "utkarsh", "outpu
                      "exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8}}      (voice / output_format / knobs optional)
 Response: {"audio_base64", "format", "sample_rate", "language", "voice", "timing": {...}}  or  {"error": "..."}
 """
+import array
 import base64
+import binascii
+import collections
 import contextlib
 import copy
 import glob
+import hashlib
 import inspect
 import io
+import math
 import os
+import re
 import sys
 import tempfile
 import threading
 import time
 import traceback
 import warnings
+import wave
 
 import numpy as np
 import soundfile as sf
@@ -42,6 +53,13 @@ MAX_TEXT_CHARS = int(os.getenv("MAX_TEXT_CHARS", "600"))
 MAX_REF_BYTES = 15 * 1024 * 1024
 OUTPUT_FORMATS = ("wav", "pcm16", "ulaw8k")
 
+# Voice Studio (task register_voice): voices registered at run time. UNVERIFIED on a GPU: only the logic around prepare_conditionals() is tested (fake model).
+MAX_REGISTERED_VOICES = max(1, int(os.getenv("MAX_REGISTERED_VOICES", "8")))   # least-recently-used cap on registered voices (baked voices are never evicted)
+MAX_REGISTER_BYTES = int(os.getenv("MAX_REGISTER_BYTES", str(8 * 1024 * 1024)))
+MIN_REGISTER_S, MAX_REGISTER_S = 3.0, 30.0
+VOICE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
+RESERVED_VOICE_NAMES = {"request"}                             # "request" is the slot of the legacy ALLOW_REQUEST_REF path
+
 ALLOWED_LANGUAGES = {
     "ar", "da", "de", "el", "en", "es", "fi", "fr",
     "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
@@ -51,7 +69,9 @@ ALLOWED_LANGUAGES = {
 GEN_LOCK = threading.Lock()
 MODEL = None            # the Chatterbox model (a fake one in --self-test)
 _torch = None           # set by load_model(); None means "no torch": generate_audio then uses the model's output as it is (self-test)
-VOICES = {}             # voice name -> prepared conditionals, built ONCE per worker at start-up
+VOICES = {}             # voice name -> prepared conditionals, built ONCE per worker at start-up (or by register_voice)
+BAKED = set()           # names of the voices made at start-up (image + VOICES_DIR): never evicted, never overwritten
+REGISTERED = collections.OrderedDict()   # name -> {"checksum", "duration_s"} of voices made by register_voice, least recently used first
 _active_voice = None
 
 
@@ -109,6 +129,8 @@ def _clone_conds(conds):
 
 def prepare_voice(name: str, wav_path: str) -> float:
     """Prepare one voice (the slow part of Chatterbox) and keep its conditionals under `name`. Returns the seconds it took."""
+    global _active_voice
+    _active_voice = None   # prepare_conditionals() overwrites MODEL.conds (even when it fails): nothing is "active" until select_voice() runs again
     t0 = time.perf_counter()
     MODEL.prepare_conditionals(wav_path)
     conds = getattr(MODEL, "conds", None)
@@ -130,6 +152,7 @@ def init_voices() -> None:
     """Prepare every voice once and log its name and how long it took."""
     if os.path.exists(DEFAULT_REF_WAV):
         spent = prepare_voice(DEFAULT_VOICE, DEFAULT_REF_WAV)
+        BAKED.add(DEFAULT_VOICE)
         log(f"[TTS] voice '{DEFAULT_VOICE}' prepared in {spent:.2f}s (source {DEFAULT_REF_WAV})")
     else:
         log(f"[TTS] WARNING: default reference not found at {DEFAULT_REF_WAV}")
@@ -139,6 +162,7 @@ def init_voices() -> None:
             log(f"[TTS] WARNING: voice '{name}' in {VOICES_DIR} is skipped: the name is already taken")
             continue
         spent = prepare_voice(name, path)
+        BAKED.add(name)
         log(f"[TTS] voice '{name}' prepared in {spent:.2f}s (source {path})")
     if not VOICES:
         log("[TTS] WARNING: no voice is available: every request will fail until a voice is baked into the image")
@@ -163,6 +187,99 @@ def warm_up() -> None:
         generate_audio(WARMUP_TEXT, "hi")
         generate_audio(WARMUP_TEXT, "hi")
     log(f"[TTS] warmup done in {time.perf_counter() - t:.2f}s")
+
+
+# ---------------------------------------------------------------------------------------------------------- Voice Studio tasks
+def task_error(code: str, message: str, **extra) -> dict:
+    """The structured error of the voice tasks: `error` and `code` are the same short word, `message` is for people. Never holds audio."""
+    return {"error": code, "code": code, "message": message, **extra}
+
+
+def needs_reference_response(voice) -> dict:
+    return task_error("needs_reference", "this worker has no such voice: send register_voice with the reference clip and ask again",
+                      voice=voice if isinstance(voice, str) and len(voice) <= 40 else None, voices=sorted(n for n in VOICES if n not in RESERVED_VOICE_NAMES))
+
+
+def valid_voice_name(name) -> bool:
+    return isinstance(name, str) and VOICE_NAME_RE.fullmatch(name) is not None
+
+
+def wav_duration_s(data: bytes) -> float:
+    """Seconds of audio in a PCM WAV, read from its header with the standard library. Raises ValueError when the bytes are not a readable WAV."""
+    try:
+        with wave.open(io.BytesIO(data), "rb") as w:
+            frames, rate = w.getnframes(), w.getframerate()
+    except (wave.Error, EOFError, ValueError, OverflowError) as exc:
+        raise ValueError(f"not a readable WAV ({type(exc).__name__})") from None
+    if rate <= 0 or frames <= 0:
+        raise ValueError("the WAV holds no audio")
+    return frames / rate
+
+
+def list_voices() -> dict:
+    """Task `voices`: the names this worker can speak with now. Baked voices first-class, registered ones in least-recently-used order (oldest first)."""
+    with GEN_LOCK:
+        return {"ok": True, "voices": sorted(n for n in VOICES if n not in RESERVED_VOICE_NAMES), "baked": sorted(BAKED), "registered": list(REGISTERED),
+                "max_registered": MAX_REGISTERED_VOICES}
+
+
+def register_voice(data: dict) -> dict:
+    """Task `register_voice`: validate, prepare ONCE and cache by name and checksum. UNVERIFIED on a GPU (prepare_conditionals with an arbitrary clip).
+    Everything that can be checked from the request alone is checked BEFORE the GPU is touched."""
+    global _active_voice
+    name = data.get("name")
+    if not valid_voice_name(name):
+        return task_error("invalid_name", "name must be 1-40 letters, digits, '_' or '-'")
+    if name in BAKED or name in RESERVED_VOICE_NAMES:
+        return task_error("name_reserved", "this name belongs to a voice that is part of the worker and cannot be replaced")
+    b64 = data.get("reference_audio_base64")
+    if not isinstance(b64, str) or not b64:
+        return task_error("invalid_audio", "reference_audio_base64 is required")
+    if len(b64) > MAX_REGISTER_BYTES * 4 // 3 + 8:
+        return task_error("too_large", f"the reference audio must be {MAX_REGISTER_BYTES} bytes or smaller")
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError):
+        return task_error("invalid_audio", "reference_audio_base64 is not valid base64")
+    if len(raw) > MAX_REGISTER_BYTES:
+        return task_error("too_large", f"the reference audio must be {MAX_REGISTER_BYTES} bytes or smaller")
+    try:
+        duration = wav_duration_s(raw)
+    except ValueError as exc:
+        return task_error("invalid_audio", str(exc))
+    if duration < MIN_REGISTER_S:
+        return task_error("too_short", f"the reference audio must be at least {MIN_REGISTER_S:g} seconds")
+    if duration > MAX_REGISTER_S:
+        return task_error("too_long", f"the reference audio must be at most {MAX_REGISTER_S:g} seconds")
+    checksum = hashlib.sha256(raw).hexdigest()
+    try:
+        with GEN_LOCK:
+            known = REGISTERED.get(name)
+            if known is not None and known["checksum"] == checksum and name in VOICES:   # same name, same audio: nothing to prepare
+                REGISTERED.move_to_end(name)
+                return {"ok": True, "name": name, "checksum": checksum, "duration_s": round(duration, 3), "cached": True, "prepare_s": 0.0,
+                        "registered": len(REGISTERED), "max_registered": MAX_REGISTERED_VOICES}
+            with tempfile.NamedTemporaryFile(suffix=".wav") as f:
+                f.write(raw)
+                f.flush()
+                spent = prepare_voice(name, f.name)
+            REGISTERED[name] = {"checksum": checksum, "duration_s": duration}
+            REGISTERED.move_to_end(name)
+            evicted = []
+            while len(REGISTERED) > MAX_REGISTERED_VOICES:
+                old = next(iter(REGISTERED))
+                del REGISTERED[old]
+                VOICES.pop(old, None)
+                if _active_voice == old:
+                    _active_voice = None
+                evicted.append(old)
+        log(f"[TTS_REGISTER] voice={name} duration_s={duration:.2f} prepare_s={spent:.3f} registered={len(REGISTERED)} evicted={len(evicted)}")
+        return {"ok": True, "name": name, "checksum": checksum, "duration_s": round(duration, 3), "cached": False, "prepare_s": round(spent, 3),
+                "registered": len(REGISTERED), "max_registered": MAX_REGISTERED_VOICES, "evicted": evicted}
+    except Exception as exc:
+        traceback.print_exc()
+        log(f"[TTS_ERROR] register_voice failed: {type(exc).__name__}")
+        return task_error("prepare_failed", "the worker could not prepare this voice", type=type(exc).__name__)
 
 
 # ---------------------------------------------------------------------------------------------------------- audio encoding
@@ -197,6 +314,14 @@ def handler(job):
     if data.get("warmup"):
         return {"ok": True}
 
+    task = data.get("task")
+    if task == "voices":
+        return list_voices()
+    if task == "register_voice":
+        return register_voice(data)
+    if task not in (None, "synth"):
+        return task_error("unknown_task", "task must be 'synth', 'register_voice' or 'voices'")
+
     total_start = time.perf_counter()
 
     text = data.get("text")
@@ -215,8 +340,10 @@ def handler(job):
         return {"error": f"ulaw8k needs a model rate that is a multiple of 8000 (got {MODEL.sr})"}
 
     voice = data.get("voice", DEFAULT_VOICE)
+    if not isinstance(voice, str):
+        return task_error("invalid_voice", "voice must be a string")
     if voice not in VOICES and not (ALLOW_REQUEST_REF and data.get("reference_audio_base64")):
-        return {"error": f"Unknown voice: {voice!r}", "voices": sorted(VOICES)}
+        return needs_reference_response(voice)   # a structured answer, not a crash: the client registers the voice and asks again
 
     # Optional generation knobs (only passed when provided)
     gen_kwargs = {}
@@ -237,6 +364,10 @@ def handler(job):
                     f.flush()
                     ref_s = prepare_voice("request", f.name)
                 voice = "request"
+            if voice not in VOICES:   # evicted by a register_voice between the check above and now
+                return needs_reference_response(voice)
+            if voice in REGISTERED:
+                REGISTERED.move_to_end(voice)   # used: it becomes the most recently used
             select_voice(voice)   # by name: no reference audio is read or prepared per request
 
             t0 = time.perf_counter()
@@ -276,6 +407,108 @@ def handler(job):
 
 
 # ---------------------------------------------------------------------------------------------------------- self-test (no GPU)
+def selftest_voice_tasks(check) -> None:
+    """The register_voice / voices / needs_reference checks with a FAKE model. Needs the standard library only (no numpy: the audio is built with `wave`),
+    so tests can run it with the heavy imports stubbed. It restores every module setting it changes."""
+    global MODEL, _torch, VOICES, _active_voice, MAX_REGISTERED_VOICES, MAX_REGISTER_BYTES, ALLOW_REQUEST_REF, log
+    saved = (MODEL, _torch, VOICES, _active_voice, MAX_REGISTERED_VOICES, MAX_REGISTER_BYTES, ALLOW_REQUEST_REF, log, set(BAKED), collections.OrderedDict(REGISTERED))
+
+    def tone(seconds, amp=0.3, rate=24000, freq=220):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(array.array("h", (int(32767 * amp * math.sin(2 * math.pi * freq * i / rate)) for i in range(int(rate * seconds)))).tobytes())
+        return buf.getvalue()
+
+    def b64(b):
+        return base64.b64encode(b).decode("ascii")
+
+    class FakeVoiceModel:
+        sr = 24000
+
+        def __init__(self):
+            self.conds, self.prepares = None, []
+
+        def prepare_conditionals(self, path):
+            with wave.open(path, "rb") as w:
+                frames = array.array("h", w.readframes(min(w.getnframes(), 2400)))
+            self.prepares.append(os.path.basename(path))
+            self.conds = {"amp": max(abs(s) for s in frames) / 32768.0}
+
+    def register(name, audio, **extra):
+        return handler({"input": {"task": "register_voice", "name": name, "reference_audio_base64": b64(audio) if isinstance(audio, bytes) else audio, **extra}})
+
+    try:
+        log = lambda m: None   # noqa: E731
+        MODEL, _torch, VOICES, _active_voice, ALLOW_REQUEST_REF = FakeVoiceModel(), None, {}, None, False
+        BAKED.clear()
+        REGISTERED.clear()
+        MAX_REGISTERED_VOICES, MAX_REGISTER_BYTES = 2, 8 * 1024 * 1024
+        VOICES["utkarsh"] = {"amp": 0.2}
+        BAKED.add("utkarsh")
+        ten = tone(10.0, 0.3)
+        prepares = lambda: len(MODEL.prepares)   # noqa: E731
+
+        # --- validation happens before the GPU is touched
+        for bad in ("", "a b", "x" * 41, "../x", "a/b", "é", None, 5):
+            r = register(bad, ten)
+            check(f"register_voice: name {str(bad)[:12]!r} is refused (invalid_name)", r.get("code") == "invalid_name", str(r)[:120])
+        check("register_voice: a name of exactly 40 letters, digits, _ and - is valid", valid_voice_name("a" * 36 + "_-9Z"))
+        check("register_voice: a baked voice cannot be replaced (name_reserved)", register("utkarsh", ten).get("code") == "name_reserved")
+        check("register_voice: the legacy 'request' slot is reserved", register("request", ten).get("code") == "name_reserved")
+        check("register_voice: missing audio is refused", register("v_a", "").get("code") == "invalid_audio")
+        check("register_voice: invalid base64 is refused", register("v_a", "!!!not base64!!!").get("code") == "invalid_audio")
+        check("register_voice: bytes that are not a WAV are refused", register("v_a", b"this is not a wav file").get("code") == "invalid_audio")
+        check("register_voice: 2 s is too short", register("v_a", tone(2.0)).get("code") == "too_short")
+        check("register_voice: 31 s is too long", register("v_a", tone(31.0, rate=8000)).get("code") == "too_long")
+        MAX_REGISTER_BYTES = 1000
+        check("register_voice: audio over MAX_REGISTER_BYTES is refused (too_large)", register("v_a", ten).get("code") == "too_large")
+        MAX_REGISTER_BYTES = 8 * 1024 * 1024
+        check("register_voice: refused requests prepared nothing", prepares() == 0, str(MODEL.prepares))
+
+        # --- prepare once, cache by name and checksum
+        r = register("v_a", ten)
+        check("register_voice: a valid clip is prepared", r.get("ok") is True and r.get("cached") is False and prepares() == 1 and "v_a" in VOICES, str(r)[:160])
+        check("register_voice: the answer carries the checksum, the duration and the time", len(r.get("checksum", "")) == 64 and abs(r.get("duration_s", 0) - 10.0) < 0.01 and "prepare_s" in r)
+        r2 = register("v_a", ten)
+        check("register_voice: the same name and checksum again prepares nothing (cached)", r2.get("cached") is True and prepares() == 1 and r2["checksum"] == r["checksum"])
+        r3 = register("v_a", tone(10.0, 0.6))
+        check("register_voice: the same name with other audio is prepared again and replaces the voice",
+              r3.get("cached") is False and prepares() == 2 and r3["checksum"] != r["checksum"] and abs(VOICES["v_a"]["amp"] - 0.6) < 0.02)
+        check("register_voice: preparing leaves no voice marked active (the next synth selects its own)", _active_voice is None)
+
+        # --- the list of voices
+        v = handler({"input": {"task": "voices"}})
+        check("voices: lists baked and registered names and the cap", v.get("voices") == ["utkarsh", "v_a"] and v.get("baked") == ["utkarsh"] and v.get("registered") == ["v_a"] and v.get("max_registered") == 2, str(v))
+
+        # --- least-recently-used cap (2): the baked voice is outside it
+        register("v_b", tone(10.0, 0.4))
+        register("v_a", tone(10.0, 0.6))            # touches v_a: v_b is now the oldest
+        r = register("v_c", tone(10.0, 0.5))
+        check("LRU: the cap evicts the least recently used registered voice", r.get("evicted") == ["v_b"] and sorted(VOICES) == ["utkarsh", "v_a", "v_c"], str(r)[:160])
+        check("LRU: the baked voice is never evicted", "utkarsh" in VOICES and "utkarsh" in BAKED)
+        e = handler({"input": {"text": "namaste", "language": "hi", "voice": "v_b"}})
+        check("an evicted voice answers needs_reference (structured, not a crash)", e.get("error") == "needs_reference" and e.get("code") == "needs_reference" and e.get("voice") == "v_b" and "message" in e, str(e))
+
+        # --- needs_reference and the legacy reference switch
+        before = prepares()
+        e = handler({"input": {"text": "namaste", "language": "hi", "voice": "nobody", "reference_audio_base64": b64(ten)}})
+        check("a reference inside a synth request is ignored by default (ALLOW_REQUEST_REF off): needs_reference, nothing prepared", e.get("code") == "needs_reference" and prepares() == before)
+        check("a voice name that is not a string is an error, not a crash", handler({"input": {"text": "namaste", "voice": ["x"]}}).get("code") == "invalid_voice")
+        check("an unknown task is an error", handler({"input": {"task": "delete_everything"}}).get("code") == "unknown_task")
+        check("the answers of the voice tasks never hold the audio", "reference_audio_base64" not in str(register("v_a", tone(2.0))) and "reference_audio_base64" not in str(v))
+    except Exception as exc:                                                                          # noqa: BLE001: a crash IS the failure this case exists to catch
+        check("voice tasks: no exception", False, f"{type(exc).__name__}: {str(exc)[:110]}")
+    finally:
+        MODEL, _torch, VOICES, _active_voice, MAX_REGISTERED_VOICES, MAX_REGISTER_BYTES, ALLOW_REQUEST_REF, log = saved[:8]
+        BAKED.clear()
+        BAKED.update(saved[8])
+        REGISTERED.clear()
+        REGISTERED.update(saved[9])
+
+
 def run_self_test() -> int:
     """`python handler.py --self-test`: checks voice caching, the request contract, the three output formats and the mu-law encoder with a FAKE
     model. Needs numpy, scipy and soundfile only: no torch, no chatterbox, no GPU, no network. Exit code 0 = all passed."""
@@ -367,6 +600,8 @@ def run_self_test() -> int:
         sf.write(os.path.join(d, "ref.wav"), 0.2 * np.sin(2 * np.pi * 200 * np.arange(8000) / 16000), 16000)
         sf.write(os.path.join(d, "voices", "priya.wav"), 0.6 * np.sin(2 * np.pi * 200 * np.arange(8000) / 16000), 16000)
         MODEL, _torch, VOICES, _active_voice = FakeModel(), None, {}, None
+        BAKED.clear()
+        REGISTERED.clear()
         DEFAULT_REF_WAV, DEFAULT_VOICE, VOICES_DIR, ALLOW_REQUEST_REF = os.path.join(d, "ref.wav"), "utkarsh", os.path.join(d, "voices"), False
         real_log, log = log, (lambda m: lines.append(m))
         init_voices()
@@ -393,7 +628,8 @@ def run_self_test() -> int:
         r = handler({"input": base})
         check("no voice named = the default voice", r.get("voice") == "utkarsh" and abs(peak(r) - 0.2) < 0.02)
         e = handler({"input": {**base, "voice": "nobody"}})
-        check("an unknown voice is an error that lists the voices", "error" in e and e.get("voices") == ["priya", "utkarsh"], str(e))
+        check("an unknown voice is a structured needs_reference answer that lists the voices",
+              e.get("error") == "needs_reference" and e.get("code") == "needs_reference" and e.get("voice") == "nobody" and e.get("voices") == ["priya", "utkarsh"], str(e))
 
         # --- 3. a reference sent in the request
         junk = base64.b64encode(b"this is not a wav file").decode()
@@ -445,6 +681,9 @@ def run_self_test() -> int:
             check("the stored voice's reference dict is not shared with the active copy", "_touched" not in stored.gen and "_touched" in MODEL.conds.gen)
         except Exception as e:                                                                  # noqa: BLE001: a crash IS the failure this case exists to catch
             check("real-like voice object that refuses deepcopy: start-up and requests work", False, f"{type(e).__name__}: {str(e)[:110]}")
+
+    # --- 5b. Voice Studio tasks (register_voice, voices, needs_reference, LRU): the logic that needs no numpy is one function that pytest also runs with stubs
+    selftest_voice_tasks(check)
 
     # --- 6. load_model(): t3_model is passed only when from_pretrained names it
     def fp_new(device, t3_model=None):

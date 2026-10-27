@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.ai import codec, tts_frontend, turn_trace
+from app.core import safe_output
 from app.core.errors import Unprocessable
 from app.observability import metrics as m
 from config.settings import Settings
@@ -35,9 +36,11 @@ _REF_CACHE: dict = {}
 
 
 class AiError(Exception):
-    def __init__(self, service: str, kind: str, detail: str = ""):
+    def __init__(self, service: str, kind: str, detail: str = "", *, status_code: int | None = None, body: str | None = None):
         super().__init__(f"{service}:{kind}")
         self.service, self.kind, self.detail = service, kind, detail
+        self.status_code = status_code
+        self.body = body
 
 
 class AiUnavailable(AiError):
@@ -145,6 +148,7 @@ class ModelClients:
                                        timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0))
         self._bg: set[asyncio.Task] = set()          # fire-and-forget RunPod cancel calls (kept referenced until they finish)
         self.cancelled_jobs: list[tuple[str, int | str]] = []   # (service, http status | error type) of each RunPod cancel attempt
+        self.last_tts_at: float | None = None        # monotonic time a real voice job started or ended (the keep-alive skips its ping right after one)
 
     def resolve_key(self, service: str | None = None) -> str | None:
         """Resolve API key for a model service without exposing or logging it.
@@ -239,7 +243,8 @@ class ModelClients:
         if self._runpod_mode() == "runsync":
             r = await self._http.post(ep.url + "/runsync", json=body, headers=hdrs, timeout=ep.timeout)
             if r.status_code >= 400:
-                raise AiError(service, "http_error", str(r.status_code))
+                body_clean = safe_output.scrub(r.text[:80]).replace("\n", " ").strip()
+                raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
             return await self._runpod_wait(service, ep, hdrs, r.json())
         post = asyncio.ensure_future(self._http.post(ep.url + "/run", json=body, headers=hdrs, timeout=ep.timeout))
         try:
@@ -248,7 +253,8 @@ class ModelClients:
             self._spawn(self._cancel_when_submitted(post, service, ep, hdrs))
             raise
         if r.status_code >= 400:
-            raise AiError(service, "http_error", str(r.status_code))
+            body_clean = safe_output.scrub(r.text[:80]).replace("\n", " ").strip()
+            raise AiError(service, "http_error", str(r.status_code), status_code=r.status_code, body=body_clean)
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
         try:
@@ -269,7 +275,8 @@ class ModelClients:
                 raise AiUnavailable(service, "client_closed")
             sr = await self._http.get(f"{ep.url}/status/{j['id']}", headers=hdrs, timeout=30)
             if sr.status_code >= 400:
-                raise AiError(service, "http_error", str(sr.status_code))
+                body_clean = safe_output.scrub(sr.text[:80]).replace("\n", " ").strip()
+                raise AiError(service, "http_error", str(sr.status_code), status_code=sr.status_code, body=body_clean)
             j = sr.json()
         if isinstance(j, dict) and j.get("status") not in (None, "COMPLETED"):
             raise AiError(service, "runpod_error", f"status={j.get('status')} {str(j.get('error', ''))[:160]}")
@@ -582,7 +589,27 @@ class ModelClients:
             m.AI_LATENCY.labels("brain").observe(time.perf_counter() - t0)
 
     # ------------------------------------------------------------------ TTS
+    async def ping_tts(self) -> bool:
+        """One no-op job on the voice worker (`{"warmup": true}`: the worker answers {"ok": true} without synthesizing). For the per-call keep-alive
+        (app/ai/keepalive.py). Never raises (a cancellation excepted); True only when the worker answered ok. Not part of any turn trace or request metric."""
+        try:
+            ep = self.endpoint("tts")
+            if not ep.path.endswith("/runsync"):
+                return False
+            j = await self._runpod_call("tts", ep, self._auth_headers("tts"), {"input": {"warmup": True}})
+            out = j.get("output") if isinstance(j, dict) else None
+            return isinstance(out, dict) and out.get("ok") is True
+        except Exception:
+            return False
+
     async def synthesize(self, text: str, language: str) -> tuple[bytes, int]:
+        self.last_tts_at = time.monotonic()
+        try:
+            return await self._synthesize(text, language)
+        finally:
+            self.last_tts_at = time.monotonic()
+
+    async def _synthesize(self, text: str, language: str) -> tuple[bytes, int]:
         async def go(ep: ServiceEndpoint):
             hdrs = self._auth_headers("tts")
             model = self.cfg.get("models", {}).get("tts", self.s.ai_tts_model)

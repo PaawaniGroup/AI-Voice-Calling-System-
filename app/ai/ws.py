@@ -230,7 +230,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         "in_speech": False,
         "last_audio_at": 0.0,   # monotonic time the last assistant audio was handed to the transport
     }
-    turn: dict = {"task": None, "pcm": b"", "end_at": 0.0, "audio": False, "n": 1}   # the turn being processed (if any)
+    turn: dict = {"task": None, "pcm": b"", "end_at": 0.0, "audio": False, "n": 1, "ack": False}   # the turn being processed (if any)
     merge: dict = {"pcm": None, "n": 0}   # speech of a cancelled attempt that the NEXT utterance continues
 
     # Full-duplex input handling (tenant flag `full_duplex_input`; None = OFF: every line below takes the old path, unchanged)
@@ -291,7 +291,11 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         from app.ai.streaming.plivo_sink import PlivoStreamSink
 
         def on_audio(seconds: float) -> None:
-            turn["audio"] = True
+            s_ = turn.get("stream")
+            if s_ is not None and not s_.playout.sending_real:
+                turn["ack"] = True        # the cached acknowledgement: audio is playing (barge-in applies) but no answer exists yet
+            else:
+                turn["audio"] = True
             on_start(seconds)
 
         sink = PlivoStreamSink(io, on_audio=on_audio, on_level=on_level if out_level is not None else None)
@@ -406,7 +410,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             if merge["pcm"] is not None:   # an earlier attempt at this question was cancelled: this speech continues it
                 pcm, n = merge["pcm"] + pcm, merge["n"] + 1
                 merge["pcm"] = None
-            turn.update(pcm=pcm, end_at=t_speech_end, audio=False, n=n, stream=None, stream_sink=None)
+            turn.update(pcm=pcm, end_at=t_speech_end, audio=False, ack=False, n=n, stream=None, stream_sink=None)
             task = asyncio.create_task(run_turn(pcm, t_speech_end, t_endpoint), name="ai-turn")
             turn["task"] = task
             try:
@@ -418,6 +422,13 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             finally:
                 if turn["task"] is task:
                     turn["task"] = None
+
+    def merge_if_only_acknowledged() -> None:
+        """The caller talks over the cached acknowledgement before any answer audio exists: the speech continues the same question, so it is merged
+        exactly like speech that starts before any audio (the question is not lost). No effect unless an acknowledgement was played."""
+        task = turn["task"]
+        if turn["ack"] and not turn["audio"] and task is not None and not task.done() and turn["pcm"] and len(turn["pcm"]) <= MERGE_MAX_AUDIO_S * rate * 2:
+            merge["pcm"], merge["n"] = turn["pcm"], turn["n"]
 
     async def cancel_turn(reason: str) -> bool:
         """Stop the turn in progress (if any): its STT/Brain/TTS requests are cancelled and the worker is free for the next utterance."""
@@ -538,6 +549,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     kept = det.take()
                     st["playing"] = False
                     st["play_until"] = 0.0
+                    merge_if_only_acknowledged()
                     silence_stream()
                     await interrupt_io()
                     await cancel_turn("barge_in")
@@ -556,6 +568,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                         log.info("barge-in triggered: rms=%.1f >= %.1f for %dms", frame_rms, barge_threshold, st["speech_ms"])
                         st["playing"] = False
                         st["play_until"] = 0.0
+                        merge_if_only_acknowledged()
                         silence_stream()                     # streaming turn: stop writing frames before the clear (a frame after it would still play)
                         await interrupt_io()                 # clear first: the caller stops hearing the assistant at once
                         await cancel_turn("barge_in")        # then stop generating the rest of the reply and free the worker

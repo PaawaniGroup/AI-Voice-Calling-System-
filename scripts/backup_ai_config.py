@@ -21,7 +21,38 @@ from app.ai.key_refs import mask_key
 from pymongo import AsyncMongoClient
 from config.settings import Settings
 
-DEFAULT_BACKUP_DIR = Path(os.environ.get("LOCALAPPDATA", "C:/Users/Admin/AppData/Local")) / "mme_telephony_backups"
+
+def get_default_backup_dir() -> Path:
+    """Returns an absolute backup directory outside the repository."""
+    if sys.platform.startswith("linux") and Path("/mnt/c").exists():
+        app_data = Path("/mnt/c/Users/Admin/AppData/Local")
+        base = app_data if app_data.exists() else Path("/tmp")
+    else:
+        app_data_str = os.environ.get("LOCALAPPDATA", "C:/Users/Admin/AppData/Local")
+        base = Path(app_data_str).resolve()
+    return base / "mme_telephony_backups"
+
+
+def validate_backup_path(path: Path) -> Path:
+    """Ensures backup path is absolute and outside any repository."""
+    resolved = path.resolve()
+    repo_dirs = [ROOT.resolve()]
+    for p in [Path("/mnt/c/Users/Admin/Desktop/MME_Telephony"),
+             Path("/mnt/c/Users/Admin/Desktop/MME_wt_turns"),
+             Path("C:/Users/Admin/Desktop/MME_Telephony"),
+             Path("C:/Users/Admin/Desktop/MME_wt_turns")]:
+        if p.exists():
+            repo_dirs.append(p.resolve())
+
+    for r in repo_dirs:
+        try:
+            resolved.relative_to(r)
+            raise ValueError(f"SAFETY ERROR: Backup path {resolved} is inside repository {r}. Backups must be strictly outside.")
+        except ValueError as e:
+            if "SAFETY ERROR" in str(e):
+                raise
+
+    return resolved
 
 
 async def backup_tenant_ai_config(
@@ -59,12 +90,15 @@ async def backup_tenant_ai_config(
         }
 
         if out_file is None:
-            DEFAULT_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            backup_dir = get_default_backup_dir()
+            backup_dir.mkdir(parents=True, exist_ok=True)
             ts = now_utc.strftime("%Y%m%dT%H%M%SZ")
-            out_file = DEFAULT_BACKUP_DIR / f"ai_config_{tenant_id}_{ts}.json"
+            out_file = backup_dir / f"ai_config_{tenant_id}_{ts}.json"
         else:
+            out_file = validate_backup_path(out_file)
             out_file.parent.mkdir(parents=True, exist_ok=True)
 
+        validate_backup_path(out_file)
         out_file.write_text(json.dumps(backup_payload, indent=2), encoding="utf-8")
         return out_file
     finally:

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 
-from app.api import routes, routes_live, routes_platform
+from app.api import routes, routes_live, routes_platform, routes_voices
 from app.ai.media import UnavailableBridge, WsForkBridge
 from app.ai.service import AiService
 from app.services.sessions import SessionService
@@ -31,6 +31,7 @@ from app.providers.base import FreeSwitchGatewayProvider, MockProvider
 from app.providers.plivo import PlivoApiProvider
 from app.security.auth import RateLimiter
 from app.services import recordings as rec_svc
+from app.voices.studio import VoiceStudio
 from app.telephony.controller import Controller
 from app.telephony.esl import EslCommandClient, EslEventClient
 from config.settings import Settings, get_settings
@@ -86,6 +87,8 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         ai = AiService(database, repos, s, sessions, emitter, bridge, transport=ai_transport)
         ctrl.sessions, ctrl.ai = sessions, ai
         app.state.sessions, app.state.ai = sessions, ai
+        voices = VoiceStudio(database, repos, ai, s, ai_transport)   # Voice Studio (previews only; behind the per-tenant flag voice_studio, default OFF)
+        app.state.voices = voices
         repos.activity = sessions.activity = ai.activity = wworker.activity = app.state.activity  # live dashboard feed
         storage = rec_svc.make_storage(s)
         app.state.repos, app.state.controller, app.state.webhook_worker = repos, ctrl, wworker
@@ -145,6 +148,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
             housekeeping.cancel()
             await asyncio.gather(housekeeping, return_exceptions=True)
             await wworker.stop()
+            await voices.shutdown()
             await ai.shutdown()
             await ctrl.stop()
             if esl_events:
@@ -174,7 +178,12 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         request_id_var.set(rid)
         correlation_id_var.set(request.headers.get("x-correlation-id", "")[:64] or rid)
         cl = request.headers.get("content-length")
-        if cl and cl.isdigit() and int(cl) > s.max_body_bytes:
+        limit = s.max_body_bytes
+        if request.method == "POST" and request.url.path.rstrip("/") == "/v1/voices":   # Voice Studio clip upload: the one route with a larger body
+            limit = s.voice_studio_max_upload_bytes + 65536                              # the file limit plus the multipart framing
+            if not (cl and cl.isdigit()):
+                return JSONResponse({"error": {"code": "length_required", "message": "Content-Length is required for uploads"}}, 411)
+        if cl and cl.isdigit() and int(cl) > limit:
             return JSONResponse({"error": {"code": "payload_too_large", "message": "request body too large"}}, 413)
         t0 = time.perf_counter()
         try:
@@ -188,7 +197,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
         resp.headers["Cache-Control"] = "no-store"
         resp.headers["X-Content-Type-Options"] = "nosniff"
         if request.url.path.startswith("/dashboard"):
-            resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+            resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
             resp.headers["X-Frame-Options"] = "DENY"
             resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
@@ -213,6 +222,7 @@ def create_app(settings: Settings | None = None, *, db: Database | None = None, 
     app.include_router(routes.health)
     app.include_router(routes.v1)
     app.include_router(routes_platform.router)
+    app.include_router(routes_voices.router)
     app.include_router(routes_live.router)
     app.include_router(routes_platform.ws_router)
     if s.dashboard_enabled:

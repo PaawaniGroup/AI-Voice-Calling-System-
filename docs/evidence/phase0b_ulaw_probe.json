@@ -1,6 +1,6 @@
 {
- "endpoint": "93tqgnxb5dyhvx",
- "started": "2026-10-25T07:43:53Z",
+ "endpoint": "6bmxas8ccwzhrv",
+ "started": "2026-10-26T05:20:53Z",
  "workers_before": {
   "idle": 2,
   "ready": 2,
@@ -8,7 +8,31 @@
   "initializing": 0
  },
  "health_http": 200,
- "verdict": "timeout",
+ "status_first_seen_s": {
+  "SUBMITTED": 0.0,
+  "IN_QUEUE": 0.4,
+  "IN_PROGRESS": 47.0,
+  "COMPLETED": 50.7
+ },
+ "worker_id": "tui6qiivyozrqn",
+ "job_id": "1ec8e709-f97c-4f5b-88bb-06c2f660df9c-e1",
+ "verdict": "new_handler",
+ "detail": "answered ulaw8k",
+ "delay_ms": 46036,
+ "exec_ms": 2356,
+ "wall_ms": 50684.8,
+ "overhead_ms": 2292.8,
+ "sample_rate": 8000,
+ "format": "ulaw8k",
+ "voice": "utkarsh",
+ "audio_bytes": 15360,
+ "audio_s": 1.92,
+ "worker_timing": {
+  "audio_s": 1.92,
+  "generate_s": 2.301,
+  "total_s": 2.306
+ },
+ "error": null,
  "cost": {
   "per_service": {
    "stt": {
@@ -24,14 +48,14 @@
     "usd": 0.0
    },
    "tts": {
-    "job_s": 240.01,
+    "job_s": 48.39,
     "idle_s": 0.0,
-    "tail_s": 300.0,
-    "usd": 0.10368
+    "tail_s": 60.0,
+    "usd": 0.02081
    }
   },
-  "usd_estimated_total": 0.10368,
-  "budget_usd": 0.1,
+  "usd_estimated_total": 0.02081,
+  "budget_usd": 0.04,
   "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
  }
 }

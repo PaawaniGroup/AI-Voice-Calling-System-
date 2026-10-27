@@ -84,3 +84,4 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .col-gap{display:flex;flex-direction:column;gap:4px}
 .lat-box{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
 .lat-note{font-size:12px;margin-bottom:4px}
+.vs-state{min-height:1.4em;margin:6px 0;color:var(--accent)}.vs-warn{color:var(--warn);margin:6px 0 0}.vs-player{width:100%;margin-top:8px}.vs-text{width:100%;resize:vertical}
