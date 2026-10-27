@@ -22,3 +22,8 @@ State what must be off (Pods, Active workers) and verify it read-only (list Pods
 - Per tenant (through `AiService.put_config`, verify with `get_config`): `rt_transport` {"tts":"persistent"} etc., `rt_endpoints` {"tts":"wss://..."}, `rt_secret_env` "NAME_OF_ENV_VAR" (the secret itself lives in that environment variable of the service process, never in config).
 - Turn OFF (any one is enough): set the tenant's `rt_transport` values back to "queue" or `{}`; global `ai_rt_kill=true` (settings); calls already in progress keep their clients until they end. The queue path (/run + poll) is always the fallback.
 - Server side (Pod): see `deploy/rt_workers/` and STAGE2_TRANSPORT.md; start/stop of any Pod is a chargeable REQUEST.
+
+## Acknowledgement path (flag `ack_enabled`, default OFF; nothing switched on)
+- Clips: `C:\mme_ack_audio\` = `/mnt/c/mme_ack_audio` (manifest.json, `.ulaw` + playable `.wav`); generated once by `tools/realtime/gen_ack_clips.py` (a chargeable REQUEST with a cap of $0.15; key from `/mnt/c/mme_keys/runpod_tts.txt` into `RUNPOD_TTS_KEY` for that process only); checked free by `python tools/realtime/check_ack_clips.py /mnt/c/mme_ack_audio`.
+- Turn ON for a tenant (after the operator listened and set `MME_TEL_AI_ACK_DIR=/mnt/c/mme_ack_audio` and restarted the service): `put_config` {"ack_enabled": true, "ack_after_ms": 1500} on a tenant that has `streaming_pipeline` on; verify with `get_config`. Turn OFF: {"ack_enabled": false}; missing or invalid files already switch it off by themselves (the call goes on without it).
+- Trace: `ack_ms`, `ack_at_ms`, `ack_first_frame_ms` in the stream metrics; `t_ack_first_frame` mark; "first audio" counts only the real answer.

@@ -11,9 +11,9 @@ Branch `realtime` (worktree `MME_wt_realtime`) from `integration` at 314b168. No
 |---|---|---|---|---|
 | 0 | supervised call on `integration` (S6-S12 of the fast path) and its REAL medians | wake, queue test (cap $0.45 mine) | - | waiting for the operator ("active set") |
 | 1 | measurement harness: stage timers, SIMULATED and REAL modes, comparison table, CI-style gate | none until approved | regression gate | **offline part built** (tools/realtime/, 21 tests) |
-| 2 | transport: queue (default) vs persistent connection (flag `rt_transport`), server files, host decision | G1 Pod round trip, cap $0.10 | G1: p50 <= 40 ms | not started |
+| 2 | transport: queue (default) vs persistent connection (flag `rt_transport`), server files, host decision | G1 Pod round trip, cap $0.10 | G1: p50 <= 40 ms | **offline part built and committed** (security, rediscovery, launcher; 177 SIMULATED tests pass); G1 not run (no Pod key, location undecided) |
 | 3 | streaming models: LLM, voice (chunked synthesis), STT (rolling decode), end of turn | caps $0.50 / $1.00 / $0.20 | one gate each | not started |
-| 4 | orchestration, topology, capacity, reliability | ack audio $0.05, concurrency $0.30 | - | not started |
+| 4 | orchestration, topology, capacity, reliability | ack audio (done: see below), concurrency $0.30 | - | ack path ported and committed (flag OFF); 5 clips generated; concurrency not started |
 | 5 | integration and proof: synthetic harness on all gates, ONE supervised call, go/no-go memo | the call | A-median, A-p90, FS | not started |
 
 No paid step of Stages 1-4 runs before the Stage 0 report.
@@ -37,4 +37,17 @@ No paid step of Stages 1-4 runs before the Stage 0 report.
 Recordings (the operator's 12 caller lines, a folder outside every repository; none exist yet); balance (above or below $1: not stated, treated as UNKNOWN, no paid step runs); Stage 0 (not decided); the Pod account key later as a REQUEST with minimal permissions.
 
 ## Stage 2 status (persistent transport)
-Built offline, behind per-tenant flags default OFF (`rt_transport`, `rt_endpoints`, `rt_secret_env`; global kill `ai_rt_kill`): client `app/ai/rt/`, server `deploy/rt_workers/`, G1 probe `tools/realtime/rt_rtt_probe.py`, design `STAGE2_TRANSPORT.md`. First approved test run (one run) hit a collection error in MY code (worker module loaded without registering in sys.modules, so its dataclass failed); no test body executed; fixed in three loaders; a re-run needs the operator's "APPROVED: run". Gate G1 (round trip p50 <= 40 ms) is judged only for a probe run from the host the service will run on (`--declared-from cloud`). Paid REQUEST order by value (operator, this stage): 1 acknowledgement audio (cap $0.05), then the Pod requests (G1, LLM, voice, concurrency), STT decode needs recordings.
+Built offline and committed (059396a and earlier), behind per-tenant flags default OFF (`rt_transport`, `rt_endpoints`, `rt_secret_env`, `rt_pins`; global kill `ai_rt_kill`): client `app/ai/rt/`, server `deploy/rt_workers/`, G1 probe `tools/realtime/rt_rtt_probe.py`, G1 launcher `tools/realtime/launch_probe_pod.py` (never run), design `STAGE2_TRANSPORT.md`. All Stage 2 evidence is SIMULATED (in-memory sockets, fake engines). Gate G1 (round trip p50 <= 40 ms) is judged only for a probe run from the host the service will run on (`--declared-from cloud`). Paid REQUEST order by value (operator, this stage): 1 acknowledgement audio (cap $0.05), then the Pod requests (G1, LLM, voice, concurrency), STT decode needs recordings.
+
+## Acknowledgement path (Stage 4 item, built early by the operator's priority)
+Code ported from quality-work 9cdb32b behind `ack_enabled` (default OFF, `ack_after_ms` 1500), committed (ebbb5ee). Five clips generated on 27 Oct 2026 (one run, MEASURED jobs: warm-up 49.0 s cold start, clips 2.1-2.9 s each) into `C:\mme_ack_audio\` (outside every repo): hi_1, hi_2, hi_3, en_2 pass `check_ack_clips.py`; en_1 came out 2.16 s (limit 2.0 s; the limit was NOT changed): leading silence 30 ms, trailing 410 ms, audible 1720 ms, one internal pause of 300 ms; a trimmed copy `en_1_trim` (10 ms margin, 10 ms fades, 1740 ms, original untouched, manifest updated, the previous manifest kept as `manifest_before_trim.json`) passes, and all five load through `AckSet.load` (`load: ok`). Not yet done: the operator's listening, `MME_TEL_AI_ACK_DIR` (needs a service restart: the operator's), a real trace with an acknowledgement (FS gate).
+
+## What remains before ONE supervised call with all the new flags
+1. The operator listens to the five clips (a voice cannot be judged by me); a re-generation of any clip is a new REQUEST.
+2. Set `MME_TEL_AI_ACK_DIR=/mnt/c/mme_ack_audio` for the service and restart it (operator's approval; I never restart it).
+3. Decide what "all the new flags" means: `ack_enabled` is ready; `rt_transport` persistent is NOT ready for a call (no server exists: Stage 3 builds the model servers and Stage 2's G1 has not been measured), `stream_ramp`, `tts_adaptive_poll`, `trace_evidence`, `stt_raw_pcm` are on `integration` and need their own Stage 0 evidence.
+4. Stage 0 (S6-S12 on `integration`): the operator's "active set", then the supervised call that produces the REAL baseline medians; nothing before that is judged.
+5. Merge path: `realtime` is a separate branch from `integration` 314b168; its commits must reach whatever branch the service runs (the operator's decision; I do not merge or push).
+6. `scripts/prepare_supervised_call_tenant.py` and `scripts/pre_call_checklist.py` must know the new keys (`ack_enabled`, `ack_after_ms`; `rt_*` stays off): not done in this worktree (those scripts live on `integration`; I do not edit other worktrees).
+7. A supervised-call plan: tenant armed state is the operator's (policy boolean), allowlist number, cap, kill switch (`plivo_testcall.py disarm`), the call itself is the operator's.
+8. First sound (FS gate) can only be judged from that call's trace (`t_ack_first_frame`), tagged MEASURED.

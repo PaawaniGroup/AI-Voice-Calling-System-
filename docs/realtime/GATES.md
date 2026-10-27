@@ -49,3 +49,8 @@ Hindi pronunciation (the operator's listening); STT term accuracy; grounding (no
 
 ## What the SIMULATED harness says today (orchestration only, MEASURED inputs; not a result)
 `python tools/realtime/harness.py --scenario ramp --workers 2` with the MEASURED medians (STT 1446 ms, Brain first token 737 ms, voice queue 1.2 s, voice wall times of 26 Oct): first audio 6.0 s (today's plan with one worker: 7.7 s; the baseline is 7.31 s MEASURED). The harness is 5.3 % above the baseline (7.70 s against 7.31 s; the test allows 10 %), SIMULATED. The goal of 2.2 s is therefore far away with today's models and transport: Stages 2 and 3 have to remove the queue and the gateway floor and make the voice first audio fast. This is SIMULATED and proves nothing about the models.
+
+## Status update (27 Oct 2026, evening)
+- **FS-first-sound** is still BLOCKED, but two of its three blockers are gone: the acknowledgement code is ported and committed (flag `ack_enabled`, default OFF) and five clips exist outside the repo (`C:\mme_ack_audio\`; four as generated, en_1 as a trimmed copy). It stays BLOCKED until the operator has listened, the directory is configured, and a REAL trace shows a played acknowledgement (`t_ack_first_frame`).
+- **G1-roundtrip** (rt_roundtrip_ms median <= 40 ms, n >= 100, `measured_from: cloud`) is defined in `gates.json`; not measured (no Pod key; the host the service runs on is undecided, the PC answer being "stay for now"; a PC run is informational and cannot pass).
+- Every other gate: unchanged, NOT YET MEASURED.

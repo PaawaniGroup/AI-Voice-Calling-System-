@@ -97,3 +97,7 @@ Prices: Brain on a 48 GB card $0.000486/s = $1.7496/h (operator's screenshots). 
 | 3 GPUs: Brain 48 GB + speech 24 GB + voice 24 GB (no sharing) | $0.00019/s | $810.58 | $2,275.85 |
 | | $0.0003/s | $1,016.50 | $2,854.01 |
 Billing is the only authoritative cost; a serverless Active worker may bill differently from a Pod (UNVERIFIED).
+## Actual and estimated: acknowledgement clips (27 Oct 2026)
+One run of `tools/realtime/gen_ack_clips.py`: 1 warm-up job (cold start, 49.0 s MEASURED) + 5 clip jobs (2.1-2.9 s each) = 63 s wall, about 61 s of worker time. Cost (ESTIMATE; only Billing is authoritative): jobs alone about $0.012 at $0.00019/s and $0.018 at $0.0003/s; with the endpoint's idle tail (about 300 s) about $0.069 / $0.109 (the tool's own projection: $0.11 at the higher price; cap was $0.15). The trim of en_1 was free and offline.
+The voice cold start is now 49.0 s in this run (earlier samples: 48.9 s and 41-52 s; MEASURED each).
+Remaining requests are unchanged from the last table (G1 Pod, LLM Pod, voice Pod, concurrency, STT decode); the ack request is consumed: total of the others about $1.64 at $0.00019/s and $2.18 at $0.0003/s (the LLM row at the 48 GB price $0.000486/s: $0.73).
