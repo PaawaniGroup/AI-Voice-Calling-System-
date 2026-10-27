@@ -377,6 +377,9 @@ class AiConfigIn(Strict):
     strict_grounding: bool | None = None    # strict grounding rules appended to the system prompt (quality-work); default OFF per tenant
     stream_ramp: bool | None = None          # clause-size ramp (short first clause, Brain opening rule); needs streaming_pipeline; default OFF per tenant
     tts_adaptive_poll: bool | None = None    # voice jobs: overlapping status polls from the predicted end (saves at most ~0.15 s per job, ESTIMATE); default OFF per tenant
+    rt_transport: dict[str, str] | None = None     # per service (stt, tts, brain): "queue" (default) or "persistent" (always-on server over a standing connection); default: all queue
+    rt_endpoints: dict[str, str] | None = None     # wss:// URL of the STT and voice servers, https:// root of the Brain server (host allowlist as for the queue URLs)
+    rt_secret_env: str | None = Field(None, max_length=64)   # NAME of the environment variable holding the signing secret (never the secret itself)
     stt_raw_pcm: bool | None = None         # send the caller's audio to the STT worker as ONE raw PCM16 field + sample rate (needs a worker that reads audio_pcm16_b64); default OFF per tenant
     stream_ramp_first_min_words: int | None = Field(None, ge=1, le=4)
     stream_first_max_words: int | None = Field(None, ge=2, le=8)
