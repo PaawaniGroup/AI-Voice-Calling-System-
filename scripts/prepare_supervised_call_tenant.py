@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Prepares tenant configuration for supervised call.
 
-Sets ONLY the four experimental flags plus tts_voice in ai_config:
-  - tts_ulaw8k: True
-  - devanagari_hindi: True
-  - streaming_pipeline: True
-  - full_duplex_input: True
-  - tts_voice: "utkarsh"
+Sets ONLY these ai_config fields:
+  - tts_ulaw8k, devanagari_hindi, streaming_pipeline, full_duplex_input: True; tts_voice: "utkarsh"   (as before)
+  - latency work:  stream_ramp, tts_adaptive_poll, trace_evidence: True
+  - quality work:  glossary_correction, strict_grounding: True
+
+NOT set (listed in every run with their current values): stt_raw_pcm, faq_grounding, ack_enabled, keepalive_enabled (all default OFF), and reply_guard, which has
+NO tenant flag in this tree (reply_guard.py is an unwired file; there is nothing to switch).
+Every flag set here is in the allowlist of AiService.get_config (tests/unit/test_tenant_key_scripts.py verifies it): a flag missing from that allowlist would be silently
+dropped before it reaches the runtime, which is exactly how key_refs was lost once.
 
 Does NOT set allowed_callers or max_duration_s (those live in tenant policy).
 Performs automatic timestamped backup prior to applying.
@@ -32,7 +35,15 @@ SUPERVISED_FLAGS = {
     "streaming_pipeline": True,
     "full_duplex_input": True,
     "tts_voice": "utkarsh",
+    "stream_ramp": True,
+    "tts_adaptive_poll": True,
+    "trace_evidence": True,
+    "glossary_correction": True,
+    "strict_grounding": True,
 }
+# Flags that stay as they are: shown, never written. reply_guard has no flag (module not wired).
+LISTED_NOT_SET = {"stt_raw_pcm": "default OFF", "faq_grounding": "default OFF (module not in this tree)", "ack_enabled": "default OFF (module not in this tree)",
+                  "keepalive_enabled": "default OFF (module not in this tree)", "reply_guard": "no tenant flag exists; nothing to set"}
 
 
 async def prepare_supervised_call(apply: bool = False, mongo_uri: str | None = None, db_name: str | None = None) -> dict:
@@ -55,6 +66,9 @@ async def prepare_supervised_call(apply: bool = False, mongo_uri: str | None = N
         print("Target Flags (ai_config ONLY):")
         for k, v in SUPERVISED_FLAGS.items():
             print(f"  {k:22s}: current={current.get(k)!r} -> proposed={v!r}")
+        print("Listed, NOT set:")
+        for k, why in LISTED_NOT_SET.items():
+            print(f"  {k:22s}: current={doc.get(k)!r}  ({why})")
 
         if not apply:
             print("\n[DRY-RUN] No database modifications made.")

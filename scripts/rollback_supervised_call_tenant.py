@@ -19,15 +19,18 @@ from pymongo import AsyncMongoClient
 from scripts.backup_ai_config import get_default_backup_dir
 
 TENANT_ID = "mme-test"
-SUPERVISED_KEYS = ("tts_ulaw8k", "devanagari_hindi", "streaming_pipeline", "full_duplex_input", "tts_voice")
+SUPERVISED_KEYS = ("tts_ulaw8k", "devanagari_hindi", "streaming_pipeline", "full_duplex_input", "tts_voice",
+                   "stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding")
 
-# Corrected one-line rollback command restoring previous unconfigured state:
+# Corrected one-line rollback command restoring previous unconfigured state (ONLY for a tenant that had none of these fields before; the script above restores the
+# previous values from the backup):
 ONE_LINE_ROLLBACK = (
     "python -c \"import asyncio; from pymongo import AsyncMongoClient; "
     "asyncio.run(AsyncMongoClient('mongodb://127.0.0.1:27117')['mme_telephony']['ai_config']"
     ".update_one({'tenant_id': 'mme-test'}, "
     "{'$unset': {'tts_ulaw8k': '', 'devanagari_hindi': '', 'streaming_pipeline': '', "
-    "'full_duplex_input': '', 'tts_voice': ''}}))\""
+    "'full_duplex_input': '', 'tts_voice': '', 'stream_ramp': '', 'tts_adaptive_poll': '', 'trace_evidence': '', "
+    "'glossary_correction': '', 'strict_grounding': ''}}))\""
 )
 
 

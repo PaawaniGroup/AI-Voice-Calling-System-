@@ -221,3 +221,165 @@ async def test_ai_service_get_config_includes_key_refs():
     cfg = await svc.get_config("mme-test")
     assert "key_refs" in cfg
     assert cfg["key_refs"]["tts"] == "RUNPOD_TTS_KEY"
+
+
+# ====================================================================== supervised call: the extended flag set (S5)
+NEW_FLAGS = ("stream_ramp", "tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding")
+NOT_SET = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled", "reply_guard")
+EP_URLS = {"stt_url": "https://api.runpod.ai/v2/ua9l3gus6qjnmg/runsync", "brain_url": "https://api.runpod.ai/v2/hu8qhrvlxbv314/runsync",
+           "tts_url": "https://api.runpod.ai/v2/6bmxas8ccwzhrv/runsync"}
+
+
+def _db_with(colls: dict):
+    mock_db = MagicMock()
+    mock_db.__getitem__.side_effect = lambda name: colls[name]
+    return mock_db
+
+
+def _coll(doc):
+    c = MagicMock()
+    c.find_one = AsyncMock(return_value=doc)
+    c.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+    return c
+
+
+def test_the_prepare_script_sets_the_five_new_flags_and_never_the_ones_that_stay_off():
+    from scripts.prepare_supervised_call_tenant import LISTED_NOT_SET, SUPERVISED_FLAGS
+    for f in NEW_FLAGS:
+        assert SUPERVISED_FLAGS[f] is True
+    for f in NOT_SET:
+        assert f not in SUPERVISED_FLAGS and f in LISTED_NOT_SET             # listed, never written
+    assert "no tenant flag" in LISTED_NOT_SET["reply_guard"]
+
+
+@pytest.mark.asyncio
+async def test_every_flag_the_prepare_script_sets_survives_get_config_into_the_runtime_config():
+    """The dropped key_refs bug was an allowlist: every field the script writes must come back from AiService.get_config."""
+    from app.ai.service import AiService
+    from config.settings import Settings
+    from scripts.prepare_supervised_call_tenant import SUPERVISED_FLAGS
+    doc = {"tenant_id": "mme-test", **SUPERVISED_FLAGS}
+    svc = AiService(_db_with({"ai_config": _coll(dict(doc))}), None, Settings(_env_file=None), None)
+    cfg = await svc.get_config("mme-test")
+    missing = [k for k, v in SUPERVISED_FLAGS.items() if cfg.get(k) != v]
+    assert missing == [], f"dropped or changed by get_config: {missing}"
+    assert all(cfg[k] is False for k in NOT_SET if k in cfg)                       # whatever of the OFF set exists defaults to False
+
+
+@pytest.mark.asyncio
+async def test_the_defaults_of_the_five_new_flags_are_off_without_a_document():
+    from app.ai.service import AiService
+    from config.settings import Settings
+    svc = AiService(_db_with({"ai_config": _coll(None)}), None, Settings(_env_file=None), None)
+    cfg = await svc.get_config("t")
+    assert all(cfg[f] is False for f in NEW_FLAGS) and cfg["stt_raw_pcm"] is False
+
+
+@pytest.mark.asyncio
+async def test_rollback_restores_the_previous_value_of_a_new_flag_and_unsets_the_ones_that_did_not_exist(tmp_path):
+    bf = tmp_path / "ai_config_mme-test_20261027T000000Z.json"
+    bf.write_text(json.dumps({"tenant_id": "mme-test", "config": {"stream_ramp": False, "devanagari_hindi": True}}), encoding="utf-8")
+    coll = _coll(None)
+    with patch("scripts.rollback_supervised_call_tenant.AsyncMongoClient") as mc:
+        mc.return_value = MagicMock()
+        mc.return_value.__getitem__.return_value = _db_with({"ai_config": coll})
+        mc.return_value.close = AsyncMock()
+        await rollback_supervised_call(backup_file=bf)
+    op = coll.update_one.call_args[0][1]
+    assert op["$set"] == {"stream_ramp": False, "devanagari_hindi": True}
+    for f in ("tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding"):
+        assert f in op["$unset"]
+
+
+async def _mongo_or_skip(uri):
+    from pymongo import AsyncMongoClient
+    c = AsyncMongoClient(uri, serverSelectionTimeoutMS=1500)
+    try:
+        await c.admin.command("ping")
+    except Exception as e:
+        await c.close()
+        pytest.skip(f"test MongoDB not reachable: {type(e).__name__}")
+    return c
+
+
+@pytest.mark.asyncio
+async def test_prepare_then_rollback_on_a_throwaway_database_restores_the_previous_state(tmp_path):
+    """REAL pymongo against a THROWAWAY database (dropped afterwards); the backup goes to tmp_path, outside the repository."""
+    import uuid
+    from scripts.prepare_supervised_call_tenant import SUPERVISED_FLAGS, prepare_supervised_call
+    uri = "mongodb://127.0.0.1:27117"
+    c = await _mongo_or_skip(uri)
+    name = f"mme_throwaway_{uuid.uuid4().hex[:10]}"
+    try:
+        coll = c[name]["ai_config"]
+        await coll.insert_one({"tenant_id": "mme-test", "enabled": True, "stream_ramp": False, "tts_voice": "default", "devanagari_hindi": True,
+                               "key_refs": {"stt": "RUNPOD_STT_KEY"}})
+        with patch("scripts.backup_ai_config.get_default_backup_dir", return_value=tmp_path):
+            res = await prepare_supervised_call(apply=True, mongo_uri=uri, db_name=name)
+        assert res["status"] == "applied"
+        now = await coll.find_one({"tenant_id": "mme-test"})
+        assert all(now.get(k) == v for k, v in SUPERVISED_FLAGS.items())
+        assert now["key_refs"] == {"stt": "RUNPOD_STT_KEY"} and now["enabled"] is True            # nothing else was touched
+        await rollback_supervised_call(backup_file=Path(res["backup"]), mongo_uri=uri, db_name=name)
+        back = await coll.find_one({"tenant_id": "mme-test"})
+        assert back["stream_ramp"] is False and back["tts_voice"] == "default" and back["devanagari_hindi"] is True      # previous values restored
+        for f in ("tts_adaptive_poll", "trace_evidence", "glossary_correction", "strict_grounding", "tts_ulaw8k", "streaming_pipeline", "full_duplex_input"):
+            assert f not in back, f                                                                       # fields that did not exist are gone
+        assert back["key_refs"] == {"stt": "RUNPOD_STT_KEY"} and back["enabled"] is True
+    finally:
+        await c.drop_database(name)
+        await c.close()
+
+
+def _checklist_docs(**ai_over):
+    flags = {"tts_ulaw8k": True, "devanagari_hindi": True, "streaming_pipeline": True, "full_duplex_input": True, "tts_voice": "utkarsh",
+             **{f: True for f in NEW_FLAGS}}
+    ai = {"tenant_id": "mme-test", **EP_URLS, **flags, "key_refs": {"stt": "A", "brain": "B", "tts": "C"}, **ai_over}
+    pol = {"tenant_id": "mme-test", "enabled": True, "allowed_callers": ["+000000000000"], "max_duration_s": 180}
+    return ai, pol
+
+
+async def _run_checklist(ai, pol, capsys, patch_get_config=None):
+    from scripts import pre_call_checklist as pc
+    db = _db_with({"ai_config": _coll(ai), "tenant_policies": _coll(pol)})
+    with patch("scripts.pre_call_checklist.AsyncMongoClient") as mc:
+        mc.return_value = MagicMock()
+        mc.return_value.__getitem__.return_value = db
+        mc.return_value.close = AsyncMock()
+        if patch_get_config is not None:
+            with patch("app.ai.service.AiService.get_config", new=patch_get_config):
+                ok = await pc.run_checklist()
+        else:
+            ok = await pc.run_checklist()
+    return ok, capsys.readouterr()
+
+
+@pytest.mark.asyncio
+async def test_checklist_passes_reads_flags_through_get_config_and_prints_a_count_but_no_number(capsys):
+    ai, pol = _checklist_docs()
+    ok, out = await _run_checklist(ai, pol, capsys)
+    assert ok is True
+    assert "via get_config" in out.out and "COUNT=1" in out.out and "policy state: ENABLED" in out.out
+    assert "+0000" not in out.out + out.err and "000000000000" not in out.out + out.err
+
+
+@pytest.mark.asyncio
+async def test_checklist_fails_when_get_config_drops_a_stored_flag(capsys):
+    from app.ai.service import AiService
+    from config.settings import Settings
+    ai, pol = _checklist_docs()
+    real = AiService.get_config
+
+    async def dropping(self, tenant_id):
+        cfg = await real(self, tenant_id)
+        cfg.pop("strict_grounding")                         # an allowlist that forgot a flag
+        return cfg
+    ok, out = await _run_checklist(ai, pol, capsys, patch_get_config=dropping)
+    assert ok is False and "strict_grounding" in out.err
+
+
+@pytest.mark.asyncio
+async def test_checklist_fails_when_a_flag_that_must_stay_off_is_on(capsys):
+    ai, pol = _checklist_docs(stt_raw_pcm=True)
+    ok, out = await _run_checklist(ai, pol, capsys)
+    assert ok is False and "stt_raw_pcm" in out.err

@@ -3,7 +3,9 @@
 
 Validates settings from BOTH collections where the call path reads them:
   1. ai_config (ai models and experimental flags):
-     - Flags: tts_ulaw8k, devanagari_hindi, streaming_pipeline, full_duplex_input all True
+     - Flags (read THROUGH AiService.get_config, i.e. what the runtime sees; a flag stored but not returned fails): tts_ulaw8k, devanagari_hindi,
+       streaming_pipeline, full_duplex_input, stream_ramp, tts_adaptive_poll, trace_evidence, glossary_correction, strict_grounding all True;
+       stt_raw_pcm, faq_grounding, ack_enabled, keepalive_enabled must be off
      - Voice: tts_voice == "utkarsh"
      - Endpoints:
        - STT:   ua9l3gus6qjnmg
@@ -31,6 +33,9 @@ sys.path.insert(0, str(ROOT))
 
 from pymongo import AsyncMongoClient
 
+from app.ai.service import AiService
+from config.settings import Settings
+
 TENANT_ID = "mme-test"
 
 EXPECTED_ENDPOINTS = {
@@ -45,7 +50,14 @@ EXPECTED_AI_FLAGS = {
     "streaming_pipeline": True,
     "full_duplex_input": True,
     "tts_voice": "utkarsh",
+    "stream_ramp": True,
+    "tts_adaptive_poll": True,
+    "trace_evidence": True,
+    "glossary_correction": True,
+    "strict_grounding": True,
 }
+# Must NOT be on for the call (absent counts as off). reply_guard has no flag in this tree.
+MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled")
 
 
 def mask_number(num: str | None) -> str:
@@ -101,17 +113,26 @@ async def run_checklist(expected_caller: str | None = None, mongo_uri: str | Non
                 if not match:
                     failures.append(f"{name} endpoint mismatch: {actual} != {expected}")
 
-            # 2. Experimental Flags
+            # 2. Flags AS THE RUNTIME SEES THEM: through AiService.get_config (its allowlist silently drops any field it does not list: the key_refs bug)
+            runtime = await AiService(db, None, Settings(_env_file=None), None).get_config(TENANT_ID)
             for flag, expected in EXPECTED_AI_FLAGS.items():
-                actual = ai_cfg.get(flag)
+                actual = runtime.get(flag)
                 match = (actual == expected)
-                status = "PASS" if match else "FAIL"
-                print(f"  [{status}] Flag {flag:20s}: actual={actual!r} | expected={expected!r}")
+                dropped = ai_cfg.get(flag) != actual                       # stored in the document but not what get_config returns
+                status = "PASS" if match and not dropped else "FAIL"
+                print(f"  [{status}] Flag {flag:20s}: via get_config={actual!r} | expected={expected!r}" + ("  (DROPPED by get_config)" if dropped else ""))
                 if not match:
-                    failures.append(f"ai_config flag {flag} mismatch: {actual!r} != {expected!r}")
+                    failures.append(f"flag {flag} via get_config mismatch: {actual!r} != {expected!r}")
+                if dropped:
+                    failures.append(f"flag {flag} is stored but get_config does not return it (allowlist)")
+            for flag in MUST_BE_OFF:
+                on = bool(runtime.get(flag)) or bool(ai_cfg.get(flag))
+                print(f"  [{'FAIL' if on else 'PASS'}] Flag {flag:20s}: must be OFF -> {'ON' if on else 'off'}")
+                if on:
+                    failures.append(f"flag {flag} must be OFF for this call")
 
-            # 3. key_refs
-            key_refs = ai_cfg.get("key_refs")
+            # 3. key_refs (through get_config too)
+            key_refs = runtime.get("key_refs")
             refs_ok = isinstance(key_refs, dict) and all(k in key_refs for k in ("stt", "brain", "tts"))
             status = "PASS" if refs_ok else "FAIL"
             print(f"  [{status}] key_refs: {key_refs}")
@@ -141,9 +162,10 @@ async def run_checklist(expected_caller: str | None = None, mongo_uri: str | Non
                 clean_exp = expected_caller.strip()
                 caller_match = bool(allowed and clean_exp in allowed)
             status = "PASS" if caller_match else "FAIL"
-            masked_act = [mask_number(x) for x in allowed] if allowed else allowed
-            masked_exp = f"[{mask_number(expected_caller)}]" if expected_caller else "non-empty list"
-            print(f"  [{status}] policy.allowed_callers: actual={masked_act} | expected={masked_exp}")
+            n_allowed = len(allowed) if isinstance(allowed, list) else 0
+            masked_exp = "the expected caller is in the list" if expected_caller else "non-empty list"
+            print(f"  [{status}] policy.allowed_callers: COUNT={n_allowed} (no number is printed) | expected={masked_exp}")
+            print(f"  [info] policy state: {'ENABLED' if pol_enabled is True else 'DISABLED'}")
             if not caller_match:
                 failures.append("tenant_policies.allowed_callers mismatch with expected caller")
 
