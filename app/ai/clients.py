@@ -306,6 +306,8 @@ class ModelClients:
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
         overlap_first = self._first_poll_delay(rec) if (service == "tts" and self.cfg.get("tts_adaptive_poll")) else None   # tenant flag, default OFF
+        if service == "stt" and self.cfg.get("stt_adaptive_poll"):                          # tenant flag, default OFF: overlapping polls for the STT job too
+            overlap_first = max(0.06, float(self.cfg.get("stt_poll_first_s") or 0.25))      # no length model for STT: a fixed first poll (a warm 6-7 s decode takes 0.3-1.0 s, MEASURED)
         try:
             return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06, rec=rec, overlap_first_s=overlap_first)
         except asyncio.CancelledError:
@@ -332,7 +334,7 @@ class ModelClients:
         2000 per 10 s per endpoint). The first answer that is not IN_QUEUE/IN_PROGRESS wins; the others are cancelled. Expected saving: the time until a finished job is
         noticed drops from about half a poll period (~0.14-0.18 s) to about 0.05 s: AT MOST ~0.15 s per job (ESTIMATE, not measured). Errors behave as in the sequential loop,
         except HTTP 429 (RunPod's rate limit), which is skipped up to 5 times in a row."""
-        step = float(self.cfg.get("tts_poll_step_s") or 0.1)
+        step = float(self.cfg.get(f"{service}_poll_step_s") or (0.12 if service == "stt" else 0.1))     # tts_poll_step_s / stt_poll_step_s
         url = f"{ep.url}/status/{job_id}"
         t_loop = time.monotonic()
         inflight: set[asyncio.Task] = set()

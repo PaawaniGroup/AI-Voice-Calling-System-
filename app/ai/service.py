@@ -40,7 +40,7 @@ LANGS = ["auto", "hi", "en", "hinglish"]
 # Per-tenant booleans, all OFF by default and ALL in the one allowlist used by default_config, get_config and update_config (the dropped key_refs bug was an allowlist):
 # latency work (trace_evidence, stream_ramp, stt_raw_pcm, tts_adaptive_poll) and the quality work ported from quality-work 9cdb32b (glossary_correction, strict_grounding).
 LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll", "glossary_correction", "strict_grounding",
-                 "ack_enabled")   # ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
+                 "ack_enabled", "stt_adaptive_poll")   # stt_adaptive_poll: overlapping status polls for the STT job (default OFF); ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
 
 
 @dataclass
