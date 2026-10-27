@@ -291,6 +291,61 @@ async def test_rollback_restores_the_previous_value_of_a_new_flag_and_unsets_the
         assert f in op["$unset"]
 
 
+THROWAWAY_PREFIX = "mme_test_throwaway_"
+
+
+def _throwaway_name() -> str:
+    import uuid
+    name = f"{THROWAWAY_PREFIX}{uuid.uuid4().hex[:10]}"
+    assert name.startswith(THROWAWAY_PREFIX)
+    return name
+
+
+@pytest.fixture(autouse=True)
+def _only_throwaway_databases(monkeypatch):
+    """No test of this file can open, create or drop a real database other than one named mme_test_throwaway_*: never the live mme_telephony.
+    (`admin` stays reachable for the read-only ping; mocks never reach this code.)"""
+    import pymongo
+    cls = pymongo.AsyncMongoClient
+    real_getitem, real_get_database, real_drop = cls.__getitem__, cls.get_database, cls.drop_database
+
+    def check(name):
+        n = getattr(name, "name", name)
+        if n != "admin" and not str(n).startswith(THROWAWAY_PREFIX):
+            raise AssertionError(f"a test touched the database {str(n)[:12]!r}...: only {THROWAWAY_PREFIX}* is allowed")
+
+    def getitem(self, name):
+        check(name)
+        return real_getitem(self, name)
+
+    def get_database(self, name=None, *a, **k):
+        check(name)
+        return real_get_database(self, name, *a, **k)
+
+    async def drop_database(self, name_or_database, *a, **k):
+        check(name_or_database)
+        return await real_drop(self, name_or_database, *a, **k)
+    monkeypatch.setattr(cls, "__getitem__", getitem)
+    monkeypatch.setattr(cls, "get_database", get_database)
+    monkeypatch.setattr(cls, "drop_database", drop_database)
+
+
+@pytest.mark.asyncio
+async def test_the_guard_refuses_the_live_database_name_before_any_network_use():
+    from pymongo import AsyncMongoClient
+    c = AsyncMongoClient("mongodb://127.0.0.1:27117", serverSelectionTimeoutMS=500)      # constructing a client does not connect
+    with pytest.raises(AssertionError):
+        c["mme_telephony"]
+    with pytest.raises(AssertionError):
+        c.get_database("mme_telephony")
+    with pytest.raises(AssertionError):
+        await c.drop_database("mme_telephony")
+    with pytest.raises(AssertionError):
+        await c.drop_database("mme_throwaway_old_prefix")                                  # the old prefix is no longer accepted either
+    c["mme_test_throwaway_x"]                                                              # a throwaway name is accepted (no I/O happens on a lookup)
+    await c.close()
+
+
 async def _mongo_or_skip(uri):
     from pymongo import AsyncMongoClient
     c = AsyncMongoClient(uri, serverSelectionTimeoutMS=1500)
@@ -305,11 +360,10 @@ async def _mongo_or_skip(uri):
 @pytest.mark.asyncio
 async def test_prepare_then_rollback_on_a_throwaway_database_restores_the_previous_state(tmp_path):
     """REAL pymongo against a THROWAWAY database (dropped afterwards); the backup goes to tmp_path, outside the repository."""
-    import uuid
     from scripts.prepare_supervised_call_tenant import SUPERVISED_FLAGS, prepare_supervised_call
     uri = "mongodb://127.0.0.1:27117"
     c = await _mongo_or_skip(uri)
-    name = f"mme_throwaway_{uuid.uuid4().hex[:10]}"
+    name = _throwaway_name()
     try:
         coll = c[name]["ai_config"]
         await coll.insert_one({"tenant_id": "mme-test", "enabled": True, "stream_ramp": False, "tts_voice": "default", "devanagari_hindi": True,
@@ -424,12 +478,11 @@ async def test_rollback_reports_whether_the_tenant_is_still_armed_and_never_chan
 @pytest.mark.asyncio
 async def test_disarm_then_rollback_on_a_throwaway_database_leaves_the_tenant_disarmed_and_the_flags_gone(tmp_path):
     """The S11 order: disarm (plivo_testcall) -> flag rollback -> verify. Real pymongo, throwaway database (dropped)."""
-    import uuid
     from scripts.plivo_testcall import disarm
     from scripts.prepare_supervised_call_tenant import prepare_supervised_call
     uri = "mongodb://127.0.0.1:27117"
     c = await _mongo_or_skip(uri)
-    name = f"mme_throwaway_{uuid.uuid4().hex[:10]}"
+    name = _throwaway_name()
     try:
         db = c[name]
         await db["ai_config"].insert_one({"tenant_id": "mme-test", "enabled": True, "tts_voice": "default"})
