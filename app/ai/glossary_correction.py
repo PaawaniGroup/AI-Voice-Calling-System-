@@ -57,20 +57,28 @@ def correct_glossary(text: str, include_proposed: bool = True) -> str:
     - Contextual hint for 'eprod' -> 'eprod (proposed unconfirmed: abroad)' if include_proposed.
     - Strictly preserves conversational words like 'men', 'kisi', 'bhi', 'fee', 'free', 'host', 'new'.
     """
-    if not text or not isinstance(text, str):
-        return text or ""
+    return correct_glossary_counted(text, include_proposed)[0]
 
-    result = text
+
+def correct_glossary_counted(text: str, include_proposed: bool = True) -> tuple[str, int]:
+    """Same result as `correct_glossary`, plus HOW MANY substitutions were made (a number: the trace records it, never the words)."""
+    if not text or not isinstance(text, str):
+        return text or "", 0
+
+    result, total = text, 0
 
     # Apply observed direct mappings
     for pattern, replacement in OBSERVED_PHRASE_MAPPINGS:
-        result = pattern.sub(replacement, result)
+        result, n = pattern.subn(replacement, result)
+        total += n
 
     # Turn "bi si" into a hint instead of a blind rewrite
-    result = BI_SI_PATTERN.sub(BI_SI_HINT, result)
+    result, n = BI_SI_PATTERN.subn(BI_SI_HINT, result)
+    total += n
 
     # Handle "eprod" as proposed unconfirmed
     if include_proposed:
-        result = EPROD_PATTERN.sub(EPROD_HINT, result)
+        result, n = EPROD_PATTERN.subn(EPROD_HINT, result)
+        total += n
 
-    return result
+    return result, total

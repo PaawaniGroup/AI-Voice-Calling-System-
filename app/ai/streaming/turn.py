@@ -420,7 +420,17 @@ class StreamingTurn:
         rel = lambda t: round((t - t0) * 1000, 1) if (t is not None and t0 is not None) else None   # noqa: E731
         cl = [c for c in m["clauses"] if c["rtf"] is not None]
         chunks_per_s = round((m["brain_chunks"] - 1) / m["brain_span_s"], 1) if m["brain_span_s"] > 0 and m["brain_chunks"] > 1 else None
-        return {"ttft_ms": rel(m["t_first_token"]), "first_clause_ms": rel(m["t_first_clause"]), "first_tts_sent_ms": rel(m["t_first_tts_sent"]),
+        ack_acct = self.playout.accounts.get(ACK_IDX)
+        real_accts = [a for i, a in self.playout.accounts.items() if i < FILLER_IDX and a.start >= 0]
+        rate = self.playout.cfg.rate
+        ack_cut = round((ack_acct.samples - ack_acct.sent) / rate * 1000, 1) if ack_acct is not None else None     # ms of the phrase never sent (barge-in, hangup)
+        ack_overlap = None
+        if ack_acct is not None and ack_acct.start >= 0 and real_accts:                                           # ms of the answer that start before the phrase ended: must be 0
+            ack_overlap = round(max(0, ack_acct.start + ack_acct.sent - min(a.start for a in real_accts)) / rate * 1000, 1)
+        ack_to_answer = (round(rel(rep.get("t_first_real")) - rel(m["t_ack"]) - m["ack_ms"], 1)                  # pause between the phrase's end and the answer's first frame
+                         if (m["t_ack"] is not None and m["ack_ms"] is not None and rep.get("t_first_real") is not None) else None)
+        return {"ack_cut_ms": ack_cut, "ack_overlap_ms": ack_overlap, "ack_to_answer_ms": ack_to_answer,
+                "ttft_ms": rel(m["t_first_token"]), "first_clause_ms": rel(m["t_first_clause"]), "first_tts_sent_ms": rel(m["t_first_tts_sent"]),
                 "first_audio_ready_ms": rel(m["t_first_enqueue"]), "first_frame_ms": rel(rep.get("t_first_real")),
                 "ack_ms": m["ack_ms"], "ack_at_ms": rel(m["t_ack"]), "ack_first_frame_ms": rel(rep.get("t_first")) if m["t_ack"] is not None else None,
                 "brain_chunks": m["brain_chunks"], "brain_chunks_per_s": chunks_per_s,

@@ -50,8 +50,9 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
         res.error = "no_speech_recognised"
         return res
     if getattr(conv, "glossary_correction", False):                     # streaming path: after the STT text, before the mode, the retrieval and the Brain
-        from app.ai.glossary_correction import correct_glossary
-        heard = correct_glossary(heard)
+        from app.ai.glossary_correction import correct_glossary_counted
+        heard, n_fixed = correct_glossary_counted(heard)
+        turn_trace.note_turn("glossary_corrections", n_fixed)             # a count; the words are never recorded
     res.heard = heard
     lang = conv.language
     if lang == "auto" and stt.get("language"):
@@ -139,6 +140,10 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
         res.outcome = st.outcome
         st.outcome.status, st.outcome.spoken_text = "cancelled", spoken
         st.outcome.stream = {**st._metrics(snap), "interrupt": st.interrupt_metrics()}
+        tr = turn_trace.current()
+        if tr is not None:
+            tr.stream = st.outcome.stream                                  # the evidence line of an interrupted turn carries its metrics too (it was empty before)
+            tr.turn["outcome"] = cancel_outcome(st)
         _trace_marks(st)
         observe_stream(st.outcome.stream, interrupted=True)
         conv.last_stream = st.outcome
@@ -147,6 +152,7 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
         conv._stream = None
     res.outcome = out
     conv.last_stream = out
+    turn_trace.note_turn("outcome", out.status)
     _trace_marks(st)
     reply = out.reply_text.strip()
     if out.status == "error" or not reply:
@@ -163,6 +169,12 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
              out.script.get("clauses_violating", 0), out.script.get("first_retried"), out.script.get("kinds"))   # kinds and counts: never words
     observe_stream(out.stream, interrupted=False)
     return res
+
+
+def cancel_outcome(st: StreamingTurn) -> str:
+    """Label of a CANCELLED streaming turn for the evidence line: "interrupted" only when audio of the ANSWER was actually sent to the caller (the cached acknowledgement
+    is not the answer); otherwise "cancelled_before_audio" (merged into the next utterance, superseded, hung up while the answer was still being made)."""
+    return "interrupted" if st.playout.t_first_real is not None else "cancelled_before_audio"
 
 
 def _commit(conv, mark: int, assistant_text: str) -> None:
