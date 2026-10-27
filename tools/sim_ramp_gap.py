@@ -57,17 +57,21 @@ def split_ramp(n: int) -> list[int]:
     return out
 
 
-COLD_READY_S = 4.0 + 41.0     # queue-delay scaling: a second worker starts only after a job has waited 4 s (REAL console setting), then needs ~41 s (REAL, operator)
-WORKER_MODELS = {"1 warm": 1, "2 warm": 2, "1 warm + 1 cold (ready 45 s later)": [0.0, COLD_READY_S]}
+COLD_READY_S = 49.0           # a cold start of the voice endpoint: MEASURED 48.9 s queue on 27 Oct (cold starts so far: 41 to 52 s)
+BASE_QUEUE_S = 0.15           # the queue inside the measured wall times (Phase 0b, back-to-back jobs: MEASURED 0.15 s)
+WARM_QUEUE_S = 1.2            # the queue of a warm voice job in the live app path: MEASURED 1.16-1.25 s at idle 300 s (26-27 Oct; 1.10 s at idle 5 s)
+WORKER_MODELS = {"1 warm": 1, "2 warm": 2, "1 warm + 1 cold (ready ~49 s later)": [0.0, COLD_READY_S]}
 
 
-def simulate(clauses: list[int], workers) -> dict:
-    """`workers`: an int (that many warm workers) or a list of the times (s) at which each worker is free for the first job."""
+def simulate(clauses: list[int], workers, queue_s: float | None = None) -> dict:
+    """`workers`: an int (that many warm workers) or a list of the times (s) at which each worker is free for the first job.
+    `queue_s`: the queue each job waits before it runs (None = the 0.15 s that is already inside the measured wall times)."""
     free = [0.0] * workers if isinstance(workers, int) else [float(x) for x in workers]   # all clause texts are available at t = 0
+    extra = 0.0 if queue_s is None else queue_s - BASE_QUEUE_S
     ready = []
     for w in clauses:
         i = min(range(len(free)), key=lambda k: free[k])
-        free[i] += wall(w)
+        free[i] += wall(w) + extra
         ready.append(free[i])
     t_end, gaps = 0.0, []
     for i, w in enumerate(clauses):
@@ -128,8 +132,30 @@ def table2() -> str:
     return "\n".join(rows)
 
 
+QUEUE_MODELS = {
+    "1 worker, queue 0.15 s (Phase 0b back-to-back)": (1, BASE_QUEUE_S),
+    "1 worker, warm queue 1.2 s": (1, WARM_QUEUE_S),
+    "2 workers, 2nd restored in ~1.2 s": (2, WARM_QUEUE_S),
+    "2 workers, 2nd cold ~49 s": ([0.0, COLD_READY_S], WARM_QUEUE_S),
+}
+
+
+def table3() -> str:
+    """The measured warm queue (1.2 s per job) and the two cases for a second voice worker: restored in about 1.2 s, or a cold start of about 49 s."""
+    rows = ["| reply words | voice workers | plan | clauses (words) | first sound (s) | gap after clause 1 (s) | all gaps (s) | reply ends (s) |",
+            "|---|---|---|---|---|---|---|---|"]
+    for n in (15, 23, 28):
+        for label, (w, q) in QUEUE_MODELS.items():
+            for name, c in (("today", split_today(n)), ("ramp 4+8+12", split_ramp(n))):
+                r = simulate(c, w, q)
+                rows.append(f"| {n} | {label} | {name} | {'+'.join(map(str, c))} | {r['first_sound_s']} | {r['gap_after_first_s']} | {r['gaps_total_s']} | {r['last_audio_end_s']} |")
+    return "\n".join(rows)
+
+
 if __name__ == "__main__":
     print("SIMULATED (inputs MEASURED, interpolation/extrapolation ESTIMATE; assumes the Brain is faster than the voice)\n")
     print(table())
-    print("\nWorker models (SIMULATED; voice endpoint REAL settings: Max 2, Active 0, queue-delay scaling 4 s, ~41 s to start a worker):\n")
+    print("\nWorker models (SIMULATED; voice endpoint REAL settings: Max 2, Active 0; a cold start takes 41-52 s, MEASURED 48.9 s on 27 Oct):\n")
     print(table2())
+    print("\nWith the MEASURED warm queue of 1.2 s per job (SIMULATED):\n")
+    print(table3())

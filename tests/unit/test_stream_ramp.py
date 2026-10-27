@@ -204,6 +204,20 @@ def test_simulation_worker_models_and_the_least_silence_search():
     assert best_plan(23, 1, max_first_sound_s=1.0) is None                  # nothing meets an impossible first-sound limit
 
 
+def test_simulation_with_the_measured_warm_queue_and_the_two_second_worker_cases():
+    from tools.sim_ramp_gap import BASE_QUEUE_S, COLD_READY_S, QUEUE_MODELS, WARM_QUEUE_S, simulate, split_ramp, split_today, table3
+    c = split_ramp(23)
+    assert simulate(c, 1, BASE_QUEUE_S) == simulate(c, 1)                                   # 0.15 s is what the measured wall times already contain
+    a, b = simulate(c, 1), simulate(c, 1, WARM_QUEUE_S)
+    assert round(b["first_sound_s"] - a["first_sound_s"], 2) == round(WARM_QUEUE_S - BASE_QUEUE_S, 2)      # every job waits 1.05 s more
+    assert COLD_READY_S == 49.0 and WARM_QUEUE_S == 1.2
+    one, restored, cold = (QUEUE_MODELS["1 worker, warm queue 1.2 s"], QUEUE_MODELS["2 workers, 2nd restored in ~1.2 s"], QUEUE_MODELS["2 workers, 2nd cold ~49 s"])
+    for plan in (split_today(23), split_ramp(23)):
+        assert simulate(plan, cold[0], cold[1]) == simulate(plan, one[0], one[1])            # a second worker that is ready after 49 s does not help a 15 s reply
+    assert simulate(split_ramp(23), restored[0], restored[1])["gaps_total_s"] < 0.1          # restored in ~1.2 s: no silence
+    assert "2 workers, 2nd cold ~49 s" in table3() and table3().count("\n") > 20
+
+
 def test_simulation_first_sound_is_earlier_and_one_worker_shows_a_gap_two_workers_none():
     from tools.sim_ramp_gap import simulate, split_ramp, split_today
     t1, r1 = simulate(split_today(23), 1), simulate(split_ramp(23), 1)
