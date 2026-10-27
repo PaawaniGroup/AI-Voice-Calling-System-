@@ -14,6 +14,9 @@
      "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "describes": "first-clause figure: Brain request -> first clause (budget 0.25 s, ESTIMATE)"},
     {"id": "FC-voice", "kind": "budget", "metric": "voice_first_audio_ms", "stat": "median", "op": "<=", "threshold": 450, "requires_tag": "MEASURED", "min_n": 12,
      "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "describes": "first-clause figure: first clause sent to the voice -> its audio ready (budget 0.45 s, ESTIMATE; today 4.38 s MEASURED)"},
+    {"id": "G1-roundtrip", "kind": "stage2", "metric": "rt_roundtrip_ms", "stat": "median", "op": "<=", "threshold": 40, "requires_tag": "MEASURED", "min_n": 100,
+     "scenario": {"mode": "rtt_probe", "measured_from": "cloud"},
+     "describes": "round trip over the persistent connection to the always-on server, p50 <= 40 ms. Judged from the host the service will RUN on: from the operator's PC the same probe is informational (measured_from pc) and cannot pass this gate; see docs/realtime/STAGE2_TRANSPORT.md"},
     {"id": "FS-first-sound", "kind": "goal", "metric": "first_sound_ms", "stat": "median", "op": "<=", "threshold": 1200, "requires_tag": "MEASURED", "status": "BLOCKED",
      "blocked_by": "needs the cached acknowledgement audio, which does not exist yet (generation is a chargeable REQUEST, cap $0.05) and the acknowledgement code of quality-work, which is not in this tree; first sound is proven separately, never as part of A-median",
      "describes": "last voiced frame -> first sound of any kind (the cached acknowledgement), median"}
