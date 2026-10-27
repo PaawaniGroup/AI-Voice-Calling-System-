@@ -60,3 +60,6 @@ Saving against today: raw PCM alone 0.44 s / 0.60 s; tail only about 1.0 s at bo
 - Per-tenant flag `utterance_cap_raise` (default OFF, in the config allowlist) + value `utterance_max_s` (6.0-12.0, default 6.0 = today). With the flag ON, one utterance may last up to that maximum before the cap splits it; the 700 ms silence rule is unchanged; the merge limit (15 s) is unchanged. Switching the flag on without setting a value changes nothing.
 - Draft state: code and tests written on `callbuild`, compile-checked, NOT RUN, NOT COMMITTED. Expected effect (ESTIMATE): no change in STT time for a given length (one job on the whole audio either way); it removes the cancelled first job and its contention (0-0.8 s on turns longer than 6 s) and the merge-window dependence. Risk: more buffering for noisy lines, which the hard maximum bounds.
 - Tail-only (decode only the new tail, keep the first piece's text) waits for the recordings.
+
+## Note (27 Oct 2026, later): the language-test cost above is superseded
+The worker stays billed between sequential jobs, so about 3 s per job (not 1 s) is the honest figure; the auto/hi/en language test is now a subset of the term-level evaluation in STT_TERMS_PLAN.md (cost .103 / .163, cap .25). The earlier 24-jobs-per-endpoint plan would cost about 590 s = .112 / .177.
