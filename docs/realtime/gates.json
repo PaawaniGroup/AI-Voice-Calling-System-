@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "note": "Thresholds are the operator's (27 Oct 2026) or, where marked budget, ESTIMATES of the stage budget that still have to be proven. A SIMULATED run never passes a MEASURED gate. Do not edit a threshold to make a gate pass.",
+  "gates": [
+    {"id": "A-median", "kind": "goal", "metric": "to_first_audio_ms", "stat": "median", "op": "<=", "threshold": 2200, "requires_tag": "MEASURED", "min_n": 12,
+     "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "constraints": {"reply_words": {"median_between": [20, 26]}},
+     "describes": "last voiced frame -> first audio frame to Plivo, median, for a reply of about 23 words (20-26), ramp clause plan (2-4 / 6-8 / 12-14 words), 2 warm voice workers"},
+    {"id": "A-p90", "kind": "goal", "metric": "to_first_audio_ms", "stat": "p90", "op": "<=", "threshold": 3000, "requires_tag": "MEASURED", "min_n": 20,
+     "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "constraints": {"reply_words": {"median_between": [20, 26]}},
+     "describes": "the same scenario, p90; min_n 20 is a PROPOSED sample size (a p90 of 12 samples is one sample): the operator may overrule"},
+    {"id": "FC-stt", "kind": "budget", "metric": "stt_ms", "stat": "median", "op": "<=", "threshold": 150, "requires_tag": "MEASURED", "min_n": 12,
+     "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "describes": "first-clause figure: STT submit -> final text (budget 0.15 s, ESTIMATE; today 1.49 s MEASURED)"},
+    {"id": "FC-brain", "kind": "budget", "metric": "brain_first_clause_ms", "stat": "median", "op": "<=", "threshold": 250, "requires_tag": "MEASURED", "min_n": 12,
+     "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "describes": "first-clause figure: Brain request -> first clause (budget 0.25 s, ESTIMATE)"},
+    {"id": "FC-voice", "kind": "budget", "metric": "voice_first_audio_ms", "stat": "median", "op": "<=", "threshold": 450, "requires_tag": "MEASURED", "min_n": 12,
+     "scenario": {"clause_plan": "ramp", "voice_workers": 2}, "describes": "first-clause figure: first clause sent to the voice -> its audio ready (budget 0.45 s, ESTIMATE; today 4.38 s MEASURED)"},
+    {"id": "FS-first-sound", "kind": "goal", "metric": "first_sound_ms", "stat": "median", "op": "<=", "threshold": 1200, "requires_tag": "MEASURED", "status": "BLOCKED",
+     "blocked_by": "needs the cached acknowledgement audio, which does not exist yet (generation is a chargeable REQUEST, cap $0.05) and the acknowledgement code of quality-work, which is not in this tree; first sound is proven separately, never as part of A-median",
+     "describes": "last voiced frame -> first sound of any kind (the cached acknowledgement), median"}
+  ]
+}
