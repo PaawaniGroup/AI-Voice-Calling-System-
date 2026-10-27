@@ -21,6 +21,7 @@ STREAM_KEYS: dict[str, tuple] = {
     "stream_second_min_words": (2, 20),
     "stream_second_max_words": (4, 24),
     "ack_after_ms": (0, 3000),                  # cached acknowledgement (flag `ack_enabled`): wait after the speech-to-text final before it plays
+    "utterance_max_s": (6.0, 12.0),             # hard maximum of ONE utterance (read only when the flag `utterance_cap_raise` is on); 6.0 = today's cap (app/ai/ws.py MAX_UTTERANCE_MS)
 }
 # Clause sizes from the TTS re-measurement of 25 Oct 2026 (docs/evidence/phase0b_tts_v3.json, ulaw8k + named voice, no reference): wall time per second of audio is
 # 1.52 for 4 words (a first clause cannot be ahead of playout, it only has to be short), 1.21 for 8, 0.99 for 12 and 0.97 for 16: only clauses of 12 words or more
@@ -28,7 +29,16 @@ STREAM_KEYS: dict[str, tuple] = {
 PROVISIONAL = {"stream_first_min_words": 4, "stream_min_words": 12, "stream_max_words": 14, "stream_prefetch_depth": 2, "stream_prebuffer_ms": 150,
                "runpod_poll_cap_s": 0.15,
                "stream_ramp_first_min_words": 2, "stream_first_max_words": 4, "stream_second_min_words": 6, "stream_second_max_words": 8,
-               "ack_after_ms": 1500}
+               "ack_after_ms": 1500, "utterance_max_s": 6.0}
+
+
+def utterance_max_ms(cfg: dict) -> int | None:
+    """The per-call utterance maximum in ms when the tenant flag `utterance_cap_raise` is ON (default OFF), else None (= today's 6 s cap in app/ai/ws.py). The value is
+    `utterance_max_s` (6.0-12.0, default 6.0: switching the flag on without setting a value changes nothing)."""
+    if not (cfg or {}).get("utterance_cap_raise"):
+        return None
+    lo, hi = STREAM_KEYS["utterance_max_s"]
+    return int(round(min(max(float(value(cfg, "utterance_max_s")), lo), hi) * 1000))
 
 
 def value(cfg: dict, key: str):

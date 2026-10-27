@@ -23,7 +23,7 @@ from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
 from app.ai.streaming.ack import AckSet
 from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
-from app.ai.streaming.config import STREAM_KEYS, stream_config_from
+from app.ai.streaming.config import STREAM_KEYS, stream_config_from, utterance_max_ms
 from app.ai.streaming.ramp import apply_to_conversation as apply_ramp_rule
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
@@ -40,7 +40,7 @@ LANGS = ["auto", "hi", "en", "hinglish"]
 # Per-tenant booleans, all OFF by default and ALL in the one allowlist used by default_config, get_config and update_config (the dropped key_refs bug was an allowlist):
 # latency work (trace_evidence, stream_ramp, stt_raw_pcm, tts_adaptive_poll) and the quality work ported from quality-work 9cdb32b (glossary_correction, strict_grounding).
 LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll", "glossary_correction", "strict_grounding",
-                 "ack_enabled", "stt_adaptive_poll")   # stt_adaptive_poll: overlapping status polls for the STT job (default OFF); ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
+                 "ack_enabled", "stt_adaptive_poll", "utterance_cap_raise")   # stt_adaptive_poll: overlapping status polls for the STT job (default OFF); ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
 
 
 @dataclass
@@ -56,6 +56,7 @@ class Runtime:
     tasks: list = field(default_factory=list)
     call_id: str | None = None
     trace_evidence: bool = False   # tenant flag `trace_evidence` (and MME_TEL_AI_TRACE_EVIDENCE_PATH set): append the numbers-only turn evidence line
+    utterance_max_ms: int | None = None   # tenant flag `utterance_cap_raise` + `utterance_max_s`: hard maximum of one utterance in ms; None = today's 6 s cap
 
 
 class AiService:
@@ -306,6 +307,7 @@ class AiService:
         if cfg.get("stream_ramp") and cfg.get("streaming_pipeline"):
             apply_ramp_rule(conv)                                  # optional Brain block, appended to the system message of THIS call only
         rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))
+        rt.utterance_max_ms = utterance_max_ms(cfg)                # None unless the tenant flag `utterance_cap_raise` is on
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")
         self.runtime[session_id] = rt
         m.AI_RUNTIMES.set(len(self.runtime))
