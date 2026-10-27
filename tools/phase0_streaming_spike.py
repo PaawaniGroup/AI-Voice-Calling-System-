@@ -175,18 +175,19 @@ async def main_async(a):
     out = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     try:
         out["workers_before"] = {svc: await workers(cl, svc) for svc in ("brain", "tts")}
-        print("workers before:", json.dumps(out["workers_before"]), flush=True)
+        print("workers before (INFORMATION ONLY: worker slots, not a warm/cold signal, UNVERIFIED):", json.dumps(out["workers_before"]), flush=True)
         for svc in ("brain", "tts"):
-            if not sum(int(out["workers_before"][svc].get(k) or 0) for k in ("idle", "ready", "running")):
-                if a.no_warm:
-                    raise SystemExit(f"{svc} is cold and --no-warm was given: nothing sent")
-                ledger.cold_reserve_s = 200.0
-                print(f"{svc} cold: warming (counted in the budget)", flush=True)
-                body = {"input": {"prompt": "hi", "messages": [{"role": "user", "content": "hi"}], "sampling_params": {"max_tokens": 1}}} if svc == "brain" else sp.tts_body(CLAUSES[4][0])
-                rec, _ = await sp.job(svc, body, "run", timeout=400)
-                out.setdefault("warmup", {})[svc] = {k: rec[k] for k in ("delay_ms", "exec_ms", "wall_ms")}
-                print("  warmed:", json.dumps(out["warmup"][svc]), flush=True)
-                ledger.cold_reserve_s = 0.0
+            if a.no_warm:                                                       # --no-warm: no warm-up job (no spend); the first measured job may be a cold start
+                continue
+            ledger.cold_reserve_s = 200.0
+            print(f"{svc}: warm-up job (counted in the budget); its own delay time says whether it was a cold start", flush=True)
+            body = {"input": {"prompt": "hi", "messages": [{"role": "user", "content": "hi"}], "sampling_params": {"max_tokens": 1}}} if svc == "brain" else sp.tts_body(CLAUSES[4][0])
+            rec, _ = await sp.job(svc, body, "run", timeout=400)
+            out.setdefault("warmup", {})[svc] = {k: rec[k] for k in ("delay_ms", "exec_ms", "wall_ms")}
+            d = rec["delay_ms"]
+            out["warmup"][svc]["class"] = None if d is None else ("cold_start" if d >= 20000 else "already_warm" if d < 5000 else "in_between")   # by queue time only
+            print("  warm-up:", json.dumps(out["warmup"][svc]), flush=True)
+            ledger.cold_reserve_s = 0.0
         # (a) Brain stream
         models = await sp.brain_models()
         out["brain_models_listed"] = len(models)

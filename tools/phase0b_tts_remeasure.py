@@ -240,10 +240,10 @@ WARM_RESERVE_S = 30.0
 
 
 def warm_reserve_s(workers_health: dict, cold_reserve_s: float) -> float:
-    """Seconds of billing the ledger reserves before a call: a worker that /health shows as idle, ready or running means no cold start to pay for. NOTE: the
-    first pickup on such a worker can still take about 50 s (Phase 0b, 25 Oct), so callers must still wait long enough."""
-    up = sum(int((workers_health or {}).get(k) or 0) for k in ("idle", "ready", "running"))
-    return min(cold_reserve_s, WARM_RESERVE_S) if up else cold_reserve_s
+    """Seconds of billing the ledger reserves before a call. /health worker counts are NOT a warm/cold signal (they look like worker SLOTS that always add up to
+    Max workers, and jobs waited 41-52 s while /health said idle 2 / ready 2: UNVERIFIED), so the reserve is NEVER lowered because of them. Only a completed job's
+    own delay time says whether a start was cold. The argument is kept so that old callers keep working."""
+    return cold_reserve_s
 
 
 async def run_ulaw_probe(a):
@@ -285,16 +285,18 @@ async def run_ulaw_probe(a):
 
 async def run_old_style_probe(a):
     """ONE request exactly as the telephony app sends it today: the reference voice in the request, no voice name, the default (wav) output. It shows whether the worker
-    behind the endpoint is healthy at all. Sent only when a worker is ALREADY warm (a cold start alone could exceed a small cap); nothing is sent otherwise."""
+    behind the endpoint is healthy at all. /health counts cannot tell whether a start would be cold, so it is sent ONLY with --allow-cold (the operator accepts that a cold
+    start may be paid); nothing is sent otherwise."""
     cl, sp = make(a, reserve=0.0)
     rec_out = {"endpoint": a.endpoint_id, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "style": "old (reference in the request, wav)"}
     try:
         w, code = await workers(sp)
         rec_out["workers_before"] = w
         print("workers before:", json.dumps(w), "health http", code, flush=True)
-        if not sum(int(w.get(k) or 0) for k in ("idle", "ready", "running")) and not a.allow_cold:
-            print("no worker is warm: a cold start could exceed the cap, so NOTHING was sent (use --allow-cold to accept that)", flush=True)
-            rec_out["verdict"] = "not_sent_no_warm_worker"
+        if not a.allow_cold:
+            print("/health worker counts do not tell warm from cold (UNVERIFIED worker slots): a cold start could exceed the cap, so NOTHING was sent "
+                  "(use --allow-cold to accept that)", flush=True)
+            rec_out["verdict"] = "not_sent_cold_start_not_accepted"
             return rec_out
         body = {"input": sp.tts_body(CLAUSES[4][0])["input"]}                 # the app's own request (with the reference)
         rec_out["request_fields"] = sorted(body["input"])

@@ -169,24 +169,23 @@ async def suite(args):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    # 0. warm (health is free; a 1-token ping only if no worker is up). Its cost is reported separately and is NOT charged to the phase caps.
+    # 0. warm-up: a 1-token ping (skipped with --no-warm); its own delay time classifies the start. /health counts are information only. Its cost is reported separately and is NOT charged to the phase caps.
     if path.exists() and args.phases != "all":                        # keep the phases already measured BEFORE anything is saved
         prev = json.loads(path.read_text(encoding="utf-8"))
         out["phases"] = prev.get("phases", {})
     args.budget = args.warm_budget
     s, cfg, cl = make(args, reserve=200.0)
     try:
-        w0 = await brain_workers(cl)
-        up = sum(int(w0.get(k) or 0) for k in ("idle", "ready", "running"))
-        if not up and args.no_warm:
-            raise SystemExit(f"Brain is cold (workers {w0}) and --no-warm was given: nothing was sent, nothing was spent")
-        if not up:
+        w0 = await brain_workers(cl)                    # INFORMATION ONLY: worker slots, not a warm/cold signal (UNVERIFIED); nothing below depends on it
+        if args.no_warm:
+            out["warmup"] = {"skipped": True, "health_slots_unverified": w0}
+        else:
             cl.cfg["max_tokens"] = 1
             await cl.chat([{"role": "user", "content": "hi"}])
             c = cl.calls[-1]
-            out["warmup"] = {"was_cold": True, "brain_delay_ms": c["delay_ms"], "brain_exec_ms": c["exec_ms"], "est_spend_usd": round(cl.ledger.spent(), 5)}
-        else:
-            out["warmup"] = {"was_cold": False, "workers_before": w0}
+            d = c["delay_ms"]
+            out["warmup"] = {"brain_delay_ms": d, "brain_exec_ms": c["exec_ms"], "est_spend_usd": round(cl.ledger.spent(), 5), "health_slots_unverified": w0,
+                             "class": None if d is None else ("cold_start" if d >= 20000 else "already_warm" if d < 5000 else "in_between")}   # by queue time only
     finally:
         await cl.aclose()
     print("warmup:", json.dumps(out["warmup"]), flush=True)
@@ -294,7 +293,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("warm", "run", "suite"))
     ap.add_argument("--phases", default="all", help="suite: all, or a comma list of en_off,multiturn,adversarial (earlier results in the output file are kept)")
-    ap.add_argument("--no-warm", action="store_true", help="suite: abort (free) if the Brain has no worker up instead of paying for a cold start")
+    ap.add_argument("--no-warm", action="store_true", help="suite: skip the 1-token warm-up ping (no spend); the first measured job may then be a cold start")
     ap.add_argument("--warm-budget", type=float, default=0.15); ap.add_argument("--cap-en-off", type=float, default=0.05)
     ap.add_argument("--cap-multiturn", type=float, default=0.20); ap.add_argument("--cap-adv", type=float, default=0.15)
     ap.add_argument("--out-suite", default=str(ROOT / "docs" / "evidence" / "devanagari_suite.json"))
