@@ -21,6 +21,7 @@ from pymongo.errors import DuplicateKeyError
 from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
+from app.ai.glossary_correction import Glossary, apply_confirm_hint
 from app.ai.streaming.ack import AckSet
 from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
 from app.ai.streaming.config import STREAM_KEYS, stream_config_from, utterance_max_ms
@@ -40,7 +41,7 @@ LANGS = ["auto", "hi", "en", "hinglish"]
 # Per-tenant booleans, all OFF by default and ALL in the one allowlist used by default_config, get_config and update_config (the dropped key_refs bug was an allowlist):
 # latency work (trace_evidence, stream_ramp, stt_raw_pcm, tts_adaptive_poll) and the quality work ported from quality-work 9cdb32b (glossary_correction, strict_grounding).
 LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll", "glossary_correction", "strict_grounding",
-                 "ack_enabled", "stt_adaptive_poll", "utterance_cap_raise")   # stt_adaptive_poll: overlapping status polls for the STT job (default OFF); ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
+                 "ack_enabled", "stt_adaptive_poll", "utterance_cap_raise", "glossary_hint")   # stt_adaptive_poll: overlapping status polls for the STT job (default OFF); ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
 
 
 @dataclass
@@ -306,6 +307,11 @@ class AiService:
             log.info("ack: enabled=%s reason=%s", conv.ack is not None, why)
         if cfg.get("stream_ramp") and cfg.get("streaming_pipeline"):
             apply_ramp_rule(conv)                                  # optional Brain block, appended to the system message of THIS call only
+        if cfg.get("glossary_correction"):
+            conv.glossary, why = Glossary.load(self.s.ai_glossary_path, tenant_id)   # built-in sound-alikes + the operator's file for this tenant (never raises)
+            log.info("glossary: reason=%s entries=%d", why, len(conv.glossary.entries))
+        if cfg.get("glossary_hint"):
+            apply_confirm_hint(conv)                               # optional Brain block (default OFF), appended after the strict-grounding and ramp blocks of THIS call only
         rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))
         rt.utterance_max_ms = utterance_max_ms(cfg)                # None unless the tenant flag `utterance_cap_raise` is on
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")

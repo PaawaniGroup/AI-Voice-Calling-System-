@@ -50,8 +50,8 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
         res.error = "no_speech_recognised"
         return res
     if getattr(conv, "glossary_correction", False):                     # streaming path: after the STT text, before the mode, the retrieval and the Brain
-        from app.ai.glossary_correction import correct_glossary_counted
-        heard, n_fixed = correct_glossary_counted(heard)
+        from app.ai.glossary_correction import apply_glossary             # the same helper as the legacy path: the call's Glossary (built-in + the operator's file) or the always-on mappings
+        heard, n_fixed = apply_glossary(conv, heard)
         turn_trace.note_turn("glossary_corrections", n_fixed)             # a count; the words are never recorded
     res.heard = heard
     lang = conv.language

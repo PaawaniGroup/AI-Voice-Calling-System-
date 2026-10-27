@@ -306,6 +306,7 @@ class Conversation:
         self.streaming = streaming
         self._stream = None          # the StreamingTurn in progress (if any)
         self.last_stream = None      # the TurnOutcome of the last streaming turn (numbers and in-memory text; never stored or logged)
+        self.glossary = None                    # Glossary (app/ai/glossary_correction.py) of this call; None = flag `glossary_correction` OFF
         self.ack = None                         # AckSet (app/ai/streaming/ack.py): cached neutral acknowledgement of this call; None = flag `ack_enabled` OFF or files missing
         self.filler_pcm8: bytes | None = None   # short "one moment" audio for slow tool calls (8 kHz PCM16), when the deployment has one
         self.tools = tools or {}  # name -> async handler(args: dict) -> str
@@ -466,8 +467,9 @@ class Conversation:
                 yield TurnChunk(error="no_speech_recognised", timings_ms=res_timings, is_first=True, is_last=True)
                 return
             if getattr(self, "glossary_correction", False):          # legacy path: after the STT text, before the mode, the retrieval and the Brain
-                from app.ai.glossary_correction import correct_glossary
-                heard = correct_glossary(heard)
+                from app.ai.glossary_correction import apply_glossary         # the same helper as the streaming path
+                heard, n_fixed = apply_glossary(self, heard)
+                turn_trace.note_turn("glossary_corrections", n_fixed)         # a count; the words are never recorded
 
             lang = self.language
             if lang == "auto" and stt.get("language"):
