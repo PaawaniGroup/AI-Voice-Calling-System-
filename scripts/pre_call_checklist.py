@@ -57,8 +57,8 @@ EXPECTED_AI_FLAGS = {
     "strict_grounding": True,
 }
 # Must NOT be on for the call (absent counts as off). reply_guard has no flag in this tree.
-MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled", "tts_keepalive", "stt_adaptive_poll", "utterance_cap_raise")
-ALLOWABLE_ON = ("stt_adaptive_poll", "utterance_cap_raise")      # off unless the operator says so for THIS call (--allow-on NAME); stt_raw_pcm, tts_keepalive, rt_transport can never be allowed here
+MUST_BE_OFF = ("stt_raw_pcm", "faq_grounding", "ack_enabled", "keepalive_enabled", "tts_keepalive", "stt_adaptive_poll", "utterance_cap_raise", "glossary_hint")
+ALLOWABLE_ON = ("stt_adaptive_poll", "utterance_cap_raise", "glossary_hint")      # off unless the operator says so for THIS call (--allow-on NAME); stt_raw_pcm, tts_keepalive, rt_transport can never be allowed here
 
 
 def rt_transport_is_off(value) -> bool:
