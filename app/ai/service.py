@@ -21,6 +21,8 @@ from pymongo.errors import DuplicateKeyError
 from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
+from app.ai.rt import protocol as rt_protocol
+from app.ai.streaming.ack import AckSet
 from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
 from app.ai.streaming.config import STREAM_KEYS, stream_config_from
 from app.ai.streaming.ramp import apply_to_conversation as apply_ramp_rule
@@ -36,7 +38,12 @@ AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
 
 
-LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
+# Per-tenant booleans, all OFF by default and ALL in the one allowlist used by default_config, get_config and update_config (the dropped key_refs bug was an allowlist):
+# latency work (trace_evidence, stream_ramp, stt_raw_pcm, tts_adaptive_poll) and the quality work ported from quality-work 9cdb32b (glossary_correction, strict_grounding).
+LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll", "glossary_correction", "strict_grounding",
+                 "ack_enabled")   # ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
+RT_KEYS = ("rt_transport", "rt_endpoints", "rt_secret_env", "rt_pins")   # persistent real-time transport (Stage 2): in the same allowlist, so they reach the runtime config (tests/unit/test_rt_clients.py)
+RT_TRANSPORT_VALUES = ("queue", "persistent")
 
 
 @dataclass
@@ -79,6 +86,7 @@ class AiService:
                 "tts_voice": None,             # name of the worker's voice for tts_ulaw8k (None = the worker's default, "utkarsh")
                 **{k: None for k in STREAM_KEYS},   # None = the built-in provisional default (set after the TTS re-measurement)
                 **{k: False for k in LATENCY_FLAGS},   # latency-work flags: per tenant, default OFF
+                "rt_transport": {}, "rt_endpoints": {}, "rt_secret_env": None, "rt_pins": {},   # persistent real-time transport (app/ai/rt): empty = every service on the queue path
                 "full_duplex_input": False,        # listen while the assistant speaks: min voiced time, echo guard, kept speech, hysteresis; OFF by default
                 **{k: None for k in DUPLEX_KEYS}}  # None = the provisional defaults of app/ai/duplex.py (to be tuned on real call recordings)
 
@@ -87,7 +95,7 @@ class AiService:
         cfg = self.default_config(tenant_id)
         if doc:
             for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
-                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *LATENCY_FLAGS, *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *LATENCY_FLAGS, *RT_KEYS, *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
             for k in ("models", "timeouts", "paths", "keys", "key_refs"):
@@ -158,6 +166,37 @@ class AiService:
             for name, val in body["keys"].items():
                 if name in SERVICES and isinstance(val, str):
                     cfg["keys"][name] = val.strip()
+        if "rt_transport" in body and body["rt_transport"] is not None:
+            rt = body["rt_transport"]
+            if not isinstance(rt, dict) or any(k not in ("stt", "tts", "brain") or v not in RT_TRANSPORT_VALUES for k, v in rt.items()):
+                raise Unprocessable("rt_transport maps stt, tts or brain to queue or persistent", code="invalid_config")
+            cfg["rt_transport"] = dict(rt)
+        if "rt_endpoints" in body and body["rt_endpoints"] is not None:
+            eps = body["rt_endpoints"]
+            if not isinstance(eps, dict) or any(k not in ("stt", "tts", "brain") for k in eps):
+                raise Unprocessable("rt_endpoints maps stt, tts or brain to a URL", code="invalid_config")
+            checked = {}
+            for k, v in eps.items():
+                v = (v or "").strip() if isinstance(v, str) else ""
+                if v:
+                    want = ("https://",) if k == "brain" else ("wss://", "ws://")
+                    if not v.startswith(want):
+                        raise Unprocessable(f"rt_endpoints.{k} must start with {' or '.join(want)}", code="invalid_config")
+                    if k != "brain" and rt_protocol.check_url(v):
+                        raise Unprocessable(f"rt_endpoints.{k}: use wss:// (plain ws:// is accepted only for a loopback address behind a private tunnel)", code="invalid_config")
+                    validate_service_url(v.replace("wss://", "https://", 1).replace("ws://", "http://", 1), self.s)    # the same host allowlist and checks as the queue URLs
+                    checked[k] = v.rstrip("/")
+            cfg["rt_endpoints"] = checked
+        if "rt_pins" in body and body["rt_pins"] is not None:
+            pins = body["rt_pins"]
+            if not isinstance(pins, dict) or any(k not in ("stt", "tts") or not (isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v.strip().lower())) for k, v in pins.items()):
+                raise Unprocessable("rt_pins maps stt or tts to the SHA-256 (64 hex characters) of the server certificate", code="invalid_config")
+            cfg["rt_pins"] = {k: v.strip().lower() for k, v in pins.items()}         # a certificate fingerprint is public, not a secret
+        if "rt_secret_env" in body:
+            v = body["rt_secret_env"]
+            if v is not None and not (isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", v)):
+                raise Unprocessable("rt_secret_env is the NAME of an environment variable (capital letters, digits, underscores)", code="invalid_config")
+            cfg["rt_secret_env"] = v
         cfg["updated_at"], cfg["updated_by"] = utcnow(), principal
         await self.db["ai_config"].update_one({"tenant_id": tenant_id}, {"$set": cfg}, upsert=True)
         return cfg
@@ -168,9 +207,14 @@ class AiService:
         if not detail:
             for svc in SERVICES:
                 out[f"{svc}_url"] = "configured" if cfg.get(f"{svc}_url") else ""
+            out["rt_endpoints"] = {k: "configured" for k, v in (cfg.get("rt_endpoints") or {}).items() if v}
         return out
 
     def _clients(self, cfg: dict) -> ModelClients:
+        """The plain queue clients, unless the tenant switched a service to the persistent transport and the global kill switch (MME_TEL_AI_RT_KILL) is off."""
+        if any(v == "persistent" for v in (cfg.get("rt_transport") or {}).values()) and not getattr(self.s, "ai_rt_kill", False):
+            from app.ai.rt.clients import RtModelClients
+            return RtModelClients(self.s, cfg, self.transport)
         return ModelClients(self.s, cfg, self.transport)
 
     # ------------------------------------------------------------------ health
@@ -282,6 +326,8 @@ class AiService:
             else:
                 return existing
         clients = self._clients(cfg)
+        if hasattr(clients, "set_call"):
+            clients.set_call(session_id)                                   # per-call isolation: the persistent connections of this call carry its id (never another's)
         conv = Conversation(
             clients,
             lang,
@@ -290,10 +336,15 @@ class AiService:
             counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
             devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
+            glossary_correction=bool(cfg.get("glossary_correction")),   # per tenant, default OFF (quality-work)
+            strict_grounding=bool(cfg.get("strict_grounding")),         # per tenant, default OFF (quality-work)
             streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
             duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
+        if cfg.get("ack_enabled") and cfg.get("streaming_pipeline"):
+            conv.ack, why = AckSet.load(self.s.ai_ack_dir)          # None when the files are missing or not neutral: the call goes on without it
+            log.info("ack: enabled=%s reason=%s", conv.ack is not None, why)
         if cfg.get("stream_ramp") and cfg.get("streaming_pipeline"):
             apply_ramp_rule(conv)                                  # optional Brain block, appended to the system message of THIS call only
         rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))

@@ -49,6 +49,9 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
     if not heard:
         res.error = "no_speech_recognised"
         return res
+    if getattr(conv, "glossary_correction", False):                     # streaming path: after the STT text, before the mode, the retrieval and the Brain
+        from app.ai.glossary_correction import correct_glossary
+        heard = correct_glossary(heard)
     res.heard = heard
     lang = conv.language
     if lang == "auto" and stt.get("language"):
@@ -59,6 +62,7 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
     else:
         mode = "en" if lang == "en" else "hi"
     res.mode = mode
+    t_stt_final = clock.now()                                          # the cached acknowledgement (flag `ack_enabled`) counts its wait from here
 
     context: list = []
     if clients.cfg.get("rag_url"):
@@ -113,9 +117,16 @@ async def run_streaming_turn(conv, pcm: bytes, rate: int, *, sink, gen: int, clo
                 res.timings_ms["tts"] = c0["tts_wall_ms"]
             on_first_frame(res, st.outcome.clause_texts.get(0, ""))
 
+    ack = getattr(conv, "ack", None)                                    # AckSet of this call, or None (flag OFF / files missing)
+
+    def ack_pick() -> bytes | None:
+        clip = ack.pick("en" if mode == "en" else "hi") if ack is not None else None   # rotation counts only the clips that are really played
+        return clip.pcm8 if clip is not None else None
+
     st = StreamingTurn(gen=gen, brain_stream=brain_stream, tts=tts, sink=sink, clock=clock, mode=mode, cfg=conv.streaming,
                        rewrite=rewrite, run_tools=run_tools if conv.tools else None, filler_pcm8=getattr(conv, "filler_pcm8", None),
-                       check_script=conv.enforce, trace=turn_trace.current(), on_first_frame=first_frame)
+                       check_script=conv.enforce, trace=turn_trace.current(), on_first_frame=first_frame,
+                       ack_pick=ack_pick if ack is not None else None, ack_t0=t_stt_final)
     conv._stream = st
     if on_created is not None:
         on_created(st)
@@ -174,5 +185,8 @@ def _trace_marks(st: StreamingTurn) -> None:
                       ("t_tts_first_chunk", "t_first_enqueue")):
         if m.get(key) is not None:
             tr.mark(name, overwrite=True, at=m[key])
-    if st.playout.t_first is not None:
-        tr.mark("t_first_frame_to_plivo", at=st.playout.t_first)
+    acked = m.get("t_ack") is not None
+    if st.playout.t_first_real is not None:
+        tr.mark("t_first_frame_to_plivo", overwrite=acked, at=st.playout.t_first_real)   # the sink stamped the acknowledgement's frame first: the answer's frame wins
+    if acked and st.playout.t_first is not None:
+        tr.mark("t_ack_first_frame", at=st.playout.t_first)                              # a new numeric field, present only when the acknowledgement was played
