@@ -373,6 +373,14 @@ class AiConfigIn(Strict):
     stream_prefetch_depth: int | None = Field(None, ge=1, le=4)
     stream_prebuffer_ms: int | None = Field(None, ge=0, le=400)
     runpod_poll_cap_s: float | None = Field(None, ge=0.03, le=1.0)
+    glossary_correction: bool | None = None  # phonetic normalisation of the caller's text before the Brain (quality-work); default OFF per tenant
+    strict_grounding: bool | None = None    # strict grounding rules appended to the system prompt (quality-work); default OFF per tenant
+    glossary_hint: bool | None = None        # short Brain hint: the recogniser mishears course names; ask ONE confirming question when a word does not fit; default OFF per tenant
+    utterance_cap_raise: bool | None = None # one utterance may last up to `utterance_max_s` instead of the fixed 6 s (fewer cap splits and merges); default OFF per tenant
+    utterance_max_s: float | None = Field(None, ge=6.0, le=12.0)   # hard maximum of one utterance in seconds; default 6.0 (today); read only with utterance_cap_raise
+    stt_adaptive_poll: bool | None = None   # STT jobs: overlapping status polls (first poll 0.25 s after the submit, then one every 0.12 s); default OFF per tenant
+    ack_enabled: bool | None = None         # cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
+    ack_after_ms: int | None = Field(None, ge=0, le=3000)   # wait after the speech-to-text final before it plays (default 1500)
     stream_ramp: bool | None = None          # clause-size ramp (short first clause, Brain opening rule); needs streaming_pipeline; default OFF per tenant
     tts_adaptive_poll: bool | None = None    # voice jobs: overlapping status polls from the predicted end (saves at most ~0.15 s per job, ESTIMATE); default OFF per tenant
     stt_raw_pcm: bool | None = None         # send the caller's audio to the STT worker as ONE raw PCM16 field + sample rate (needs a worker that reads audio_pcm16_b64); default OFF per tenant

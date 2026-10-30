@@ -37,6 +37,7 @@ class TurnTrace:
         self.runpod: dict[str, dict] = {}   # service -> {"delay_ms", "exec_ms", "calls"} of the FIRST call (the one that gates latency)
         self.meta: dict[str, float] = {}
         self.stream: dict | None = None   # token-streaming pipeline metrics (numbers only); deliberately NOT part of to_ms(): the stored record is unchanged
+        self.turn: dict = {}                # labels (endpoint_reason, cancel_reason, outcome) and counts of this turn (glossary corrections, ...); evidence line only
         self.jobs: list[dict] = []          # one numbers-only record per RunPod job (STT, voice), in submit order; NOT part of to_ms()
         self.brain_calls: list[dict] = []   # one counts-only record per Brain call (history size, prompt chars, retrieved-context chars)
         if t_speech_end is not None:
@@ -88,10 +89,23 @@ class TurnTrace:
             r["submit_at_ms"] = round((ts - base) * 1000, 1) if (ts is not None and base is not None) else None
             jobs.append(r)
         stream = {k: v for k, v in (self.stream or {}).items() if k != "clauses"}
-        return _numbers_only({"trace_id": self.trace_id, "marks_ms": self.to_ms(), "jobs": jobs, "brain_calls": self.brain_calls, "stream": stream})
+        return _numbers_only({"trace_id": self.trace_id, "marks_ms": self.to_ms(), "jobs": jobs, "brain_calls": self.brain_calls, "stream": stream, "turn": self.turn})
 
 
-_ENUM_KEYS = {"service", "status", "stop_reason", "trace_id"}   # the only keys whose string value is kept (short, from code, never speech)
+_ENUM_KEYS = {"service", "status", "stop_reason", "trace_id", "endpoint_reason", "cancel_reason", "outcome"}   # the only keys whose string value is kept (short, from code, never speech)
+
+
+def note_turn(key: str, value) -> None:
+    """Label or number of THIS turn for the evidence line (task-local trace). Strings survive only under the enumerated keys above; everything else must be a number."""
+    tr = _current.get()
+    if tr is not None:
+        tr.turn[key] = value
+
+
+def add_turn_count(key: str, n: int) -> None:
+    tr = _current.get()
+    if tr is not None:
+        tr.turn[key] = tr.turn.get(key, 0) + n
 
 # Task-local tag merged into every job record made under it (the streaming turn tags each voice job with its clause index and stop reason).
 job_tag: contextvars.ContextVar["dict | None"] = contextvars.ContextVar("turn_job_tag", default=None)

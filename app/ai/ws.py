@@ -217,7 +217,7 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     frames counts as silence, so an utterance still ends if the transport stops sending when the caller is quiet.
     """
     local: list[asyncio.Task] = []
-    utterances: asyncio.Queue[tuple] = asyncio.Queue(maxsize=3)  # (pcm, t_speech_end, t_endpoint) on the monotonic clock
+    utterances: asyncio.Queue[tuple] = asyncio.Queue(maxsize=3)  # (pcm, t_speech_end, t_endpoint, endpoint_reason) on the monotonic clock; t_speech_end = the LAST LOUD FRAME, t_endpoint = the moment the end was decided
     st = {
         "last_loud_at": 0.0,
         "playing": False,
@@ -232,6 +232,8 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
     }
     turn: dict = {"task": None, "pcm": b"", "end_at": 0.0, "audio": False, "n": 1}   # the turn being processed (if any)
     merge: dict = {"pcm": None, "n": 0}   # speech of a cancelled attempt that the NEXT utterance continues
+    _u = getattr(rt, "utterance_max_ms", None)
+    utterance_cap_ms = _u if (isinstance(_u, int) and not isinstance(_u, bool) and MAX_UTTERANCE_MS <= _u <= 12000) else MAX_UTTERANCE_MS   # tenant flag `utterance_cap_raise` (default OFF): 6-12 s; else today's 6 s
 
     # Full-duplex input handling (tenant flag `full_duplex_input`; None = OFF: every line below takes the old path, unchanged)
     duplex = getattr(rt.conversation, "duplex", None)
@@ -347,13 +349,15 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
             final["recorded"] = state["recorded"]
             turn["stream"] = None
 
-    async def run_turn(pcm: bytes, t_speech_end: float, t_endpoint: float) -> None:
+    async def run_turn(pcm: bytes, t_speech_end: float, t_endpoint: float, endpoint_reason: str = "silence", pieces: int = 1) -> None:
         """ONE turn (STT -> Brain -> TTS clauses -> audio) as its own task, so a new utterance can cancel it. Cancelling it cancels the
         in-flight STT/Brain/TTS requests (and their RunPod jobs) and frees the worker for the next utterance."""
         t_turn = time.perf_counter()
         first = True
         trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
         turn_trace.start(trace)  # this task has its own context: the trace belongs to this turn only
+        trace.turn.update(endpoint_reason=endpoint_reason, utterance_ms=round(len(pcm) / (rate * 2) * 1000), pieces_merged=pieces)   # the label and lengths of what STT is given
+        turn["trace"] = trace                                      # so cancel_turn / the hangup path can say WHY this turn ended
         recorded = False
         stream_final: dict = {}   # set only by the token-streaming path (tenant flag `streaming_pipeline`, Plivo calls)
         try:
@@ -400,16 +404,24 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                         turn_trace.append_evidence(getattr(ai.s, "ai_trace_evidence_path", ""), trace)
                 except Exception:  # latency bookkeeping must never take the call down
                     log.exception("could not store turn latency trace")
+            elif getattr(rt, "trace_evidence", False):
+                # a turn that never reached audio (merged into the next utterance, superseded, hung up, no speech): its evidence line says so; from_trace skips lines without a first frame
+                try:
+                    trace.turn.setdefault("outcome", "cancelled_before_audio" if "cancel_reason" in trace.turn else "no_answer")   # cancelled before the streaming turn began, or no answer (no speech, an error)
+                    trace.mark("t_turn_end")
+                    turn_trace.append_evidence(getattr(ai.s, "ai_trace_evidence_path", ""), trace)
+                except Exception:
+                    log.exception("could not store turn latency trace")
 
     async def worker() -> None:
         while True:
-            pcm, t_speech_end, t_endpoint = await utterances.get()
+            pcm, t_speech_end, t_endpoint, endpoint_reason = await utterances.get()
             n = 1
             if merge["pcm"] is not None:   # an earlier attempt at this question was cancelled: this speech continues it
                 pcm, n = merge["pcm"] + pcm, merge["n"] + 1
                 merge["pcm"] = None
             turn.update(pcm=pcm, end_at=t_speech_end, audio=False, n=n, stream=None, stream_sink=None)
-            task = asyncio.create_task(run_turn(pcm, t_speech_end, t_endpoint), name="ai-turn")
+            task = asyncio.create_task(run_turn(pcm, t_speech_end, t_endpoint, endpoint_reason, n), name="ai-turn")
             turn["task"] = task
             try:
                 await asyncio.wait({task})   # a cancelled turn ends here normally; only OUR cancellation raises
@@ -426,6 +438,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         task = turn["task"]
         if task is None or task.done():
             return False
+        tr = turn.get("trace")
+        if tr is not None:
+            tr.turn["cancel_reason"] = reason                          # barge_in | merged | superseded (hangup is set in the cleanup below)
         rt.conversation.cancel()
         silence_stream()                       # token-streaming turn: no frame is written after this line (no-op for the old path)
         stream = turn.get("stream")
@@ -470,15 +485,16 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         await cancel_turn(reason)
 
     async def flush_if_due() -> None:
-        if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000):
+        if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * utterance_cap_ms // 1000):
             utt = bytes(st["buf"])
+            reason = "silence" if st["silence_ms"] >= silence_ms else "cap"          # the 700 ms silence rule, or the utterance-length cap (MAX_UTTERANCE_MS)
             t_endpoint = time.monotonic()
             t_speech_end = st["last_loud_at"] or t_endpoint
             st.update(buf=bytearray(), in_speech=False, speech_ms=0, silence_ms=0)
             if utterances.full():  # backpressure: drop the oldest queued utterance
                 utterances.get_nowait()
                 await io.error("inbound_overflow")
-            utterances.put_nowait((utt, t_speech_end, t_endpoint))
+            utterances.put_nowait((utt, t_speech_end, t_endpoint, reason))
 
     async def next_item():
         if hasattr(io, "next_item"):
@@ -598,6 +614,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                     await flush_if_due()
     finally:
         # Bounded: a worker that does not honour cancellation must never keep the socket handler (and the call) alive.
+        tr_end = turn.get("trace")
+        if tr_end is not None and turn["task"] is not None and not turn["task"].done():
+            tr_end.turn.setdefault("cancel_reason", "hangup")           # the socket ended under a running turn: the caller hung up, or a disarm/hangup request closed the call
         pending = set(local)
         for wait_s in (WORKER_STOP_S, WORKER_STOP_S / 2):
             for tk in pending:

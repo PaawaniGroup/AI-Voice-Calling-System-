@@ -21,8 +21,10 @@ from pymongo.errors import DuplicateKeyError
 from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
+from app.ai.glossary_correction import Glossary, apply_confirm_hint
+from app.ai.streaming.ack import AckSet
 from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
-from app.ai.streaming.config import STREAM_KEYS, stream_config_from
+from app.ai.streaming.config import STREAM_KEYS, stream_config_from, utterance_max_ms
 from app.ai.streaming.ramp import apply_to_conversation as apply_ramp_rule
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
@@ -36,7 +38,10 @@ AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
 
 
-LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
+# Per-tenant booleans, all OFF by default and ALL in the one allowlist used by default_config, get_config and update_config (the dropped key_refs bug was an allowlist):
+# latency work (trace_evidence, stream_ramp, stt_raw_pcm, tts_adaptive_poll) and the quality work ported from quality-work 9cdb32b (glossary_correction, strict_grounding).
+LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll", "glossary_correction", "strict_grounding",
+                 "ack_enabled", "stt_adaptive_poll", "utterance_cap_raise", "glossary_hint")   # stt_adaptive_poll: overlapping status polls for the STT job (default OFF); ack_enabled: cached neutral acknowledgement after the speech-to-text final (needs MME_TEL_AI_ACK_DIR); default OFF per tenant
 
 
 @dataclass
@@ -52,6 +57,7 @@ class Runtime:
     tasks: list = field(default_factory=list)
     call_id: str | None = None
     trace_evidence: bool = False   # tenant flag `trace_evidence` (and MME_TEL_AI_TRACE_EVIDENCE_PATH set): append the numbers-only turn evidence line
+    utterance_max_ms: int | None = None   # tenant flag `utterance_cap_raise` + `utterance_max_s`: hard maximum of one utterance in ms; None = today's 6 s cap
 
 
 class AiService:
@@ -290,13 +296,24 @@ class AiService:
             counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
             hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
             devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
+            glossary_correction=bool(cfg.get("glossary_correction")),   # per tenant, default OFF (quality-work)
+            strict_grounding=bool(cfg.get("strict_grounding")),         # per tenant, default OFF (quality-work)
             streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
             duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
         )
         rt = Runtime(session_id, tenant_id, conv, clients)
+        if cfg.get("ack_enabled") and cfg.get("streaming_pipeline"):
+            conv.ack, why = AckSet.load(self.s.ai_ack_dir)          # None when the files are missing or not neutral: the call goes on without it
+            log.info("ack: enabled=%s reason=%s", conv.ack is not None, why)
         if cfg.get("stream_ramp") and cfg.get("streaming_pipeline"):
             apply_ramp_rule(conv)                                  # optional Brain block, appended to the system message of THIS call only
+        if cfg.get("glossary_correction"):
+            conv.glossary, why = Glossary.load(self.s.ai_glossary_path, tenant_id)   # built-in sound-alikes + the operator's file for this tenant (never raises)
+            log.info("glossary: reason=%s entries=%d", why, len(conv.glossary.entries))
+        if cfg.get("glossary_hint"):
+            apply_confirm_hint(conv)                               # optional Brain block (default OFF), appended after the strict-grounding and ramp blocks of THIS call only
         rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))
+        rt.utterance_max_ms = utterance_max_ms(cfg)                # None unless the tenant flag `utterance_cap_raise` is on
         rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")
         self.runtime[session_id] = rt
         m.AI_RUNTIMES.set(len(self.runtime))

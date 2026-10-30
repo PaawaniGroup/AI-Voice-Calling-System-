@@ -66,6 +66,20 @@ class AiTimeout(AiError):
     pass
 
 
+_AUDIO_FIELD_WORDS = ("audio_b64", "audio_pcm16", "audio_base64", "pcm16", "provide audio")
+
+
+def _rejects_audio_fields(e: "AiError") -> bool:
+    """True when a worker ERROR (a failed job, or HTTP 400/422) names the audio input fields: the signature of a worker that does not know the raw PCM body.
+    Timeouts, unreachable endpoints, auth and 5xx errors never match (retrying those with another body would hide a real outage)."""
+    if isinstance(e, (AiTimeout, AiUnavailable)):
+        return False
+    if e.kind == "runpod_error" or (e.kind == "http_error" and e.status_code in (400, 422)):
+        text = f"{e.detail or ''} {e.body or ''}".lower()
+        return any(w in text for w in _AUDIO_FIELD_WORDS)
+    return False
+
+
 def validate_service_url(url: str, s: Settings) -> str:
     """Only http(s) URLs to explicitly allow-listed hosts, without credentials/query. Blocks cloud metadata."""
     u = urlparse(url)
@@ -164,6 +178,7 @@ class ModelClients:
         self._bg: set[asyncio.Task] = set()          # fire-and-forget RunPod cancel calls (kept referenced until they finish)
         self.cancelled_jobs: list[tuple[str, int | str]] = []   # (service, http status | error type) of each RunPod cancel attempt
         self._last_job_end: dict[str, float] = {}               # service -> monotonic time its last RunPod job ended (gap between voice jobs)
+        self._stt_raw_off = False                               # set for the rest of THIS call after the worker rejected the raw PCM body (flag `stt_raw_pcm`)
 
     def resolve_key(self, service: str | None = None) -> str | None:
         """Resolve API key for a model service without exposing or logging it.
@@ -306,6 +321,8 @@ class ModelClients:
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
         overlap_first = self._first_poll_delay(rec) if (service == "tts" and self.cfg.get("tts_adaptive_poll")) else None   # tenant flag, default OFF
+        if service == "stt" and self.cfg.get("stt_adaptive_poll"):                          # tenant flag, default OFF: overlapping polls for the STT job too
+            overlap_first = max(0.06, float(self.cfg.get("stt_poll_first_s") or 0.25))      # no length model for STT: a fixed first poll (a warm 6-7 s decode takes 0.3-1.0 s, MEASURED)
         try:
             return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06, rec=rec, overlap_first_s=overlap_first)
         except asyncio.CancelledError:
@@ -332,7 +349,7 @@ class ModelClients:
         2000 per 10 s per endpoint). The first answer that is not IN_QUEUE/IN_PROGRESS wins; the others are cancelled. Expected saving: the time until a finished job is
         noticed drops from about half a poll period (~0.14-0.18 s) to about 0.05 s: AT MOST ~0.15 s per job (ESTIMATE, not measured). Errors behave as in the sequential loop,
         except HTTP 429 (RunPod's rate limit), which is skipped up to 5 times in a row."""
-        step = float(self.cfg.get("tts_poll_step_s") or 0.1)
+        step = float(self.cfg.get(f"{service}_poll_step_s") or (0.12 if service == "stt" else 0.1))     # tts_poll_step_s / stt_poll_step_s
         url = f"{ep.url}/status/{job_id}"
         t_loop = time.monotonic()
         inflight: set[asyncio.Task] = set()
@@ -472,39 +489,22 @@ class ModelClients:
         async def go(ep: ServiceEndpoint):
             hdrs = self._auth_headers("stt")
             if ep.path.endswith("/runsync"):
-                t_conv = time.perf_counter()
                 lang_hint = {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
-                raw_pcm = bool(self.cfg.get("stt_raw_pcm"))
-                if raw_pcm:
-                    # Tenant flag `stt_raw_pcm` (default OFF; needs a worker that reads `audio_pcm16_b64`, e.g. handler (7): UNVERIFIED which one is live):
-                    # the PCM16 samples as they are, ONE field plus the sample rate. No WAV wrapper, no triple copy; the worker resamples to 16 kHz itself.
-                    b64 = base64.b64encode(pcm).decode("ascii")
-                    fields = {"audio_pcm16_b64": b64, "sample_rate": rate}
-                    if lang_hint:
-                        fields["language"] = lang_hint
-                else:
-                    wav_bytes = pcm16_to_wav(pcm, rate)
-                    b64 = base64.b64encode(wav_bytes).decode("ascii")
-                    fields = {
-                        "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
-                        "audio": b64,
-                        "audio_base64": b64,
-                        "language": lang_hint,
-                    }
-                job = {"audio_pcm_bytes": len(pcm), "audio_s": round(len(pcm) / 2 / rate, 3) if rate else None, "sample_rate": rate, "raw_pcm": raw_pcm,
-                       "audio_b64_chars": len(b64), "audio_fields": sum(1 for k in fields if k.startswith("audio")),
-                       "convert_ms": round((time.perf_counter() - t_conv) * 1000, 2)}   # conversion = (WAV wrap +) base64
-                body = {"input": fields}
-                j = await self._runpod_call("stt", ep, hdrs, body, job=job)
-                out = j.get("output", {}) if isinstance(j, dict) else {}
-                if isinstance(out, dict):
-                    text = out.get("transcription") or out.get("text") or ""
-                    lang = out.get("language") or language
-                elif isinstance(out, str):
-                    text, lang = out, language
-                else:
-                    text, lang = "", language
-                return {"text": text.strip(), "language": lang}
+
+                async def once(raw_pcm: bool, fallback: bool = False) -> dict:
+                    return await self._stt_request(ep, hdrs, pcm, rate, language, lang_hint, raw_pcm, fallback, time.perf_counter())
+                raw_pcm = bool(self.cfg.get("stt_raw_pcm")) and not self._stt_raw_off
+                try:
+                    return await once(raw_pcm)
+                except AiError as e:
+                    if raw_pcm and _rejects_audio_fields(e):
+                        # ONE-SHOT FALLBACK (flag `stt_raw_pcm`): the live worker did not accept the new body. Retry ONCE with the old body and keep the flag off for the
+                        # rest of THIS call (the clients object is per call). Counted, never with any content. A second failure is raised as usual.
+                        self._stt_raw_off = True
+                        turn_trace.add_turn_count("stt_raw_fallback", 1)
+                        log.warning("stt_raw_pcm: the worker rejected the raw PCM body (%s); one retry with the old body, the flag is off for this call", e.kind)
+                        return await once(False, fallback=True)
+                    raise
             else:
                 files = {"file": ("audio.wav", pcm16_to_wav(pcm, rate), "audio/wav")}
                 data = {"model": self.cfg.get("models", {}).get("stt", self.s.ai_stt_model)}
@@ -521,6 +521,43 @@ class ModelClients:
                     raise AiError("stt", "bad_response", "not a JSON object") from None
                 return {"text": text.strip() if isinstance(text, str) else "", "language": lang if isinstance(lang, str) and lang else language}
         return await self._call("stt", go)
+
+    async def _stt_request(self, ep, hdrs, pcm: bytes, rate: int, language: str, lang_hint, raw_pcm: bool, fallback: bool, t_conv: float) -> dict:
+        """ONE STT RunPod job with either body (raw PCM16 when `raw_pcm`, else the old WAV in three fields). `fallback` marks the retry after a rejected raw body."""
+        if raw_pcm and not (isinstance(rate, int) and not isinstance(rate, bool) and rate > 0):
+            raw_pcm = False                                                         # no usable capture rate: never send raw PCM without it (the old body carries the rate in its WAV header)
+        if raw_pcm:
+            # Tenant flag `stt_raw_pcm` (default OFF; needs a worker that reads `audio_pcm16_b64`: the live worker is VERY LIKELY handler (7)-compatible, UNVERIFIED until one
+            # real job proves it): the PCM16 samples as they are, ONE field plus the sample rate. No WAV wrapper, no triple copy; the worker resamples to 16 kHz itself.
+            # `sample_rate` is ALWAYS sent and is the capture rate of THIS audio (8000 for Plivo): the live handler defaults a missing value to 16000 and would decode garbage.
+            b64 = base64.b64encode(pcm).decode("ascii")
+            fields = {"audio_pcm16_b64": b64, "sample_rate": rate}
+            if lang_hint:
+                fields["language"] = lang_hint
+        else:
+            wav_bytes = pcm16_to_wav(pcm, rate)
+            b64 = base64.b64encode(wav_bytes).decode("ascii")
+            fields = {
+                "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
+                "audio": b64,
+                "audio_base64": b64,
+                "language": lang_hint,
+            }
+        job = {"audio_pcm_bytes": len(pcm), "audio_s": round(len(pcm) / 2 / rate, 3) if rate else None, "sample_rate": rate, "raw_pcm": raw_pcm,
+               "audio_b64_chars": len(b64), "audio_fields": sum(1 for k in fields if k.startswith("audio")),
+               "convert_ms": round((time.perf_counter() - t_conv) * 1000, 2)}   # conversion = (WAV wrap +) base64
+        if fallback:
+            job["raw_fallback"] = True                                              # this job is the retry after a rejected raw body
+        j = await self._runpod_call("stt", ep, hdrs, {"input": fields}, job=job)
+        out = j.get("output", {}) if isinstance(j, dict) else {}
+        if isinstance(out, dict):
+            text = out.get("transcription") or out.get("text") or ""
+            lang = out.get("language") or language
+        elif isinstance(out, str):
+            text, lang = out, language
+        else:
+            text, lang = "", language
+        return {"text": text.strip(), "language": lang}
 
     # ------------------------------------------------------------------ Brain
     async def chat(self, messages: list[dict], tools: list[dict] | None = None, temperature: float | None = None) -> dict:
