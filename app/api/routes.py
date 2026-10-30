@@ -8,8 +8,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import Field
 
-from app.api.schemas import CallCreate, PolicyIn, RouteIn, TransferRequest, WebhookEndpointIn, call_out
+from app.api.schemas import CallCreate, PolicyIn, RouteIn, Strict, TransferRequest, WebhookEndpointIn, call_out
 from app.core import phone
 from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized, Unprocessable
 from app.core.ids import new_id, utcnow
@@ -121,7 +122,7 @@ async def create_call(request: Request, body: CallCreate, response: Response,
     key = idempotency_key or body.idempotency_key
     if not key:
         raise Unprocessable("Idempotency-Key header (or idempotency_key) is required", code="idempotency_key_required")
-    call, created = await call_svc.create_call(s, repos, p, payload, key)
+    call, created = await call_svc.create_call(s, repos, p, payload, key, ai=request.app.state.ai)
     if created:
         sess, _ = await request.app.state.sessions.create(
             p.tenant_id, call_ref=call["_id"], call_id=call["_id"], caller=call["from_number"], destination=call["to_number"],
@@ -323,10 +324,33 @@ async def put_policy(request: Request, tenant_id: str, body: PolicyIn, p: Princi
     data["allowed_callers"] = [phone.normalize(n, s.default_region) for n in data.get("allowed_callers", [])]
     data["transfer_destinations"] = [x if x.endswith("*") else phone.normalize(x, s.default_region)
                                      for x in data.get("transfer_destinations", [])]
+    data["outbound_ai_destinations"] = [phone.normalize(n, s.default_region) for n in data.get("outbound_ai_destinations", [])]
     res = await repos.put_policy(tenant_id, data)
     await repos.audit(tenant_id, p.sub, "policy.put", tenant_id, {"enabled": data["enabled"]}, request.state.request_id)
     res.pop("_id", None)
     return res
+
+
+class OutboundAiPause(Strict):
+    paused: bool
+    reason: str = Field("", max_length=200)
+
+
+@v1.get("/admin/outbound-ai/pause")
+async def get_outbound_ai_pause(request: Request, p: Principal = Depends(require_admin)):
+    _, repos, _ = _ctx(request)
+    return {"paused": await repos.outbound_ai_paused(), "config_paused": bool(request.app.state.settings.outbound_ai_paused),
+            "runtime_flag": await repos.get_outbound_ai_pause_flag()}
+
+
+@v1.put("/admin/outbound-ai/pause")
+async def put_outbound_ai_pause(request: Request, body: OutboundAiPause, p: Principal = Depends(require_platform)):
+    """Global emergency stop for NEW outbound AI calls (all tenants). Calls already in progress are not touched: hang them up separately."""
+    _, repos, _ = _ctx(request)
+    await repos.set_outbound_ai_pause(body.paused, p.sub, body.reason)
+    await repos.audit(p.tenant_id, p.sub, "outbound_ai.pause" if body.paused else "outbound_ai.resume", "global",
+                      {"paused": body.paused, "reason": body.reason[:200]}, request.state.request_id)
+    return {"paused": await repos.outbound_ai_paused(), "runtime_flag": await repos.get_outbound_ai_pause_flag()}
 
 
 @v1.put("/admin/tenants/{tenant_id}/routes")

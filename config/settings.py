@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     provider_callback_max_age_s: int = F(300, "Reject provider callbacks older than this (nonce replay window).", ge=30)
     real_calls_enabled: bool = F(False, "Explicit opt-in to dial real PSTN numbers. Default off.")
     estimate_rate_per_min: float = F(0.0, "Estimated carrier rate/minute used ONLY for estimates; 0 disables.", ge=0)
+    outbound_ai_paused: bool = F(False, "Emergency pause: refuse EVERY new outbound AI call (ordinary calls and inbound AI are untouched). The same pause can be "
+                                        "switched at runtime, without a restart, with PUT /v1/admin/outbound-ai/pause; either one pauses.")
+    outbound_ai_daily_quota: int = F(20, "Default number of outbound AI calls a tenant may create per UTC day (a tenant policy `outbound_ai_daily_quota` overrides it; 0 blocks). "
+                                         "Counts accepted creations, enforced atomically in MongoDB. Not a financial cap.", ge=0)
+    outbound_ai_max_duration_s: int = F(300, "Default hard cap, in seconds, for ONE outbound AI call (a tenant policy `outbound_ai_max_duration_s` overrides it).", ge=10, le=3600)
 
     # ---- Call control / queue ----------------------------------------------------------
     max_active_global: int = F(30, "Global max active calls.", ge=1)
@@ -212,13 +217,34 @@ class Settings(BaseSettings):
     ai_tts_model: str = F("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "TTS model identifier.")
     ai_tts_reference_wav: str = F("", "Path to the reference voice WAV sent to RunPod TTS workers (voice cloning; the worker rejects requests without one).")
     ai_tts_normalize: bool = F(True, "Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence.")
+    ai_store_transcripts: bool = F(False, "Store caller and assistant conversation text in MongoDB and transcript endpoint when enabled. Default False.")
     ai_greeting: str = F("Welcome to MME AI Voice Calling Agent.", "Greeting spoken when an inbound call answers before connecting to AI services.")
-    ai_script_enforcement: bool = F(False, "Enforce script policy: Hindi/Hinglish in Devanagari, English in Latin. Default False.")
+    ai_script_enforcement: bool = F(True, "Enforce script policy: Hindi/Hinglish in Devanagari, English in Latin. Default True.")
     ai_counsellor_gender: Literal["masculine", "feminine"] = F("masculine", "Gender for Hindi verb forms in counsellor replies ('masculine' or 'feminine').")
     ai_counsellor_name: str = F("MME AI counsellor", "Counsellor name used in system prompt.")
     ai_temperature: float = F(0.3, "Sampling temperature for Brain replies (default 0.3).", ge=0.0, le=2.0)
     ai_script_allowlist_path: str = F("config/script_allowlist_terms.txt", "Path to editable allow-listed English terms file.")
     ai_hint_placement: Literal["user_suffix", "system_message"] = F("user_suffix", "Placement for per-turn mode hint.")
+    ai_tts_max_retries: int = F(1, "Max retry attempts for eligible transient TTS failures (0 disables).", ge=0, le=3)
+    ai_tts_turn_deadline_s: float = F(12.0, "Overall turn deadline for TTS synthesis and playback readiness.", gt=1.0, le=60.0)
+    ai_tts_min_retry_budget_s: float = F(1.0, "Minimum remaining seconds before turn deadline required to attempt a retry.", gt=0.1, le=10.0)
+    ai_silence_ms: int = F(1100, "Trailing silence in ms to endpoint an utterance (default 1100ms: callers pause 650-1000ms mid-thought).", ge=300, le=3000)
+    ai_silence_short_ms: int = F(1200, "Trailing silence in ms for short/starter utterances under 600ms (default 1200ms).", ge=300, le=3000)
+    ai_vad_pre_roll_ms: int = F(300, "Audio pre-roll buffer in ms to prevent onset clipping (default 300ms).", ge=50, le=1000)
+    ai_max_utterance_ms: int = F(8000, "Soft cap in ms: a longer utterance is split at its quietest frame and merged again before STT (default 8000ms).", ge=2000, le=30000)
+    ai_vad_min_valid_ms: int = F(60, "Less loud audio than this in a whole capture is a noise burst: rejected with a reason, not sent to STT.", ge=20, le=500)
+    ai_queue_max: int = F(4, "Utterances waiting per call for the turn worker; when full the newest is merged into the last (no audio dropped).", ge=1, le=16)
+    ai_queue_expire_s: float = F(90.0, "A queued utterance older than this many seconds is EXPIRED (explicit terminal state).", gt=5.0, le=600.0)
+    ai_repetition_penalty: float = F(1.15, "Repetition penalty for Brain replies (default 1.15).", ge=1.0, le=2.0)
+    ai_presence_penalty: float = F(0.3, "Presence penalty for Brain replies (default 0.3).", ge=0.0, le=2.0)
+    ai_frequency_penalty: float = F(0.2, "Frequency penalty for Brain replies (default 0.2).", ge=0.0, le=2.0)
+    ai_silence_ms: int = F(850, "Trailing silence in ms to endpoint an utterance (default 850ms).", ge=300, le=3000)
+    ai_silence_short_ms: int = F(1000, "Trailing silence in ms for short/starter utterances under 600ms (default 1000ms).", ge=300, le=3000)
+    ai_vad_pre_roll_ms: int = F(200, "Audio pre-roll buffer in ms to prevent onset clipping (default 200ms).", ge=50, le=1000)
+    ai_max_utterance_ms: int = F(8000, "Max utterance duration cap in ms (default 8000ms).", ge=2000, le=30000)
+    ai_repetition_penalty: float = F(1.15, "Repetition penalty for Brain replies (default 1.15).", ge=1.0, le=2.0)
+    ai_presence_penalty: float = F(0.3, "Presence penalty for Brain replies (default 0.3).", ge=0.0, le=2.0)
+    ai_frequency_penalty: float = F(0.2, "Frequency penalty for Brain replies (default 0.2).", ge=0.0, le=2.0)
 
     @property
     def is_prod_like(self) -> bool:

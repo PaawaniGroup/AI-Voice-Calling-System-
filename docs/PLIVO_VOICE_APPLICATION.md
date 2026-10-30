@@ -205,3 +205,20 @@ What the 69 tests assert: valid Answer + XML structure and attributes; signature
 * Timings are not yet measured on a real call; the transport adds only milliseconds, the 700 ms end-of-speech wait and real STT+LLM+TTS time dominate.
 * Plivo account limits (concurrency, CPS, regions, pricing for streaming) are **unverified**; set `PROVIDER_MAX_*` from your account.
 * Compliance (TRAI/DoT, call-recording consent, DLT) is not reviewed.
+
+## Outbound AI calls (Plivo)
+
+`POST /v1/calls` with `"ai_enabled": true` on a deployment whose `provider` is `plivo_api` places the call and, when the recipient answers, opens the SAME bidirectional AI stream as an inbound `ai` route (`plivo_calls._ai_stream_xml`, `ws.handle_plivo_media`, one conversation pipeline).
+
+* Creation refuses with 409 `ai_not_ready` unless `AiService.preflight` passes (AI enabled globally and for the tenant, STT/Brain/TTS URLs set, Plivo stream configuration present). An AI call cannot also set `bridge_to` (422 `ai_bridge_unsupported`).
+* The call is stored with `ai_outbound: true`; the Answer handler returns `<Stream>` (with the signed ticket and the stream watchdog) for it and `<Wait>`/`<Dial>` for every other outbound call, exactly as before. The stream handler refuses an outbound AI stream without a valid ticket.
+* An Answer that arrives before the originate response stored the RequestUUID waits up to 3 s for it instead of hanging up.
+* A Plivo outbound call whose originate outcome is unknown is failed (`origination_uncertain_no_channel`) after `initiating_timeout_s`, so it cannot hold a capacity slot forever.
+* Safety controls (all fail-closed, none is a financial cap):
+  * Tenant opt-in: policy `outbound_ai_enabled` (default false) and `outbound_ai_destinations`, the EXACT E.164 numbers an AI call may dial (no prefixes or wildcards; empty = none). A policy PUT that omits them resets them to closed.
+  * Daily quota per tenant: policy `outbound_ai_daily_quota`, default `MME_TEL_OUTBOUND_AI_DAILY_QUOTA` (20, UTC day, 0 blocks). Taken atomically in MongoDB (`usage_counters`), given back if the call cannot be stored; idempotent replays do not consume it.
+  * Duration: policy `outbound_ai_max_duration_s`, default `MME_TEL_OUTBOUND_AI_MAX_DURATION_S` (300), always combined with the ordinary call cap.
+  * Emergency pause of NEW outbound AI calls (all tenants): `MME_TEL_OUTBOUND_AI_PAUSED=true` or, without a restart, `PUT /v1/admin/outbound-ai/pause` (platform role); `GET` shows the state. Calls already running are not touched.
+  * Audit/accounting: `outbound_ai.rejected`, `outbound_ai.quota_exhausted`, `outbound_ai.pause|resume` audit records; an `ai.usage` call event and `ai_usage` on the call (AI seconds, turns, STT/RAG/Brain/TTS requests started) when the AI session ends.
+* Not covered: FreeSWITCH/mock providers (they still only store `ai_enabled`), recordings for Plivo calls, an outbound-specific greeting (it reuses `AI_GREETING`), a hard financial cap, per-minute/hour rate limits for inbound.
+* Evidence: `tests/integration/test_outbound_ai.py` (mocks only; nothing here has been tried with real Plivo or a real phone).

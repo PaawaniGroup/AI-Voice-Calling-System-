@@ -45,12 +45,16 @@ class Models(MockModels):
     def __init__(self):
         super().__init__()
         self.stt_uploads: list[tuple[int, int]] = []
+        self.stt_wav_bytes: list[int] = []   # size of the WAV (audio) part alone: the multipart envelope and text fields (e.g. the STT vocabulary prompt) are not audio
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/audio/transcriptions":
             body = request.content
             i = body.find(b"RIFF")
             self.stt_uploads.append((len(body), struct.unpack_from("<I", body, i + 24)[0] if i >= 0 else -1))
+            boundary = request.headers.get("content-type", "").partition("boundary=")[2].encode()
+            end = body.find(b"\r\n--" + boundary, i) if i >= 0 and boundary else -1
+            self.stt_wav_bytes.append(end - i if end > i else -1)
         return await super().handler(request)
 
 
@@ -517,8 +521,10 @@ async def test_full_turn_caller_audio_to_stt_brain_tts_and_playaudio_back(pv):
     assert cp["event"] == "checkpoint" and cp["streamId"] == a.stream_id and cp["name"] == "utt-1"
     assert [k for k, _ in pv.models.calls] == ["stt", "rag", "brain", "tts"]
     size, wav_rate = pv.models.stt_uploads[0]
-    # buffered from the 200 ms speech gate: 21 speech frames + 35 trailing-silence frames = 56 x 320 B (+ WAV header + multipart)
-    assert wav_rate == 8000 and 17900 < size < 19500, size
+    # buffered from the 200 ms speech gate: 21 speech frames + 35 trailing-silence frames = 56 x 320 B + the 44-byte WAV header.
+    # The audio part is checked on its own: the default STT vocabulary prompt (about 1.4 KB) travels in the same multipart body.
+    assert wav_rate == 8000 and pv.models.stt_wav_bytes[0] == 56 * 320 + 44, pv.models.stt_wav_bytes
+    assert size < pv.models.stt_wav_bytes[0] + 4000, size  # the envelope plus text fields stay small
     brain = next(b for k, b in pv.models.calls if k == "brain")
     assert "CONTEXT" in brain["messages"][-1]["content"]
     ai = await ai_doc(pv, a.sid)
@@ -529,6 +535,7 @@ async def test_full_turn_caller_audio_to_stt_brain_tts_and_playaudio_back(pv):
 
 async def test_turn_latency_trace_is_stored_with_voice_to_voice(pv):
     """Step 0: every turn record carries the monotonic-relative trace; voice_to_voice == first Plivo frame - speech end."""
+    pv.models.stt_delay = 0.05
     a = await answered_stream(pv, call_uuid="TRACE-1")
     ws = await connect(pv, a)
     await until(lambda: _active(pv, a.sid))
@@ -585,8 +592,8 @@ async def test_inbound_media_robustness_duplicates_bad_payloads_wrong_track_dtmf
         await ws.send(json.dumps(f))  # every frame delivered twice: the duplicate must be dropped, not fed twice
     await recv_until(ws, lambda m: m.get("event") == "checkpoint")
     assert [k for k, _ in pv.models.calls].count("stt") == 1
-    size, _ = pv.models.stt_uploads[0]
-    assert 17900 < size < 19500, size  # a stream fed twice would be ~2x larger
+    wav = pv.models.stt_wav_bytes[0]
+    assert 17900 < wav < 18100, wav  # a stream fed twice would be ~2x larger (the audio part alone; the vocabulary prompt is not audio)
     assert (await ai_doc(pv, a.sid))["state"] == "active"  # none of that killed the stream
     await ws.close()
 

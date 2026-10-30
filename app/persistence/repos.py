@@ -227,6 +227,54 @@ class Repos:
         return await self.db["tenant_policies"].find_one_and_update(
             {"tenant_id": tenant_id}, {"$set": policy}, upsert=True, return_document=ReturnDocument.AFTER)
 
+    # ---------------------------------------------------------------- outbound AI: emergency pause and daily quota
+    async def get_outbound_ai_pause_flag(self) -> dict | None:
+        d = await self.db["service_flags"].find_one({"_id": "outbound_ai_pause"})
+        if not d:
+            return None
+        return {"paused": bool(d.get("paused")), "by": d.get("by"), "reason": d.get("reason"), "at": d.get("at")}
+
+    async def outbound_ai_paused(self) -> bool:
+        """True when the config switch OR the runtime DB switch pauses new outbound AI calls (either one is enough)."""
+        if self.s.outbound_ai_paused:
+            return True
+        d = await self.db["service_flags"].find_one({"_id": "outbound_ai_pause"})
+        return bool(d and d.get("paused"))
+
+    async def set_outbound_ai_pause(self, paused: bool, by: str, reason: str = "") -> None:
+        await self.db["service_flags"].update_one(
+            {"_id": "outbound_ai_pause"}, {"$set": {"paused": bool(paused), "by": by, "reason": reason[:200], "at": utcnow()}}, upsert=True)
+
+    @staticmethod
+    def _quota_id(tenant_id: str, day: str) -> str:
+        return f"{tenant_id}:outbound_ai:{day}"
+
+    async def reserve_outbound_ai_quota(self, tenant_id: str, quota: int, day: str | None = None) -> bool:
+        """Atomically take one outbound-AI slot of today's (UTC) quota. True = taken. The upsert filter `count < quota` matches nothing once the
+        quota is used, so the upsert then tries to insert the same `_id` and fails with DuplicateKeyError: exhausted, with no read-then-write race
+        (safe across concurrent requests and processes). A quota of 0 (or less) never admits a call."""
+        if quota <= 0:
+            return False
+        now = utcnow()
+        day = day or now.strftime("%Y%m%d")
+        try:
+            await self.db["usage_counters"].update_one(
+                {"_id": self._quota_id(tenant_id, day), "count": {"$lt": quota}},
+                {"$inc": {"count": 1}, "$setOnInsert": {"tenant_id": tenant_id, "kind": "outbound_ai", "day": day, "purge_at": now + timedelta(days=3)}},
+                upsert=True)
+            return True
+        except DuplicateKeyError:
+            return False
+
+    async def release_outbound_ai_quota(self, tenant_id: str, day: str | None = None) -> None:
+        """Give a slot back when a reserved creation did not result in a call."""
+        day = day or utcnow().strftime("%Y%m%d")
+        await self.db["usage_counters"].update_one({"_id": self._quota_id(tenant_id, day), "count": {"$gt": 0}}, {"$inc": {"count": -1}})
+
+    async def outbound_ai_quota_used(self, tenant_id: str, day: str | None = None) -> int:
+        d = await self.db["usage_counters"].find_one({"_id": self._quota_id(tenant_id, day or utcnow().strftime("%Y%m%d"))})
+        return int((d or {}).get("count", 0))
+
     async def get_route(self, number: str) -> dict | None:
         return await self.db["inbound_routes"].find_one({"number": number, "enabled": True})
 

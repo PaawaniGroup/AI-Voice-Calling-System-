@@ -137,8 +137,66 @@ def _acronym(m):
     return WORD_ACRONYMS.get(tok, spell_letters(tok))
 
 
-HINGLISH_MARKERS = {"hai", "hain", "hoga", "hogi", "hoon", "ke", "ki", "ka", "ko", "se", "me", "mein", "par", "aap", "aapka", "aapki", "aapko", "main", "mera", "mujhe",
-                    "kaise", "kya", "kyun", "nahi", "nahin", "aur", "ya", "lekin", "pehle", "phir", "bhi", "toh", "kar", "karna", "kijiye", "rakhiye", "chahiye", "liye", "wala", "padhai", "fees"}
+HINGLISH_MARKERS = {
+    "hai", "hain", "hoga", "hogi", "hoon", "ke", "ki", "ka", "ko", "se", "mein",
+    "par", "aap", "aapka", "aapki", "aapko", "mera", "meri", "mere", "mujhe",
+    "kaise", "kya", "kyun", "nahi", "nahin", "aur", "lekin", "pehle", "phir", "bhi",
+    "toh", "kar", "karna", "kijiye", "rakhiye", "chahiye", "liye", "wala", "wali",
+    "wale", "padhai", "batao", "bataiye", "batayein", "jaise", "kuch", "apna", "apni",
+    "apne", "hum", "humein", "unhe", "unka", "inki", "achha", "acha", "theek", "thik",
+    "sahi", "namaste", "kal", "aaj", "aana", "aao", "aaye"
+}
+ENGLISH_HOMOGRAPHS = {
+    "me", "main", "to", "is", "do", "so", "per", "are", "man", "pan",
+    "bas", "ban", "us", "as", "or", "he", "ho", "par", "ya", "fees"
+}
+
+
+def strip_spoken_metadata(text: str) -> str:
+    """Removes non-spoken markdown, bracketed instructions, tool results, and formatting markers.
+    Preserves conversational words, numbers, punctuation (. , ? ! -), and sentence boundaries.
+    """
+    if not text:
+        return ""
+    t = text
+    # 1. Strip tool results and bracketed instructions: e.g. [Tool Result: ...] or [Instruction: ...]
+    t = re.sub(r"\[(?:Tool Result|Instruction|CRM|Metadata)[^\]]*\]", " ", t, flags=re.I)
+    # 2. Strip XML/HTML tags
+    t = re.sub(r"<[^>]+>", " ", t)
+    # 3. Strip markdown code blocks and inline code backticks
+    t = re.sub(r"```[a-zA-Z]*\n?|```", " ", t)
+    t = re.sub(r"`([^`]+)`", r"\1", t)
+    # 4. Strip markdown headers (#, ##, etc.) at line starts
+    t = re.sub(r"(?m)^\s*#+\s*", "", t)
+    # 5. Strip markdown bullet points and list markers at line starts: e.g. "- ", "* ", "1. "
+    t = re.sub(r"(?m)^\s*[\*\-]\s+", "", t)
+    t = re.sub(r"(?m)^\s*\d+\.\s+", "", t)
+    # 6. Strip markdown bold / italic formatting (**text**, *text*, __text__, _text_)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"\*([^*]+)\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"\1", t)
+    # 7. Collapse multiple horizontal spaces
+    t = re.sub(r"[ \t]+", " ", t)
+    return t.strip()
+
+
+def prepare_text_for_tts(text: str, lang: str = "auto") -> tuple[str, str]:
+    """Prepares text for TTS according to MME AI Counsellor TTS text preparation policy.
+
+    Returns:
+        (spoken_text, language_code)
+    """
+    if not text or not text.strip():
+        return "", ("en" if lang == "en" else "hi")
+
+    clean = strip_spoken_metadata(text)
+    if not clean:
+        return "", ("en" if lang == "en" else "hi")
+
+    detected = detect_lang(clean) if lang in ("", "auto", "hinglish") else lang
+    spoken = normalize(clean, lang=detected)
+    return spoken, detected
 
 
 def detect_lang(text: str) -> str:
@@ -151,8 +209,14 @@ def detect_lang(text: str) -> str:
 
 def normalize(text: str, lang: str = "auto") -> str:
     """lang: 'hi' (convert), 'en' (leave plain English untouched), 'auto' (detect)."""
-    if (lang == "auto" and detect_lang(text) == "en") or lang == "en":
-        return text
+    if not text:
+        return ""
+    cleaned = strip_spoken_metadata(text)
+    if not cleaned:
+        return ""
+    if (lang == "auto" and detect_lang(cleaned) == "en") or lang == "en":
+        return cleaned
+    text = cleaned
     t = text
     t = re.sub(r"(?:₹|Rs\.?|INR)\s?(?P<amt>\d[\d,]*(?:\.\d+)?)", _money, t)                                     # money first
     t = re.sub(r"(?P<d>\d{1,2})(?:st|nd|rd|th)?\s+(?P<m>[A-Za-z]{3,9})\.?,?\s+(?P<y>\d{4})",

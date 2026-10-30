@@ -48,7 +48,25 @@ DRAINING = Gauge("mme_tel_draining", "1 while the service is draining for shutdo
 RECOVERY = Counter("mme_tel_recovery_total", "Startup recovery actions", ["action"], registry=REGISTRY)
 AI_AUTOSTART = Counter("mme_tel_ai_autostart_total", "AI auto-start on answered FreeSWITCH inbound calls", ["result"], registry=REGISTRY)
 RATE_LIMITED = Counter("mme_tel_rate_limited_total", "Requests rejected by rate limiting", registry=REGISTRY)
+TTS_RETRIES = Counter("mme_tel_tts_retries_total", "TTS retry decisions", ["decision", "reason"], registry=REGISTRY)
+TTS_RECOVERY_OUTCOMES = Counter("mme_tel_tts_recovery_outcomes_total", "TTS recovery final outcomes", ["outcome"], registry=REGISTRY)
 
 
 def render() -> tuple[bytes, str]:
     return generate_latest(REGISTRY), CONTENT_TYPE_LATEST
+
+# --- inbound capture / turn lifecycle (per-process; never labelled with call ids, numbers or text)
+AI_FRAMES = Counter("mme_tel_ai_frames_total", "Inbound audio frames by capture outcome", ["outcome"], registry=REGISTRY)
+AI_CAPTURE_REJECTED = Counter("mme_tel_ai_capture_rejected_total", "Captured audio rejected before STT, by reason", ["reason"], registry=REGISTRY)
+AI_UTTERANCES = Counter("mme_tel_ai_utterances_total", "Captured utterances by terminal state", ["state"], registry=REGISTRY)
+AI_QUEUE_EVENTS = Counter("mme_tel_ai_queue_events_total", "Utterance queue events", ["event"], registry=REGISTRY)
+AI_QUEUE_DEPTH = Gauge("mme_tel_ai_queue_depth", "Utterances waiting for the turn worker (all calls)", registry=REGISTRY)
+AI_QUEUE_WAIT = Histogram("mme_tel_ai_queue_wait_seconds", "Utterance wait between endpoint and the start of its turn", registry=REGISTRY,
+                          buckets=(0.01, 0.05, 0.25, 1, 3, 8, 20, 60))
+AI_UTTERANCE_SECONDS = Histogram("mme_tel_ai_utterance_seconds", "Audio duration handed to STT per utterance", registry=REGISTRY,
+                                 buckets=(0.25, 0.5, 1, 2, 4, 8, 16, 30))
+AI_STT_SUBMISSIONS = Counter("mme_tel_ai_stt_submissions_total", "Utterances submitted to STT", ["kind"], registry=REGISTRY)
+AI_BARGE_IN = Counter("mme_tel_ai_barge_in_total", "Barge-in detections", registry=REGISTRY)
+AI_TURN_CANCELLED = Counter("mme_tel_ai_turn_cancelled_total", "In-flight turns invalidated by newer caller speech", ["reason"], registry=REGISTRY)
+AI_STALE_REJECTED = Counter("mme_tel_ai_stale_rejected_total", "Assistant audio/replies rejected because their turn was invalidated", ["kind"], registry=REGISTRY)
+AI_CALLER_COMMIT = Counter("mme_tel_ai_caller_commit_total", "Caller transcripts committed to conversation history", ["status"], registry=REGISTRY)

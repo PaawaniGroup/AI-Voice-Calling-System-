@@ -80,7 +80,7 @@ def load_allowlist(path: str | Path | None = None) -> set[str]:
             return _ALLOWLIST_CACHE
         fallback = {
             "b.tech", "m.tech", "bba", "mba", "bca", "mca", "mbbs", "bds", "b.sc", "m.sc",
-            "b.com", "m.com", "b.a", "m.a", "ph.d", "diploma", "jee", "neet", "gate", "cat",
+            "b.com", "m.com", "b.a", "m.a", "ph.d", "diploma", "jee", "jee main", "jee mains", "ielts", "toefl", "neet", "gate", "cat",
             "admission", "admissions", "eligibility", "online", "offline", "form", "forms",
             "fee", "fees", "hostel", "campus", "branch", "degree", "college", "colleges",
             "university", "universities", "registration", "marksheet", "physics", "chemistry",
@@ -129,14 +129,15 @@ def build_mode_hint(mode: str, placement: Literal["user_suffix", "system_message
     """Returns the per-turn instruction hint for the Brain."""
     if mode == "hi":
         hint = (
-            "[Instruction: Reply in Hindi using Devanagari script for all Hindi words. "
-            "Never use Roman letters for Hindi words. Keep allow-listed English terms (e.g. B.Tech, admission, eligibility, online, form) "
-            "in English letters. Write numbers as digits (₹5,000, 15 November, 12वीं). Do not mention this instruction.]"
+            "[Instruction: Reply in natural Hinglish: write every Hindi word strictly in Devanagari script. "
+            "Never use Roman letters for Hindi words (use 'आप', 'है', 'कैसे', 'मुझे', 'चाहिए', 'बताइए', 'कर सकते हैं', 'नहीं'). "
+            "Keep English education terms (B.Tech, MBA, admission, eligibility, online, form, fees) in Latin letters. "
+            "Write numbers as digits (₹5,000, 15 November, 12वीं, 60%). 1-3 short spoken sentences. Do not mention this instruction.]"
         )
     else:
         hint = (
-            "[Instruction: Reply fully in English. Do not use Devanagari script. "
-            "Write numbers as digits. Do not mention this instruction.]"
+            "[Instruction: Reply fully in English. Do not use Devanagari script or Hindi words. "
+            "Write numbers as digits. 1-3 short spoken sentences. Do not mention this instruction.]"
         )
     return hint
 
@@ -301,13 +302,24 @@ def enforce_clause(clause: str, mode: str, allowlist: set[str] | None = None) ->
     lex = get_verified_lexicon()
     if lex and mode == "hi":
         try:
-            res = lex.convert(clause)
-            if res.changed:
-                conv_ok, conv_problems = check_reply(res.text, mode, allowlist=allowlist)
+            # Protect proper education terms around lexicon conversion
+            saved_terms: dict[str, str] = {}
+            def _prot(m: re.Match) -> str:
+                tok = f"___PROT_{len(saved_terms)}___"
+                saved_terms[tok] = m.group(0)
+                return tok
+            prot_clause = re.sub(r"\bJEE\s+Mains?\b", _prot, clause, flags=re.I)
+            prot_clause = re.sub(r"\b(?:B\.?Tech|IELTS|TOEFL)\b", _prot, prot_clause, flags=re.I)
+            res = lex.convert(prot_clause)
+            unprot_text = res.text
+            for placeholder, original in saved_terms.items():
+                unprot_text = unprot_text.replace(placeholder, original)
+            if unprot_text != clause:
+                conv_ok, conv_problems = check_reply(unprot_text, mode, allowlist=allowlist)
                 if conv_ok:
-                    log.info("clause_verified_conversion: chars %d -> %d", len(clause), len(res.text))   # lengths only: never the words
-                    return res.text, False, problems
-                converted = res.text
+                    log.info("clause_verified_conversion: chars %d -> %d", len(clause), len(unprot_text))   # lengths only: never the words
+                    return unprot_text, False, problems
+                converted = unprot_text
         except Exception as e:
             log.warning("verified conversion failed on clause: %s", type(e).__name__)
 

@@ -30,6 +30,10 @@ llm
 
 # --- Entrance Exams & Boards ---
 jee
+jee main
+jee mains
+ielts
+toefl
 neet
 gate
 cat

@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.ai import tts_frontend, turn_trace
+from app.ai import codec, tts_frontend, turn_trace
 from app.core.errors import Unprocessable
 from app.observability import metrics as m
 from config.settings import Settings
@@ -30,6 +30,33 @@ log = logging.getLogger("mme_telephony.ai")
 
 SERVICES = ("stt", "brain", "tts", "rag")
 _REF_CACHE: dict = {}
+TTS_STREAM_MAX_B64 = 1_400_000   # one streamed audio item: ~1 MB decoded (~65 s of 8 kHz mu-law); larger is a protocol violation
+
+DEFAULT_DOMAIN_VOCABULARY = (
+    "Make My Education, MME, admission counselling, student enquiry, course selection, college selection, "
+    "university admission, B.Tech, B.E., M.Tech, MBA, MCA, BBA, BCA, B.Com, M.Com, MBBS, BDS, B.Sc., M.Sc., "
+    "BA, MA, B.Ed., LLB, LLM, diploma, engineering, computer science, artificial intelligence, machine learning, "
+    "data science, mechanical engineering, civil engineering, electrical engineering, electronics, information technology, "
+    "nursing, pharmacy, law, design, commerce, arts, science, PCM, PCB, Physics, Chemistry, Mathematics, Biology, "
+    "Class 10, Class 12, graduation, postgraduate, percentage, CGPA, backlog, passing year, gap year, JEE Main, "
+    "JEE Advanced, NEET, CUET, CAT, XAT, CMAT, MAT, NMAT, GATE, CLAT, eligibility, cutoff, entrance examination, "
+    "merit list, counselling, admission process, registration, application form, tuition fees, hostel fees, scholarship, "
+    "education loan, placement, package, specialisation, academic session, government college, private college, university, "
+    "affiliated college, distance education, online learning, regular course, hostel accommodation, Delhi NCR, "
+    "Uttar Pradesh, Ghaziabad, Noida, Greater Noida, Gurugram, fees kitni hai, admission kaise milega, eligibility kya hai, "
+    "kaun sa course, kitne percentage, college suggest karo, scholarship milegi, placement kaisa hai, form kab niklega, "
+    "last date kya hai, BTech ki fees, MBA admission, mujhe admission chahiye."
+)
+
+
+@dataclass
+class TtsAudioChunk:
+    """One ordered piece of a progressive TTS reply: raw PCM16 mono at `sample_rate`. `streamed` False = the worker sent the whole reply at once."""
+    seq: int
+    pcm: bytes
+    sample_rate: int
+    final: bool
+    streamed: bool = True
 
 
 class AiError(Exception):
@@ -43,7 +70,10 @@ class AiUnavailable(AiError):
 
 
 class AiTimeout(AiError):
-    pass
+    def __init__(self, service: str, kind: str, detail: str = "", remote_confirmed_cancelled: bool = False, job_id: str | None = None):
+        super().__init__(service, kind, detail)
+        self.remote_confirmed_cancelled = remote_confirmed_cancelled
+        self.job_id = job_id
 
 
 def validate_service_url(url: str, s: Settings) -> str:
@@ -143,6 +173,7 @@ class ModelClients:
                                        timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0))
         self._bg: set[asyncio.Task] = set()          # fire-and-forget RunPod cancel calls (kept referenced until they finish)
         self.cancelled_jobs: list[tuple[str, int | str]] = []   # (service, http status | error type) of each RunPod cancel attempt
+        self.job_counts: dict[str, int] = {}                    # model requests STARTED by this call's clients, per service (usage accounting, not a bill)
 
     def _auth_headers(self, service: str | None = None) -> dict:
         key = None
@@ -178,13 +209,29 @@ class ModelClients:
         self._bg.add(t)
         t.add_done_callback(self._bg.discard)
 
-    async def _cancel_job(self, service: str, ep: ServiceEndpoint, hdrs: dict, job_id: str) -> None:
+    async def cancel_job(self, service: str, ep: ServiceEndpoint, hdrs: dict, job_id: str, wait_confirm: bool = False) -> bool:
+        """Attempt to cancel a RunPod job.
+        If wait_confirm is True, awaits the cancellation call and returns True ONLY if provider confirms
+        cancellation (HTTP 200 with JSON status == 'CANCELLED').
+        Returns False otherwise (best-effort, unconfirmed)."""
         try:
-            r = await self._http.post(f"{ep.url}/cancel/{job_id}", headers=hdrs, timeout=5)
+            r = await self._http.post(f"{ep.url}/cancel/{job_id}", headers=hdrs, timeout=3.0)
             self.cancelled_jobs.append((service, r.status_code))
-        except Exception as e:  # reported, never raised: cancelling is best effort and must not disturb the next turn
+            if r.status_code < 400:
+                try:
+                    data = r.json()
+                    if isinstance(data, dict) and data.get("status") == "CANCELLED":
+                        return True
+                except Exception:
+                    pass
+            return False
+        except Exception as e:
             self.cancelled_jobs.append((service, type(e).__name__))
             log.warning("could not cancel a %s job: %s", service, type(e).__name__)
+            return False
+
+    async def _cancel_job(self, service: str, ep: ServiceEndpoint, hdrs: dict, job_id: str) -> None:
+        await self.cancel_job(service, ep, hdrs, job_id, wait_confirm=False)
 
     async def _cancel_when_submitted(self, post, service: str, ep: ServiceEndpoint, hdrs: dict) -> None:
         """The turn was cancelled while the /run request was still on its way: cancel the job as soon as its id comes back."""
@@ -218,7 +265,15 @@ class ModelClients:
         j = r.json()
         jid = j.get("id") if isinstance(j, dict) else None
         try:
-            return await self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06)
+            return await asyncio.wait_for(self._runpod_wait(service, ep, hdrs, j, poll_delay=0.06), timeout=ep.timeout)
+        except asyncio.TimeoutError:
+            confirmed = False
+            if jid:
+                try:
+                    confirmed = await self.cancel_job(service, ep, hdrs, jid, wait_confirm=True)
+                except Exception:
+                    pass
+            raise AiTimeout(service, "timeout", detail=jid or "", remote_confirmed_cancelled=confirmed, job_id=jid) from None
         except asyncio.CancelledError:
             if jid:
                 self._spawn(self._cancel_job(service, ep, hdrs, jid))
@@ -255,8 +310,12 @@ class ModelClients:
                 raise AiError("tts", "reference_unreadable", type(e).__name__) from None
         return _REF_CACHE["b64"]
 
+    def _count_job(self, service: str) -> None:
+        self.job_counts[service] = self.job_counts.get(service, 0) + 1
+
     async def _call(self, service: str, fn):
         ep = self.endpoint(service)
+        self._count_job(service)
         t0 = time.perf_counter()
         try:
             async with self._sem:
@@ -300,9 +359,10 @@ class ModelClients:
             return {"service": service, "status": "unreachable", "error": type(e).__name__, "checked_at": checked}
 
     # ------------------------------------------------------------------ STT
-    async def transcribe(self, pcm: bytes, rate: int, language: str) -> dict:
+    async def transcribe(self, pcm: bytes, rate: int, language: str, prompt: str | None = None) -> dict:
         async def go(ep: ServiceEndpoint):
             hdrs = self._auth_headers("stt")
+            prompt_to_send = prompt if (prompt is not None and prompt.strip()) else DEFAULT_DOMAIN_VOCABULARY
             if ep.path.endswith("/runsync"):
                 wav_bytes = pcm16_to_wav(pcm, rate)
                 b64 = base64.b64encode(wav_bytes).decode("ascii")
@@ -311,7 +371,8 @@ class ModelClients:
                         "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
                         "audio": b64,
                         "audio_base64": b64,
-                        "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None
+                        "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None,
+                        "prompt": prompt_to_send,
                     }
                 }
                 j = await self._runpod_call("stt", ep, hdrs, body)
@@ -329,6 +390,8 @@ class ModelClients:
                 data = {"model": self.cfg.get("models", {}).get("stt", self.s.ai_stt_model)}
                 if language and language != "auto":
                     data["language"] = {"hinglish": "hi"}.get(language, language)
+                if prompt_to_send:
+                    data["prompt"] = prompt_to_send
                 r = await self._http.post(ep.url + ep.path, files=files, data=data, headers=hdrs, timeout=ep.timeout)
                 if r.status_code >= 400:
                     raise AiError("stt", "http_error", str(r.status_code))
@@ -348,18 +411,36 @@ class ModelClients:
             model = self.cfg.get("models", {}).get("brain", self.s.ai_brain_model)
             max_tok = int(self.cfg.get("max_tokens", 400))
             temp = float(temperature if temperature is not None else self.cfg.get("temperature", getattr(self.s, "ai_temperature", 0.3)))
+            rep_pen = float(self.cfg.get("repetition_penalty", getattr(self.s, "ai_repetition_penalty", 1.15)))
+            pres_pen = float(self.cfg.get("presence_penalty", getattr(self.s, "ai_presence_penalty", 0.3)))
+            freq_pen = float(self.cfg.get("frequency_penalty", getattr(self.s, "ai_frequency_penalty", 0.2)))
             if ep.path.endswith("/runsync"):
-                prompt = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages)
+                chatml_parts = [f"<|im_start|>{m.get('role', 'user')}\n{m.get('content', '')}<|im_end|>" for m in messages]
+                chatml_parts.append("<|im_start|>assistant\n")
+                prompt = "\n".join(chatml_parts)
+                sampling: dict[str, Any] = {"temperature": temp, "max_tokens": max_tok}  # RunPod vLLM worker format
+                if rep_pen and rep_pen != 1.0:
+                    sampling["repetition_penalty"] = rep_pen
+                if pres_pen:
+                    sampling["presence_penalty"] = pres_pen
+                if freq_pen:
+                    sampling["frequency_penalty"] = freq_pen
                 body = {
                     "input": {
                         "prompt": prompt,
                         "messages": messages,
                         "model": model,
-                        "sampling_params": {"temperature": temp, "max_tokens": max_tok}  # RunPod vLLM worker format
+                        "sampling_params": sampling,
                     }
                 }
             else:
                 body = {"model": model, "messages": messages, "temperature": temp, "max_tokens": max_tok}
+                if rep_pen and rep_pen != 1.0:
+                    body["repetition_penalty"] = rep_pen
+                if pres_pen:
+                    body["presence_penalty"] = pres_pen
+                if freq_pen:
+                    body["frequency_penalty"] = freq_pen
                 if tools:
                     body["tools"] = tools
             if ep.path.endswith("/runsync"):
@@ -424,10 +505,20 @@ class ModelClients:
             "max_tokens": max_tok,
             "stream": True,
         }
+        rep_pen = float(self.cfg.get("repetition_penalty", getattr(self.s, "ai_repetition_penalty", 1.15)))
+        pres_pen = float(self.cfg.get("presence_penalty", getattr(self.s, "ai_presence_penalty", 0.3)))
+        freq_pen = float(self.cfg.get("frequency_penalty", getattr(self.s, "ai_frequency_penalty", 0.2)))
+        if rep_pen and rep_pen != 1.0:
+            body["repetition_penalty"] = rep_pen
+        if pres_pen:
+            body["presence_penalty"] = pres_pen
+        if freq_pen:
+            body["frequency_penalty"] = freq_pen
         if tools:
             body["tools"] = tools
 
         t0 = time.perf_counter()
+        self._count_job("brain")
         accumulated_text: list[str] = []
         accumulated_tool_calls: dict[int, dict] = {}
 
@@ -527,31 +618,161 @@ class ModelClients:
             m.AI_LATENCY.labels("brain").observe(time.perf_counter() - t0)
 
     # ------------------------------------------------------------------ TTS
+    def _tts_runpod_body(self, text: str, language: str, model: str) -> dict:
+        spoken, lang = text, language
+        if self.s.ai_tts_normalize:
+            # Chatterbox test: per-sentence hi/en tag (Hindi + Hinglish -> hi, plain English -> en) and numbers/rupees/dates/phones/
+            # acronyms written as spoken Devanagari words. Other explicit language codes pass through untouched.
+            if language in ("", "auto", "hi", "en", "hinglish"):
+                lang = tts_frontend.detect_lang(text)
+            spoken = tts_frontend.normalize(text, lang)
+        elif language == "hinglish":
+            lang = "hi"
+        body = {
+            "input": {
+                "text": spoken,
+                "prompt": spoken,
+                "language": lang,
+                "model": model
+            }
+        }
+        ref = self._tts_reference_b64()
+        if ref:
+            body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
+        return body
+
+    async def synthesize_stream(self, text: str, language: str) -> AsyncIterator[TtsAudioChunk]:
+        """Progressive TTS: yields `TtsAudioChunk`s in order as the worker produces them (RunPod `/run` + `/stream/{id}`; the job is cancelled on
+        early close). Contract per streamed item (the worker `yield`s it): {"seq": int from 0, "audio_base64": str, "format": "ulaw8k"|"pcm16",
+        "sample_rate": int, "final": bool}. A worker that does NOT stream (today's handler returns one finished output) completes with no stream
+        items: the finished output is then read from /status and yielded as ONE final chunk (`streamed=False`), so old workers keep working.
+        UNVERIFIED against a live RunPod endpoint: the `/stream` JSON shape ({"status", "stream": [{"output": item}]}) is not in the pages
+        read; parsing is tolerant, the first live run must confirm it."""
+        ep = self.endpoint("tts")
+        if not ep.path.endswith("/runsync"):   # not RunPod: no progressive protocol is defined, one complete reply
+            pcm, rate = await self.synthesize(text, language)
+            yield TtsAudioChunk(0, pcm, rate, True, False)
+            return
+        hdrs = self._auth_headers("tts")
+        model = self.cfg.get("models", {}).get("tts", self.s.ai_tts_model)
+        body = self._tts_runpod_body(text, language, model)
+        body["input"].update(stream=True, output_format="ulaw8k")
+        t0 = time.perf_counter()
+        self._count_job("tts")
+        jid = None
+        finished = failed = confirmed = False
+        try:
+            async with self._sem:
+                post = asyncio.ensure_future(self._http.post(ep.url + "/run", json=body, headers=hdrs, timeout=ep.timeout))
+                try:
+                    r = await asyncio.shield(post)
+                except asyncio.CancelledError:
+                    self._spawn(self._cancel_when_submitted(post, "tts", ep, hdrs))
+                    raise
+                if r.status_code >= 400:
+                    raise AiError("tts", "http_error", str(r.status_code))
+                j = r.json()
+                jid = j.get("id") if isinstance(j, dict) else None
+                if not jid:
+                    raise AiError("tts", "bad_response", "no job id")
+                expected, got_any, delay = 0, False, 0.03
+                deadline = time.monotonic() + ep.timeout
+                while True:
+                    sr = await self._http.get(f"{ep.url}/stream/{jid}", headers=hdrs, timeout=30)
+                    if sr.status_code >= 400:
+                        raise AiError("tts", "http_error", str(sr.status_code))
+                    sj = sr.json()
+                    status = sj.get("status") if isinstance(sj, dict) else None
+                    items = (sj.get("stream") if isinstance(sj, dict) else None) or []
+                    for item in items:
+                        chunk = self._parse_tts_chunk(item)
+                        if chunk.seq < expected:
+                            continue   # a repeated item (a re-sent poll window) is dropped, never played twice
+                        if chunk.seq > expected:
+                            raise AiError("tts", "bad_response", f"stream gap: expected seq {expected}, got {chunk.seq}")
+                        expected += 1
+                        got_any, delay = True, 0.03
+                        if chunk.final:
+                            finished = True
+                        yield chunk
+                        if finished:
+                            break
+                    if finished:
+                        return
+                    if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"):
+                        finished = True
+                        if status != "COMPLETED":
+                            raise AiError("tts", "runpod_error", f"status={status}")
+                        if got_any:
+                            raise AiError("tts", "bad_response", "stream ended without a final chunk")
+                        done = await self._http.get(f"{ep.url}/status/{jid}", headers=hdrs, timeout=30)   # a non-streaming worker: whole result
+                        dj = done.json() if done.status_code < 400 else None
+                        out = dj.get("output") if isinstance(dj, dict) else None
+                        if isinstance(out, dict) and out.get("error"):
+                            raise AiError("tts", "runpod_error", str(out["error"])[:200])
+                        b64 = (out.get("audio") or out.get("audio_base64")) if isinstance(out, dict) else None
+                        if not b64:
+                            raise AiError("tts", "bad_response", "missing audio in output")
+                        pcm, rate = wav_to_pcm16(base64.b64decode(b64))
+                        yield TtsAudioChunk(0, pcm, rate, True, False)
+                        return
+                    if time.monotonic() > deadline:
+                        raise asyncio.TimeoutError
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 1.5, 0.15)
+        except asyncio.TimeoutError:
+            failed = True
+            m.AI_REQUESTS.labels("tts", "timeout").inc()
+            if jid:
+                try:
+                    confirmed = await self.cancel_job("tts", ep, hdrs, jid, wait_confirm=True)
+                except Exception:
+                    pass
+            raise AiTimeout("tts", "timeout", detail=jid or "", remote_confirmed_cancelled=confirmed, job_id=jid) from None
+        except AiError:
+            failed = True
+            m.AI_REQUESTS.labels("tts", "error").inc()
+            raise
+        except (httpx.HTTPError, OSError) as e:
+            failed = True
+            m.AI_REQUESTS.labels("tts", "error").inc()
+            raise AiUnavailable("tts", "unreachable", type(e).__name__) from e
+        finally:
+            if finished and not failed:
+                m.AI_REQUESTS.labels("tts", "ok").inc()
+            if jid and not (finished and not failed) and not confirmed:   # consumer closed early / cancelled / failed mid-stream: stop the GPU job (it frees the single worker)
+                self._spawn(self._cancel_job("tts", ep, hdrs, jid))
+            m.AI_LATENCY.labels("tts").observe(time.perf_counter() - t0)
+
+    @staticmethod
+    def _parse_tts_chunk(item) -> TtsAudioChunk:
+        out = item.get("output", item) if isinstance(item, dict) else None
+        if not isinstance(out, dict):
+            raise AiError("tts", "bad_response", "stream item is not an object")
+        if out.get("error"):
+            raise AiError("tts", "runpod_error", str(out["error"])[:200])
+        seq, final = out.get("seq"), bool(out.get("final"))
+        b64, fmt, rate = out.get("audio_base64", ""), out.get("format"), out.get("sample_rate")
+        if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0 or not isinstance(b64, str) or len(b64) > TTS_STREAM_MAX_B64:
+            raise AiError("tts", "bad_response", "malformed stream chunk")
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except ValueError:
+            raise AiError("tts", "bad_response", "chunk audio is not base64") from None
+        if not raw and not final:
+            raise AiError("tts", "bad_response", "empty non-final chunk")
+        if fmt == "ulaw8k":
+            return TtsAudioChunk(seq, codec.mulaw_to_pcm16(raw), 8000, final, True)
+        if fmt == "pcm16" and isinstance(rate, int) and rate > 0 and len(raw) % 2 == 0:
+            return TtsAudioChunk(seq, raw, rate, final, True)
+        raise AiError("tts", "bad_response", "unsupported stream chunk format")
+
     async def synthesize(self, text: str, language: str) -> tuple[bytes, int]:
         async def go(ep: ServiceEndpoint):
             hdrs = self._auth_headers("tts")
             model = self.cfg.get("models", {}).get("tts", self.s.ai_tts_model)
             if ep.path.endswith("/runsync"):
-                spoken, lang = text, language
-                if self.s.ai_tts_normalize:
-                    # Chatterbox test: per-sentence hi/en tag (Hindi + Hinglish -> hi, plain English -> en) and numbers/rupees/dates/phones/
-                    # acronyms written as spoken Devanagari words. Other explicit language codes pass through untouched.
-                    if language in ("", "auto", "hi", "en", "hinglish"):
-                        lang = tts_frontend.detect_lang(text)
-                    spoken = tts_frontend.normalize(text, lang)
-                elif language == "hinglish":
-                    lang = "hi"
-                body = {
-                    "input": {
-                        "text": spoken,
-                        "prompt": spoken,
-                        "language": lang,
-                        "model": model
-                    }
-                }
-                ref = self._tts_reference_b64()
-                if ref:
-                    body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
+                body = self._tts_runpod_body(text, language, model)
                 j = await self._runpod_call("tts", ep, hdrs, body)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 b64_audio = None

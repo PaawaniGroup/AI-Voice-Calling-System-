@@ -63,18 +63,20 @@ function renderTranscript(transcript, lastExchange, isLive = false) {
   return h('div', { class: 'transcript-card' }, turns.map((ex, idx) => {
     const turnNum = ex.turn != null ? ex.turn : idx + 1;
     const tim = normTim(ex);
+    const tsStr = ex.ts || ex.at;
     return h('div', { class: 'exchange-turn' },
       h('div', { class: 'exchange-header' },
-        h('span', { class: 'mono' }, `Turn #${turnNum}${ex.at ? ' · ' + t(ex.at) : ''}`),
+        h('span', { class: 'mono' }, `Turn #${turnNum}${tsStr ? ' · ' + t(tsStr) : ''}`),
         latencyStrip(tim)
       ),
       h('div', { class: 'bubble bubble-user' },
-        h('span', { class: 'bubble-sender' }, '👤 Caller / Student'),
-        h('span', { class: 'bubble-text' }, ex.heard || '—')
+        h('span', { class: 'bubble-sender' }, '👤 Caller / Student (STT Input)'),
+        h('span', { class: 'bubble-text' }, ex.heard || (ex.heard_chars ? `(${ex.heard_chars} chars heard)` : '—'))
       ),
       h('div', { class: 'bubble bubble-ai' },
-        h('span', { class: 'bubble-sender' }, '🤖 MME AI Counsellor'),
-        h('span', { class: 'bubble-text' }, ex.reply || '—')
+        h('span', { class: 'bubble-sender' }, ex.status === 'processing' ? '🤖 MME AI Counsellor (Thinking…)' : '🤖 MME AI Counsellor (LLM Response)'),
+        h('span', { class: 'bubble-text' + (ex.status === 'processing' ? ' muted live-thinking' : '') },
+          ex.reply || (ex.status === 'processing' ? 'Thinking… (Generating response)' : (ex.reply_chars ? `(${ex.reply_chars} chars replied)` : '—')))
       )
     );
   }));

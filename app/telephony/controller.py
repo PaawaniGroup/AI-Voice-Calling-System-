@@ -423,12 +423,16 @@ class Controller:
         try:
             res = await self.provider.originate(req)
         except ProviderError as e:
+            if call.get("ai_outbound"):
+                log_event(log, "outbound_ai.origination_failed", call_id=call["_id"], tenant=call["tenant_id"], reason=e.reason[:60], outcome="rejected")
             m.ORIGINATIONS.labels("rejected").inc()
             m.PROVIDER_ERRORS.labels("rejected").inc()
             await self.apply(call, S.FAILED, source="provider", dedup_id=f"orig-fail:{call['_id']}",
                              fields={"failure_reason": e.reason[:80]})
             return
         except ProviderUncertain as e:
+            if call.get("ai_outbound"):
+                log_event(log, "outbound_ai.origination_failed", call_id=call["_id"], tenant=call["tenant_id"], reason=str(e)[:60], outcome="uncertain")
             m.ORIGINATIONS.labels("uncertain").inc()
             m.PROVIDER_ERRORS.labels("uncertain").inc()
             await self.repos.update_call(call["_id"], {"origination_uncertain": True, "uncertain_reason": str(e)[:60]})
@@ -513,6 +517,12 @@ class Controller:
             if c.get("origination_uncertain") or not c.get("fs_uuid"):
                 continue  # reconcile owns uncertain outcomes
             await self._kill_quietly(c, "PROGRESS_TIMEOUT")
+        # Plivo outbound whose originate outcome is unknown (REST timed out): no call id exists to ask about and `reconcile` only knows
+        # FreeSWITCH, so the call would hold a capacity slot forever. Fail it after the initiating window; a late Answer for it is rejected.
+        async for c in db.find({"provider": "plivo_api", "direction": "outbound", "state": "initiating", "origination_uncertain": True,
+                                "initiated_at": {"$lt": now - timedelta(seconds=self.s.initiating_timeout_s)}}).limit(50):
+            await self.apply(c, S.FAILED, source="timeout", dedup_id=f"orig-unc:{c['_id']}",
+                             fields={"failure_reason": "origination_uncertain_no_channel"})
         # Plivo inbound: an Answer that was received but never completed (process died between insert and answer)
         async for c in db.find({"provider": "plivo_api", "direction": "inbound", "state": "initiating",
                                 "initiated_at": {"$lt": now - timedelta(seconds=self.s.initiating_timeout_s)}}).limit(50):

@@ -1,0 +1,549 @@
+{
+  "benchmark_type": "PARTIAL REAL RUN: speech-to-text and Brain only; the voice never answered; no end-to-end number exists",
+  "timestamp": "2026-10-25T16:32:26.104738+00:00",
+  "tenant": "mme-test",
+  "audio_source": "C:\\Users\\Admin\\Desktop\\MME_Telephony\\Utkarsh_voice.wav",
+  "turns_completed": 4,
+  "errors": {
+    "brain_timeout": 1,
+    "tts_timeout": 3
+  },
+  "halted": "3 consecutive errors on tts: stopped, no retries",
+  "endpoints": {
+    "stt": "ua9l3gus6qjnmg",
+    "brain": "hu8qhrvlxbv314",
+    "tts": "93tqgnxb5dyhvx"
+  },
+  "aggregate_all": {
+    "llm_first_token": {
+      "n": 3,
+      "p50": 1438.0,
+      "p95": 19746.7,
+      "min": 1422.0,
+      "max": 21781.0
+    },
+    "runpod_brain_delay": {
+      "n": 3,
+      "p50": 91.0,
+      "p95": 17324.2,
+      "min": 90.0,
+      "max": 19239.0
+    },
+    "runpod_brain_exec": {
+      "n": 3,
+      "p50": 1009.0,
+      "p95": 1519.3,
+      "min": 916.0,
+      "max": 1576.0
+    },
+    "runpod_stt_delay": {
+      "n": 4,
+      "p50": 164.5,
+      "p95": 22629.4,
+      "min": 145.0,
+      "max": 26591.0
+    },
+    "runpod_stt_exec": {
+      "n": 4,
+      "p50": 872.0,
+      "p95": 988.2,
+      "min": 621.0,
+      "max": 1008.0
+    },
+    "stt": {
+      "n": 4,
+      "p50": 1851.5,
+      "p95": 25377.4,
+      "min": 1500.0,
+      "max": 29500.0
+    },
+    "turn": {
+      "n": 4,
+      "p50": 2.5,
+      "p95": 3.9,
+      "min": 1,
+      "max": 4
+    },
+    "turn_total": {
+      "n": 4,
+      "p50": 133499.5,
+      "p95": 148662.8,
+      "min": 122938.0,
+      "max": 149516.0
+    }
+  },
+  "first_turn_cold": {
+    "stt": 29500.0,
+    "turn_total": 149516.0,
+    "runpod_stt_delay": 26591.0,
+    "runpod_stt_exec": 876.0,
+    "error": "brain_timeout",
+    "turn": 1
+  },
+  "warm_turns_2plus": {
+    "llm_first_token": {
+      "n": 3,
+      "p50": 1438.0,
+      "p95": 19746.7,
+      "min": 1422.0,
+      "max": 21781.0
+    },
+    "runpod_brain_delay": {
+      "n": 3,
+      "p50": 91.0,
+      "p95": 17324.2,
+      "min": 90.0,
+      "max": 19239.0
+    },
+    "runpod_brain_exec": {
+      "n": 3,
+      "p50": 1009.0,
+      "p95": 1519.3,
+      "min": 916.0,
+      "max": 1576.0
+    },
+    "runpod_stt_delay": {
+      "n": 3,
+      "p50": 149.0,
+      "p95": 176.9,
+      "min": 145.0,
+      "max": 180.0
+    },
+    "runpod_stt_exec": {
+      "n": 3,
+      "p50": 868.0,
+      "p95": 994.0,
+      "min": 621.0,
+      "max": 1008.0
+    },
+    "stt": {
+      "n": 3,
+      "p50": 1687.0,
+      "p95": 1983.1,
+      "min": 1500.0,
+      "max": 2016.0
+    },
+    "turn": {
+      "n": 3,
+      "p50": 3.0,
+      "p95": 3.9,
+      "min": 2,
+      "max": 4
+    },
+    "turn_total": {
+      "n": 3,
+      "p50": 123171.0,
+      "p95": 141762.3,
+      "min": 122938.0,
+      "max": 143828.0
+    }
+  },
+  "stage_split_all": {
+    "stt": {
+      "calls": 4,
+      "delay_ms": {
+        "n": 4,
+        "p50": 164.5,
+        "p95": 22629.4,
+        "min": 145.0,
+        "max": 26591.0
+      },
+      "exec_ms": {
+        "n": 4,
+        "p50": 872.0,
+        "p95": 988.2,
+        "min": 621.0,
+        "max": 1008.0
+      },
+      "client_ms": {
+        "n": 4,
+        "p50": 1843.5,
+        "p95": 25375.0,
+        "min": 1500.0,
+        "max": 29500.0
+      },
+      "sum_delay_s": 27.07,
+      "sum_exec_s": 3.37,
+      "delay_share_of_service": 0.889,
+      "share_of_all_runpod_time": 0.57
+    },
+    "brain": {
+      "calls": 3,
+      "delay_ms": {
+        "n": 3,
+        "p50": 91.0,
+        "p95": 17324.2,
+        "min": 90.0,
+        "max": 19239.0
+      },
+      "exec_ms": {
+        "n": 3,
+        "p50": 1009.0,
+        "p95": 1519.3,
+        "min": 916.0,
+        "max": 1576.0
+      },
+      "client_ms": {
+        "n": 3,
+        "p50": 1438.0,
+        "p95": 19733.2,
+        "min": 1422.0,
+        "max": 21766.0
+      },
+      "sum_delay_s": 19.42,
+      "sum_exec_s": 3.5,
+      "delay_share_of_service": 0.847,
+      "share_of_all_runpod_time": 0.43
+    },
+    "tts": {
+      "calls": 0,
+      "delay_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "exec_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "client_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "sum_delay_s": 0.0,
+      "sum_exec_s": 0.0,
+      "delay_share_of_service": null,
+      "share_of_all_runpod_time": 0.0
+    }
+  },
+  "stage_split_warm": {
+    "stt": {
+      "calls": 3,
+      "delay_ms": {
+        "n": 3,
+        "p50": 149.0,
+        "p95": 176.9,
+        "min": 145.0,
+        "max": 180.0
+      },
+      "exec_ms": {
+        "n": 3,
+        "p50": 868.0,
+        "p95": 994.0,
+        "min": 621.0,
+        "max": 1008.0
+      },
+      "client_ms": {
+        "n": 3,
+        "p50": 1687.0,
+        "p95": 1968.7,
+        "min": 1500.0,
+        "max": 2000.0
+      },
+      "sum_delay_s": 0.47,
+      "sum_exec_s": 2.5,
+      "delay_share_of_service": 0.16,
+      "share_of_all_runpod_time": 0.115
+    },
+    "brain": {
+      "calls": 3,
+      "delay_ms": {
+        "n": 3,
+        "p50": 91.0,
+        "p95": 17324.2,
+        "min": 90.0,
+        "max": 19239.0
+      },
+      "exec_ms": {
+        "n": 3,
+        "p50": 1009.0,
+        "p95": 1519.3,
+        "min": 916.0,
+        "max": 1576.0
+      },
+      "client_ms": {
+        "n": 3,
+        "p50": 1438.0,
+        "p95": 19733.2,
+        "min": 1422.0,
+        "max": 21766.0
+      },
+      "sum_delay_s": 19.42,
+      "sum_exec_s": 3.5,
+      "delay_share_of_service": 0.847,
+      "share_of_all_runpod_time": 0.885
+    },
+    "tts": {
+      "calls": 0,
+      "delay_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "exec_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "client_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "sum_delay_s": 0.0,
+      "sum_exec_s": 0.0,
+      "delay_share_of_service": null,
+      "share_of_all_runpod_time": 0.0
+    }
+  },
+  "cost": {
+    "per_service": {
+      "stt": {
+        "job_s": 30.44,
+        "idle_s": 15.0,
+        "tail_s": 5.0,
+        "usd": 0.00968
+      },
+      "brain": {
+        "job_s": 142.94,
+        "idle_s": 12.03,
+        "tail_s": 5.0,
+        "usd": 0.07774
+      },
+      "tts": {
+        "job_s": 360.08,
+        "idle_s": 6.05,
+        "tail_s": 5.0,
+        "usd": 0.07126
+      }
+    },
+    "usd_estimated_total": 0.15868,
+    "budget_usd": 1.5,
+    "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+  },
+  "per_turn": [
+    {
+      "stt": 29500.0,
+      "turn_total": 149516.0,
+      "runpod_stt_delay": 26591.0,
+      "runpod_stt_exec": 876.0,
+      "error": "brain_timeout",
+      "turn": 1
+    },
+    {
+      "stt": 2016.0,
+      "llm_first_token": 21781.0,
+      "turn_total": 143828.0,
+      "runpod_stt_delay": 180.0,
+      "runpod_stt_exec": 1008.0,
+      "runpod_brain_delay": 19239.0,
+      "runpod_brain_exec": 1576.0,
+      "error": "tts_timeout",
+      "turn": 2
+    },
+    {
+      "stt": 1500.0,
+      "llm_first_token": 1422.0,
+      "turn_total": 122938.0,
+      "runpod_stt_delay": 149.0,
+      "runpod_stt_exec": 621.0,
+      "runpod_brain_delay": 91.0,
+      "runpod_brain_exec": 1009.0,
+      "error": "tts_timeout",
+      "turn": 3
+    },
+    {
+      "stt": 1687.0,
+      "llm_first_token": 1438.0,
+      "turn_total": 123171.0,
+      "runpod_stt_delay": 145.0,
+      "runpod_stt_exec": 868.0,
+      "runpod_brain_delay": 90.0,
+      "runpod_brain_exec": 916.0,
+      "error": "tts_timeout",
+      "turn": 4
+    }
+  ],
+  "calls": [
+    {
+      "service": "stt",
+      "turn": 0,
+      "role": "turn",
+      "request_id": "b4db0bc8-f1f4-405a-a610-cb454370d252-e2",
+      "delay_ms": 26591.0,
+      "exec_ms": 876.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 29500.0,
+      "cold_delay": true,
+      "cold_inferred": false,
+      "cold": true
+    },
+    {
+      "service": "brain",
+      "turn": 0,
+      "role": "turn",
+      "request_id": "3057e1e5-3d82-43cf-864e-60e9ab86cd2b-e2",
+      "delay_ms": null,
+      "exec_ms": null,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": "AiTimeout:timeout",
+      "client_ms": 120016.0,
+      "cold_delay": false,
+      "cold_inferred": false,
+      "cold": false
+    },
+    {
+      "service": "stt",
+      "turn": 1,
+      "role": "turn",
+      "request_id": "00d12585-3be3-4c9c-95fe-d3312501ab79-e2",
+      "delay_ms": 180.0,
+      "exec_ms": 1008.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 2000.0,
+      "cold_delay": false,
+      "cold_inferred": true,
+      "cold": true
+    },
+    {
+      "service": "brain",
+      "turn": 1,
+      "role": "turn",
+      "request_id": "190c6299-ffb0-47f8-a4c6-883b5daccf18-e1",
+      "delay_ms": 19239.0,
+      "exec_ms": 1576.0,
+      "prompt_tokens": 151,
+      "completion_tokens": 120,
+      "error": null,
+      "client_ms": 21766.0,
+      "cold_delay": true,
+      "cold_inferred": false,
+      "cold": true
+    },
+    {
+      "service": "tts",
+      "turn": 1,
+      "role": "turn",
+      "request_id": "4c76f288-7e74-4a81-b0d1-649beece9457-e2",
+      "delay_ms": null,
+      "exec_ms": null,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": "AiTimeout:timeout",
+      "client_ms": 120016.0,
+      "cold_delay": false,
+      "cold_inferred": false,
+      "cold": false
+    },
+    {
+      "service": "stt",
+      "turn": 2,
+      "role": "turn",
+      "request_id": "fa5d3f66-cd07-4308-a77e-3e93fa1622a2-e1",
+      "delay_ms": 149.0,
+      "exec_ms": 621.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 1500.0,
+      "cold_delay": false,
+      "cold_inferred": true,
+      "cold": true
+    },
+    {
+      "service": "brain",
+      "turn": 2,
+      "role": "turn",
+      "request_id": "67f2c944-fdd4-4e1a-be94-09965ce7bd64-e2",
+      "delay_ms": 91.0,
+      "exec_ms": 1009.0,
+      "prompt_tokens": 149,
+      "completion_tokens": 68,
+      "error": null,
+      "client_ms": 1422.0,
+      "cold_delay": false,
+      "cold_inferred": true,
+      "cold": true
+    },
+    {
+      "service": "tts",
+      "turn": 2,
+      "role": "turn",
+      "request_id": "6ca0d030-8af6-4460-8031-c7dca04445c4-e1",
+      "delay_ms": null,
+      "exec_ms": null,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": "AiTimeout:timeout",
+      "client_ms": 120016.0,
+      "cold_delay": false,
+      "cold_inferred": false,
+      "cold": false
+    },
+    {
+      "service": "stt",
+      "turn": 3,
+      "role": "turn",
+      "request_id": "c8e78e45-0f23-4d36-892a-47be46aac4a2-e2",
+      "delay_ms": 145.0,
+      "exec_ms": 868.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 1687.0,
+      "cold_delay": false,
+      "cold_inferred": true,
+      "cold": true
+    },
+    {
+      "service": "brain",
+      "turn": 3,
+      "role": "turn",
+      "request_id": "312c29a7-d75c-427a-9a47-57961d2a63bd-e1",
+      "delay_ms": 90.0,
+      "exec_ms": 916.0,
+      "prompt_tokens": 155,
+      "completion_tokens": 52,
+      "error": null,
+      "client_ms": 1438.0,
+      "cold_delay": false,
+      "cold_inferred": true,
+      "cold": true
+    },
+    {
+      "service": "tts",
+      "turn": 3,
+      "role": "turn",
+      "request_id": "70f6b01e-05c6-4e64-b162-06948c24fde3-e2",
+      "delay_ms": null,
+      "exec_ms": null,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": "AiTimeout:timeout",
+      "client_ms": 120046.0,
+      "cold_delay": false,
+      "cold_inferred": false,
+      "cold": false
+    }
+  ],
+  "note": "Brain full reply (non-streamed); TTS never answered; no end-to-end number exists"
+}

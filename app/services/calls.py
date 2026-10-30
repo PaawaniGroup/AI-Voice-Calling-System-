@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from app.core import phone
-from app.core.errors import CapacityExceeded, Conflict, Forbidden
+from app.core.errors import ApiError, CapacityExceeded, Conflict, Forbidden, RateLimited
 from app.core.ids import new_id, utcnow
 from app.core.logging import correlation_id_var
+from app.core.logging import event as log_event
 from app.observability import metrics as m
 from app.persistence.repos import Repos, fingerprint
 from app.security.auth import Principal
@@ -23,8 +25,13 @@ def effective_policy(s: Settings, tenant_policy: dict | None) -> tuple[dict, pho
         "max_active_calls": min(tp.get("max_active_calls", s.max_active_per_tenant), s.max_active_global),
         "max_duration_s": min(tp.get("max_duration_s", s.max_call_duration_s), s.max_call_duration_s),
         "recording": tp.get("recording", "off"),
+        # outbound AI: fail-closed (a tenant must opt in, and may only dial the exact numbers listed)
+        "outbound_ai_enabled": tp.get("outbound_ai_enabled") is True,
+        "outbound_ai_destinations": list(tp.get("outbound_ai_destinations") or []),
+        "outbound_ai_daily_quota": tp.get("outbound_ai_daily_quota"),
+        "outbound_ai_max_duration_s": tp.get("outbound_ai_max_duration_s"),
     }
-    deny = s.csv(s.default_deny_prefixes) + list(file_pol.get("deny_prefixes", [])) + list(tp.get("deny_prefixes", []))
+    deny =s.csv(s.default_deny_prefixes) + list(file_pol.get("deny_prefixes", [])) + list(tp.get("deny_prefixes", []))
     dp = phone.DestinationPolicy(
         allowed_countries=tp.get("allowed_countries") or s.csv(s.default_allowed_countries),
         deny_prefixes=deny, allow_prefixes=list(tp.get("allow_prefixes", [])),
@@ -37,8 +44,45 @@ def pstn_path(s: Settings) -> bool:
     return s.provider == "plivo_api" or (s.provider == "freeswitch_gateway" and "{destination}" in s.fs_dial_template)
 
 
-async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, Any], idem_key: str) -> tuple[dict, bool]:
-    """Returns (call, created). Tenant comes from the authenticated principal only."""
+def outbound_ai_requested(s: Settings, body: dict[str, Any]) -> bool:
+    """An outbound call that asks for an AI conversation AND goes through Plivo (the only provider whose answer handler can open the
+    AI media stream). Other providers keep storing `ai_enabled` without starting anything (FreeSWITCH outbound AI is not built)."""
+    return bool(body.get("ai_enabled")) and s.provider == "plivo_api"
+
+
+log = logging.getLogger("mme_telephony.calls")
+
+
+async def _outbound_ai_gate(s: Settings, repos: Repos, tenant: str, pol: dict, to: str, bridge_to: str | None, ai) -> None:
+    """Every precondition of an outbound AI call that does not need capacity or quota. Raises ApiError; the caller audits it. Order: the
+    global pause first (cheapest and the emergency stop), then tenant opt-in, the exact destination allowlist, then AI readiness."""
+    if await repos.outbound_ai_paused():
+        raise Forbidden("outbound AI calls are paused", code="outbound_ai_paused")
+    if not pol["outbound_ai_enabled"]:
+        raise Forbidden("outbound AI calls are not enabled for this tenant", code="outbound_ai_disabled")
+    if to not in pol["outbound_ai_destinations"]:   # exact string match of normalised E.164: no prefixes, no wildcards, an empty list allows nothing
+        raise Forbidden("destination is not on this tenant's outbound AI allowlist", code="outbound_ai_destination_not_allowed")
+    if bridge_to:
+        raise phone.Unprocessable("an AI call cannot also bridge to a second party", code="ai_bridge_unsupported")
+    from app.ai.media import PlivoStreamBridge
+    ok, why = await ai.preflight(tenant, bridge=PlivoStreamBridge(s)) if ai is not None else (False, "ai_unavailable")
+    if not ok:
+        raise Conflict(f"AI is not ready for this tenant ({why})", code="ai_not_ready", details={"reason": why})
+
+
+async def _audit_ai_rejection(repos: Repos, p: Principal, e: ApiError, to: str | None = None) -> None:
+    """Structured record of a refused outbound AI call (never the destination number: only its length class). Best effort."""
+    action = "outbound_ai.quota_exhausted" if e.code == "outbound_ai_quota_exhausted" else "outbound_ai.rejected"
+    log_event(log, action, tenant=p.tenant_id, code=e.code)
+    try:
+        await repos.audit(p.tenant_id, p.sub, action, "call", {"code": e.code}, "-")
+    except Exception:
+        log.exception("could not record the refusal of an outbound AI call")
+
+
+async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, Any], idem_key: str, ai=None) -> tuple[dict, bool]:
+    """Returns (call, created). Tenant comes from the authenticated principal only.
+    `ai` (AiService): needed to preflight outbound AI calls; without it an outbound AI request is refused."""
     tenant = p.tenant_id
     pol, dp = effective_policy(s, await repos.get_policy(tenant))
     if not pol["enabled"]:
@@ -62,6 +106,15 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
         bridge_to = phone.normalize(body["bridge_to"], s.default_region)
         dp.check_transfer(bridge_to)
     max_dur = min(body.get("max_duration_s") or pol["max_duration_s"], pol["max_duration_s"])
+    ai_outbound = outbound_ai_requested(s, body)
+    if ai_outbound:
+        # Same preconditions as an inbound AI call (`plivo_calls.handle_answer`) plus the outbound-only controls: never queue a call that must not start.
+        try:
+            await _outbound_ai_gate(s, repos, tenant, pol, to, bridge_to, ai)
+        except ApiError as e:
+            await _audit_ai_rejection(repos, p, e)
+            raise
+        max_dur = min(max_dur, pol["outbound_ai_max_duration_s"] or s.outbound_ai_max_duration_s)   # hard cap for one AI call
 
     fp = fingerprint({"to": to, "from": frm, "bridge_to": bridge_to, "max_duration_s": body.get("max_duration_s"),
                       "metadata": body.get("metadata"), "ai_enabled": bool(body.get("ai_enabled")), "language": language})
@@ -74,6 +127,7 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
                 return c, False
             await asyncio.sleep(0.1)
         raise Conflict("original request still in progress", code="idempotency_in_progress")
+    quota_tenant = None
     try:
         # Admission control (hard ceilings; never silently dropped).
         active_total = await repos.count_active()
@@ -84,6 +138,15 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
         if over_capacity and (s.queue_policy == "reject" or queued >= s.max_queued or
                               tenant_in_flight >= pol["max_active_calls"] + max(1, s.max_queued // 10)):
             raise CapacityExceeded("call capacity exhausted", details={"retry_after_s": 5})
+        if ai_outbound:
+            # Daily quota, taken atomically (see Repos.reserve_outbound_ai_quota) only after everything else has passed, and given back below
+            # if the call cannot be stored. Counts ACCEPTED creations (a call that later fails to dial still used its slot).
+            quota = pol["outbound_ai_daily_quota"] if pol["outbound_ai_daily_quota"] is not None else s.outbound_ai_daily_quota
+            if not await repos.reserve_outbound_ai_quota(tenant, quota):
+                e = RateLimited("the daily outbound AI call quota is used up", code="outbound_ai_quota_exhausted", details={"quota": quota})
+                await _audit_ai_rejection(repos, p, e)
+                raise e
+            quota_tenant = tenant
         now = utcnow()
         call = {
             "_id": call_id, "tenant_id": tenant, "direction": "outbound", "provider": s.provider,
@@ -93,9 +156,13 @@ async def create_call(s: Settings, repos: Repos, p: Principal, body: dict[str, A
             "max_duration_s": max_dur, "metadata": body.get("metadata") or {},
             "recording_policy": pol["recording"], "ai_enabled": bool(body.get("ai_enabled")), "language": language,
         }
+        if ai_outbound:
+            call["ai_outbound"] = True  # read by the Plivo Answer handler: this answered call gets the AI media stream, not <Wait>
         await repos.insert_call(call)
         await repos.add_event(call, "state.queued", "api", f"created:{call_id}", {})
     except Exception:
+        if quota_tenant:
+            await repos.release_outbound_ai_quota(quota_tenant)
         await repos.release_idempotency(tenant, "create_call", idem_key)
         raise
     m.CALLS_CREATED.labels("outbound").inc()

@@ -35,6 +35,7 @@ CALL_UUID = re.compile(r"^[0-9A-Za-z._-]{1,64}$")
 _CALLER = re.compile(r"[^0-9A-Za-z+*#@._-]")
 REJECT = '<Response><Hangup reason="rejected"/></Response>'
 BUSY = '<Response><Hangup reason="busy"/></Response>'
+ANSWER_LOOKUP_TRIES = 30   # x 0.1 s: how long an outbound Answer waits for the call's RequestUUID to be stored
 ENDED_EVENTS = {"stopped", "failed", "completed", "hangup", "busy", "no-answer", "cancel"}
 
 
@@ -78,6 +79,8 @@ async def _respond(app, call: dict) -> str:
         return REJECT
     cap = min(call.get("max_duration_s", s.max_call_duration_s), 3600)
     if call.get("direction") != "inbound":  # calls we placed through the REST API keep their existing behaviour
+        if call.get("ai_outbound") and call.get("ai_enabled"):  # an outbound call that asked for AI (marked at creation): same stream as inbound
+            return await _ai_stream_xml(app, call)
         if call.get("bridge_to"):
             return _xml(f'<Dial timeLimit="{call.get("max_duration_s", s.max_call_duration_s)}"><Number>{call["bridge_to"].lstrip("+")}</Number></Dial>')
         return _xml(f'<Wait length="{cap}"/>')
@@ -87,21 +90,28 @@ async def _respond(app, call: dict) -> str:
     if action == "bridge" and target:
         return _xml(f'<Dial timeLimit="{call.get("max_duration_s", s.max_call_duration_s)}"><Number>{target.lstrip("+")}</Number></Dial>')
     if action == "ai":
-        sid = call.get("session_id")
-        for _ in range(10):  # a duplicate Answer can race the first one's session creation: wait briefly, never hang up on it
-            if sid:
-                break
-            await asyncio.sleep(0.1)
-            sid = ((await repos.get_call(call["_id"])) or {}).get("session_id")
-        if not sid:
-            return REJECT
-        call = {**call, "session_id": sid}
-        if not call.get("stream_connected"):  # a late duplicate keeps the watchdog honest
-            await repos.update_call(call["_id"], {"stream_expected_by": utcnow() + timedelta(seconds=s.plivo_stream_connect_s + 15),
-                                                  "stream_watch_done": False})
-        ticket = tickets.mint(s, session_id=sid, tenant_id=call["tenant_id"], call_id=call["provider_call_id"])
-        return stream_xml(s, ticket, greeting=getattr(s, "ai_greeting", "Welcome to MME AI Voice Calling Agent."))
+        return await _ai_stream_xml(app, call)
     return _xml(f'<Wait length="{cap}"/>')
+
+
+async def _ai_stream_xml(app, call: dict) -> str:
+    """The bidirectional AI stream for an answered call (inbound `ai` route, or an outbound call marked `ai_outbound`).
+    Ticket scope = this call's session + tenant + Plivo CallUUID; the stream watchdog is (re)armed."""
+    s, repos = app.state.settings, app.state.repos
+    sid = call.get("session_id")
+    for _ in range(10):  # a duplicate Answer can race the first one's session creation: wait briefly, never hang up on it
+        if sid:
+            break
+        await asyncio.sleep(0.1)
+        sid = ((await repos.get_call(call["_id"])) or {}).get("session_id")
+    if not sid:
+        return REJECT
+    call = {**call, "session_id": sid}
+    if not call.get("stream_connected"):  # a late duplicate keeps the watchdog honest
+        await repos.update_call(call["_id"], {"stream_expected_by": utcnow() + timedelta(seconds=s.plivo_stream_connect_s + 15),
+                                              "stream_watch_done": False})
+    ticket = tickets.mint(s, session_id=sid, tenant_id=call["tenant_id"], call_id=call["provider_call_id"])
+    return stream_xml(s, ticket, greeting=getattr(s, "ai_greeting", "Welcome to MME AI Voice Calling Agent."))
 
 
 async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) -> str:
@@ -114,6 +124,14 @@ async def handle_answer(app, params: dict[str, str], *, replayed: bool = False) 
         raise ApiError("missing or invalid CallUUID", code="invalid_payload", status=400)
 
     call = await _by_provider_id(repos, uuid_, params.get("RequestUUID"))
+    if call is None and params.get("RequestUUID") and (params.get("Direction") or "").lower() != "inbound":
+        # An outbound call can be answered before the originate request returned and stored its RequestUUID (controller._originate saves
+        # it afterwards): wait briefly for it instead of hanging up on a call that is really ours. Unknown ids still end in REJECT below.
+        for _ in range(ANSWER_LOOKUP_TRIES):
+            await asyncio.sleep(0.1)
+            call = await _by_provider_id(repos, uuid_, params.get("RequestUUID"))
+            if call is not None:
+                break
     if call is not None:
         # Known call: either one we placed (this is its first Answer) or a duplicate/retry. ANSWERED is idempotent (dedup id).
         if call["state"] not in {x.value for x in TERMINAL}:

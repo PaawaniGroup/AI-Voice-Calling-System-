@@ -55,7 +55,7 @@ def _shrink(v: Any, depth: int = 0, key: str = "") -> Any:
     if depth > 3:
         return "…"
     if isinstance(v, str):
-        limit = 350 if key in ("heard", "reply", "transcript", "msg", "detail") else 120
+        limit = 2000 if key in ("heard", "reply", "transcript", "msg", "detail") else 120
         return v if len(v) <= limit else v[: limit - 3] + "…"
     if isinstance(v, dict):
         return {str(k)[:40]: _shrink(x, depth + 1, str(k)) for k, x in list(v.items())[:20]}

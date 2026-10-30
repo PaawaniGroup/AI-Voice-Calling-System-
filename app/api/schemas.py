@@ -105,6 +105,12 @@ class PolicyIn(Strict):
                                        description="Inbound Plivo calls: when non-empty, ONLY these caller numbers are answered; everyone else is rejected before a call exists.")
     transfer_destinations: list[str] = Field(default_factory=list, max_length=200)
     recording: Literal["on", "off"] = "off"
+    # Outbound AI calls (fail-closed: all four are OFF/empty unless sent explicitly, and a PUT that omits them resets them).
+    outbound_ai_enabled: bool = Field(False, description="Allow this tenant to place outbound calls that start an AI conversation.")
+    outbound_ai_destinations: list[str] = Field(default_factory=list, max_length=200,
+                                                description="EXACT E.164 numbers an outbound AI call may dial (no prefixes, no wildcards). Empty = none allowed.")
+    outbound_ai_daily_quota: int | None = Field(None, ge=0, le=100000, description="Outbound AI calls per UTC day; omitted = the service default.")
+    outbound_ai_max_duration_s: int | None = Field(None, ge=10, le=3600, description="Cap for one outbound AI call; omitted = the service default.")
 
 
 class RouteIn(Strict):

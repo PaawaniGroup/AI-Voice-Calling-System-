@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 import logging
 import time
@@ -27,6 +28,7 @@ import time
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.ai import codec, turn_trace
+from app.ai.capture import (CANCELLED, EXPIRED, FAILED, PROCESSED, REJECTED, Capture, CaptureConfig, Utterance, UtteranceQueue)
 from app.ai.clients import pcm16_to_wav, rms
 from app.core.errors import ApiError
 from app.core.ids import utcnow
@@ -41,10 +43,16 @@ log = logging.getLogger("mme_telephony.ai.ws")
 VAD_RMS = 450.0        # 16-bit PCM RMS above which a frame counts as speech (avoids telephone line noise)
 BARGE_IN_VAD_RMS = 1000.0   # Higher RMS needed to barge in over speaker audio / acoustic bleed
 BARGE_IN_RMS_MULTIPLIER = 2.2  # Multiplier for barge-in threshold over vad_rms
-SILENCE_MS = 700       # trailing silence that ends an utterance (21 speech + 35 silence frames)
+SILENCE_MS = 1100      # trailing silence that ends an utterance (callers pause 650-1000 ms mid-thought)
+SHORT_SILENCE_MS = 1200 # same for short starters (< 600 ms of speech: "haan ..." is often continued)
+PRE_ROLL_MS = 300      # audio kept from before the first loud frame (bounded ring)
+MIN_VALID_MS = 60      # less loud audio than this in a whole capture is a noise burst (rejected with a reason, never silently)
+QUEUE_MAX = 4          # utterances waiting for the turn worker; when full the newest is merged into the last (capture.UtteranceQueue)
+QUEUE_EXPIRE_S = 90.0  # a queued utterance older than this is EXPIRED (explicit terminal state)
+STT_RETRYABLE = ("stt_timeout", "stt_unreachable", "stt_http_error", "stt_runpod_error")
 MIN_SPEECH_MS = 200    # minimum speech gate before speech accumulation begins
 BARGE_IN_MS = 200      # minimum continuous loud speech to interrupt assistant playback (prevents self-breaks)
-MAX_UTTERANCE_MS = 6000 # 6s max utterance cap prevents huge buffering and latency spikes
+MAX_UTTERANCE_MS = 8000 # 8s max utterance cap prevents huge buffering and latency spikes
 IDLE_POLL_S = 0.05     # tighter 50ms gap polling for fast silence accounting
 WORKER_STOP_S = 2.0    # max wait for the turn worker to honour cancellation when a media socket ends
 PLIVO_PLAY_CHUNK = 8000        # mu-law bytes per playAudio (1 s => ~10.7 KB base64, under Plivo's 16 KB guidance)
@@ -81,12 +89,15 @@ class NativeIO:
     async def interrupt(self) -> None:
         await self.ws.send_text(json.dumps({"type": "interrupt"}))
 
-    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start) -> None:
+    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start, valid=None) -> None:
         on_start(len(audio) / 2 / src_rate)
         await self.ws.send_text(json.dumps({"type": "playback_start", "utterance_id": uid, "sample_rate": self.rate, "language": language}))
         pcm = resample(audio, src_rate, self.rate)
         fb = self.rate * self.frame_ms // 1000 * 2
         for i in range(0, len(pcm), fb):
+            if valid is not None and not valid():      # superseded by a newer caller turn / barge-in: stop sending
+                m.AI_STALE_REJECTED.labels("audio").inc()
+                return
             await self.ws.send_bytes(pcm[i:i + fb])
             if self.realtime:
                 await asyncio.sleep(self.frame_ms / 1000)
@@ -108,7 +119,10 @@ class FsIO:
         except Exception:
             log.warning("uuid_break failed")
 
-    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start) -> None:
+    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start, valid=None) -> None:
+        if valid is not None and not valid():
+            m.AI_STALE_REJECTED.labels("audio").inc()
+            return
         on_start(len(audio) / 2 / src_rate)  # FreeSWITCH plays the file asynchronously; we track an estimated end for barge-in
         self.rt.sent_at = time.monotonic()
         msg = {"type": "streamAudio", "data": {"audioDataType": "wav", "sampleRate": src_rate,
@@ -190,7 +204,7 @@ class PlivoIO:
     async def interrupt(self) -> None:
         await self.ws.send_text(json.dumps({"event": "clearAudio", "streamId": self.stream_id}))
 
-    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start) -> None:
+    async def play(self, audio: bytes, src_rate: int, language: str, uid: int, on_start, valid=None) -> None:
         mu = codec.pcm16_to_mulaw(codec.resample_pcm16(audio, src_rate, codec.MULAW_RATE))
         limit = PLIVO_MAX_PLAY_S * codec.MULAW_RATE
         if len(mu) > limit:
@@ -198,6 +212,9 @@ class PlivoIO:
             mu = mu[:limit]
         on_start(len(mu) / codec.MULAW_RATE)
         for part in codec.chunks(mu, PLIVO_PLAY_CHUNK):
+            if valid is not None and not valid():      # stale turn: nothing more of it may reach the caller (after clearAudio too)
+                m.AI_STALE_REJECTED.labels("audio").inc()
+                return
             await self.ws.send_text(json.dumps({"event": "playAudio", "media": {
                 "contentType": "audio/x-mulaw", "sampleRate": codec.MULAW_RATE, "payload": base64.b64encode(part).decode()}}))
             turn_trace.mark("t_first_frame_to_plivo")  # first write wins
@@ -206,25 +223,58 @@ class PlivoIO:
         await self.ws.send_text(json.dumps({"event": "checkpoint", "streamId": self.stream_id, "name": name}))
 
 
-async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad_rms: float, silence_ms: int) -> str | None:
+async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *,
+                     vad_rms: float, silence_ms: int = SILENCE_MS,
+                     short_silence_ms: int = SHORT_SILENCE_MS,
+                     pre_roll_ms: int = PRE_ROLL_MS,
+                     max_utterance_ms: int = MAX_UTTERANCE_MS,
+                     min_valid_ms: int = MIN_VALID_MS,
+                     queue_max: int = QUEUE_MAX,
+                     queue_expire_s: float = QUEUE_EXPIRE_S) -> str | None:
     """Shared endpointing/barge-in/turn loop. Returns an end reason when the transport signalled one, else None.
 
+    Per call, nothing shared: one `Capture` (pre-roll, endpointing, barge detection; app/ai/capture.py), one bounded `UtteranceQueue`,
+    one turn worker. Ownership: the capture owns caller audio until a final segment is handed to the queue as an `Utterance` (unique id,
+    monotonically increasing `gen`); the worker owns it from `pop_coalesced` until the utterance reaches ONE terminal state.
+    Turn validity: only the utterance whose `gen` equals `st["live_gen"]` may speak. A newer caller utterance or a barge-in changes
+    `live_gen`, so a stale reply can neither start nor continue (checked before every frame sent, see `valid` in the io.play adapters).
+    Assistant playback never discards or replaces caller audio; a capture in progress when playback starts raises a barge instead.
     The item source is `io.next_item(timeout)` when the adapter has one (Plivo), otherwise the raw WebSocket. A gap with no
     frames counts as silence, so an utterance still ends if the transport stops sending when the caller is quiet.
     """
     local: list[asyncio.Task] = []
-    utterances: asyncio.Queue[tuple] = asyncio.Queue(maxsize=3)  # (pcm, t_speech_end, t_endpoint) on the monotonic clock
+    cap = Capture(CaptureConfig(rate=rate, vad_rms=vad_rms, barge_rms=BARGE_IN_VAD_RMS, barge_ms=BARGE_IN_MS, silence_ms=silence_ms,
+                                short_silence_ms=short_silence_ms, pre_roll_ms=pre_roll_ms, max_utterance_ms=max_utterance_ms,
+                                min_valid_ms=min_valid_ms))
+    queue = UtteranceQueue(rate, max_items=queue_max, expire_s=queue_expire_s)
+    wake = asyncio.Event()
     st = {
-        "last_loud_at": 0.0,
         "playing": False,
         "play_until": 0.0,
         "play_started_at": 0.0,
         "uid": 0,
-        "speech_ms": 0,
-        "silence_ms": 0,
-        "buf": bytearray(),
-        "in_speech": False,
+        "gen": 0,        # last utterance generation issued
+        "live_gen": 0,   # the only generation allowed to speak; -1 after a barge-in
+        "busy": False,   # the worker is inside a turn
     }
+    cont = bytearray()   # `continues` segments of the utterance being spoken (soft cap); merged into one STT job
+    cont_speech = 0
+    synced = {k: 0 for k in ("captured", "trimmed", "rejected", "ring_evicted", "playback_unmatched", "pre_roll_included")}
+    try:
+        rt.capture, rt.utt_queue = cap, queue          # introspection for tests/ops; per-call objects
+    except Exception:
+        pass
+    try:
+        play_takes_valid = "valid" in inspect.signature(io.play).parameters
+    except (TypeError, ValueError):
+        play_takes_valid = False
+
+    def sync_stats() -> None:
+        for k in synced:
+            cur = getattr(cap.stats, k)
+            if cur > synced[k]:
+                m.AI_FRAMES.labels(k).inc(cur - synced[k])
+                synced[k] = cur
 
     def on_start(duration_s: float) -> None:
         now = time.monotonic()
@@ -233,69 +283,175 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
         st["playing"] = True
         st["play_started_at"] = now
 
-    async def play(audio: bytes, src: int, lang: str, uid: int) -> None:
+    async def play(audio: bytes, src: int, lang: str, uid: int, gen: int) -> bool:
+        def valid() -> bool:
+            return st["live_gen"] == gen
+
+        if not valid():
+            m.AI_STALE_REJECTED.labels("audio").inc()
+            return False
+        turn_trace.mark("t_playback_start")
         if not isinstance(io, PlivoIO):  # PlivoIO marks the exact moment its first frame is written to the socket
             turn_trace.mark("t_first_frame_to_plivo")
         try:
-            await io.play(audio, src, lang, uid, on_start)
+            if play_takes_valid:
+                await io.play(audio, src, lang, uid, on_start, valid=valid)
+            else:
+                await io.play(audio, src, lang, uid, on_start)
         finally:
             if isinstance(io, NativeIO):
                 st["playing"] = False
+        return True
+
+    def invalidate(reason: str) -> None:
+        """The in-flight turn (if any) is stale: no more audio from it, cancel its LLM/TTS work. Caller text is committed by the pipeline."""
+        if st["busy"]:
+            m.AI_TURN_CANCELLED.labels(reason).inc()
+        rt.conversation.cancel()
+
+    async def take() -> Utterance:
+        while True:
+            u, expired = queue.pop_coalesced(time.monotonic())
+            for e in expired:
+                m.AI_QUEUE_EVENTS.labels("expired").inc()
+                m.AI_UTTERANCES.labels(EXPIRED).inc()
+                log.warning("utterance %d expired in queue", e.id)
+            m.AI_QUEUE_DEPTH.set(len(queue))
+            if u is not None:
+                return u
+            wake.clear()
+            await wake.wait()
 
     async def worker() -> None:
         while True:
-            pcm, t_speech_end, t_endpoint = await utterances.get()
+            u = await take()
+            st["busy"] = True
+            wait_s = max(0.0, time.monotonic() - u.enqueued_at)
+            m.AI_QUEUE_WAIT.observe(wait_s)
+            m.AI_UTTERANCE_SECONDS.observe(len(u.pcm) / 2 / rate)
+            m.AI_STT_SUBMISSIONS.labels("retry" if u.retries else "first").inc()
             t_turn = time.perf_counter()
-            first = True
-            trace = turn_trace.TurnTrace(t_speech_end, t_endpoint, endpoint_silence_ms=silence_ms)
+            stt_recorded = False
+            turn_recorded = False
+            heard_seen = False
+            trace = turn_trace.TurnTrace(u.t_speech_end, u.t_endpoint, endpoint_silence_ms=silence_ms)
+            trace.meta.update(utterance_ms=round(len(u.pcm) / 2 / rate * 1000, 1), utterance_parts=u.parts, utterance_gen=u.gen,
+                              queue_wait_ms=round(wait_s * 1000, 1), pre_roll_frames=cap.stats.pre_roll_included,
+                              frames_in=cap.stats.frames_in, frames_trimmed=cap.stats.trimmed, frames_rejected=cap.stats.rejected,
+                              frames_playback_unmatched=cap.stats.playback_unmatched)
             turn_trace.start(trace)  # the worker is one long-lived task: each turn simply replaces the previous trace
             recorded = False
+            end_state, end_reason = PROCESSED, ""
+            retry = False
             try:
-                async for chunk in rt.conversation.stream_turn(pcm, rate):
+                rt.conversation.current_turn_id = f"u{u.id}g{u.gen}"
+                async for chunk in rt.conversation.stream_turn(u.pcm, rate):
+                    if chunk.heard:
+                        heard_seen = True
+                    if st["live_gen"] != u.gen:                       # a newer caller utterance / barge-in superseded this turn
+                        m.AI_STALE_REJECTED.labels("reply").inc()
+                        rt.conversation.cancel()
+                        break
                     if rt.conversation.cancelled:
                         break
-                    if first and (chunk.timings_ms or chunk.heard or chunk.reply):
+                    # Phase A: caller utterance transcribed (before Brain & TTS start)
+                    if chunk.heard and not stt_recorded and not chunk.reply:
+                        await ai.record_user_utterance(rt, chunk.heard, chunk.timings_ms.get("stt", 0.0))
+                        stt_recorded = True
+
+                    # Phase B: assistant reply ready (timings / first chunk)
+                    if not turn_recorded and (chunk.audio or chunk.reply):
                         chunk.timings_ms["turn_ms"] = round((time.perf_counter() - t_turn) * 1000, 1)
                         if not chunk.error:
                             m.AI_TURN_SECONDS.observe(chunk.timings_ms["turn_ms"] / 1000)
                         await ai.record_turn(rt, chunk.timings_ms, heard=chunk.heard, reply=chunk.reply, trace_id=trace.trace_id)
                         recorded = True
-                        first = False
+                        turn_recorded = True
                     if chunk.error and chunk.error != "cancelled":
                         m.AI_TURN_ERRORS.labels(chunk.error[:40]).inc()
                         ai.note_error(rt, chunk.error)
-                        if not rt.conversation.cancelled:
-                            await io.error(chunk.error)
+                        if chunk.error in STT_RETRYABLE and u.retries < 1 and not heard_seen:
+                            retry = True                              # one bounded retry; the audio is still ours
+                        else:
+                            end_state, end_reason = (FAILED, chunk.error[:40]) if not heard_seen else (PROCESSED, "")
+                            if not rt.conversation.cancelled:
+                                await io.error(chunk.error)
                         break
                     if chunk.audio and not rt.conversation.cancelled:
                         st["uid"] += 1
-                        await play(chunk.audio, chunk.sample_rate, chunk.language, st["uid"])
+                        await play(chunk.audio, chunk.sample_rate, chunk.language, st["uid"], u.gen)
+                if not heard_seen and not retry and end_state == PROCESSED and rt.conversation.cancelled:
+                    end_state, end_reason = CANCELLED, "cancelled_before_transcript"
             except asyncio.CancelledError:
+                end_state, end_reason = CANCELLED, "worker_cancelled"
                 raise
             except Exception:  # defence in depth: the worker must outlive any single failed turn
                 log.exception("conversation worker error")
                 m.AI_TURN_ERRORS.labels("worker_exception").inc()
                 ai.note_error(rt, "worker_exception")
+                end_state, end_reason = FAILED, "worker_exception"
                 continue
             finally:
+                st["busy"] = False
+                if retry:
+                    u.retries += 1
+                    queue.requeue_front(u)
+                    m.AI_QUEUE_EVENTS.labels("stt_retry").inc()
+                    wake.set()
+                else:
+                    queue.finish(u, end_state, end_reason)
+                    m.AI_UTTERANCES.labels(u.state).inc()
                 if recorded:
-                    trace.mark("t_turn_end")
+                    trace.mark("t_turn_end")   # lifecycle 3: the last audio was handed to the transport (NOT yet heard)
+                    if st["play_until"] > time.monotonic():   # lifecycle 4, EXPECTED (not observed): when the queued audio will have finished playing
+                        trace.mark("t_playback_end_expected", at=st["play_until"])
                     try:
                         final_reply = rt.conversation.turns[-1]["reply"] if rt.conversation.turns else None
                         await ai.finalize_turn(rt, trace.trace_id, trace.to_ms(), reply=final_reply)
                     except Exception:  # latency bookkeeping must never take the call down
                         log.exception("could not store turn latency trace")
 
-    async def flush_if_due() -> None:
-        if st["in_speech"] and (st["silence_ms"] >= silence_ms or len(st["buf"]) >= rate * 2 * MAX_UTTERANCE_MS // 1000):
-            utt = bytes(st["buf"])
-            t_endpoint = time.monotonic()
-            t_speech_end = st["last_loud_at"] or t_endpoint
-            st.update(buf=bytearray(), in_speech=False, speech_ms=0, silence_ms=0)
-            if utterances.full():  # backpressure: drop the oldest queued utterance
-                utterances.get_nowait()
+    async def enqueue(pcm: bytes, speech_ms: int, t_speech_end: float, t_endpoint: float) -> None:
+        st["gen"] += 1
+        u = Utterance(queue.new_id(), st["gen"], pcm, t_speech_end, t_endpoint, time.monotonic(), speech_ms)
+        st["live_gen"] = u.gen                       # every older turn is now stale
+        if st["busy"]:
+            invalidate("newer_utterance")
+        for kind, item in queue.put(u):
+            m.AI_QUEUE_EVENTS.labels(kind).inc()
+            if kind == "rejected":
+                m.AI_UTTERANCES.labels(REJECTED).inc()
+                log.warning("inbound queue full: utterance %d rejected (reason=%s)", item.id, item.reason)
                 await io.error("inbound_overflow")
-            utterances.put_nowait((utt, t_speech_end, t_endpoint))
+        m.AI_QUEUE_DEPTH.set(len(queue))
+        wake.set()
+
+    async def absorb(events) -> None:
+        nonlocal cont_speech
+        for ev in events:
+            if ev.kind == "barge":
+                m.AI_BARGE_IN.inc()
+                log.info("barge-in: caller speech over assistant audio")
+                st["live_gen"] = -1
+                invalidate("barge_in")
+                st["playing"] = False
+                st["play_until"] = 0.0
+                await io.interrupt()
+            elif ev.kind == "rejected":
+                m.AI_CAPTURE_REJECTED.labels(ev.reason).inc()
+                log.info("captured audio rejected: reason=%s", ev.reason)
+            elif ev.kind == "segment":
+                seg = ev.segment
+                cont.extend(seg.pcm)
+                cont_speech += seg.speech_ms
+                ceiling = rate * 2 * queue.max_merged_ms // 1000 - rate * 2   # keep one second of headroom below the merge ceiling
+                if not seg.continues or len(cont) >= ceiling:
+                    pcm, sp = bytes(cont), cont_speech
+                    cont.clear()
+                    cont_speech = 0
+                    if pcm:
+                        await enqueue(pcm, sp, seg.t_speech_end, seg.t_endpoint)
+        sync_stats()
 
     async def next_item():
         if hasattr(io, "next_item"):
@@ -325,62 +481,21 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 except ValueError:
                     pass
                 continue
+            now = time.monotonic()
+            if st["playing"] and now >= st["play_until"]:
+                st["playing"] = False
             if kind == "idle":
-                now = time.monotonic()
-                if st["playing"] and now >= st["play_until"]:
-                    st["playing"] = False
-                if st["in_speech"]:
-                    st["silence_ms"] += val
-                    await flush_if_due()
+                await absorb(cap.idle_tick(val, now))
                 continue
             if kind != "audio":
                 continue
             frame = val
             fm = max(1, len(frame) * 500 // rate)  # real duration of this frame at `rate` (16-bit mono)
-            now = time.monotonic()
-            is_playing = st["playing"] and (now < st["play_until"])
-            if not is_playing:
-                st["playing"] = False
-
-            frame_rms = rms(frame)
-
-            if is_playing:
-                # Assistant is playing audio to the caller.
-                # Inbound audio is speaker echo + line noise, UNLESS caller deliberately talks over.
-                barge_threshold = max(vad_rms * BARGE_IN_RMS_MULTIPLIER, BARGE_IN_VAD_RMS)
-                if frame_rms >= barge_threshold:
-                    st["last_loud_at"] = now
-                    st["speech_ms"] += fm
-                    st["silence_ms"] = 0
-                    if st["speech_ms"] >= BARGE_IN_MS:
-                        log.info("barge-in triggered: rms=%.1f >= %.1f for %dms", frame_rms, barge_threshold, st["speech_ms"])
-                        rt.conversation.cancel()
-                        st["playing"] = False
-                        st["play_until"] = 0.0
-                        await io.interrupt()
-                        st["in_speech"] = True
-                        st["buf"] = bytearray(frame)
-                else:
-                    st["speech_ms"] = 0
-                    st["silence_ms"] += fm
-            else:
-                # Assistant is quiet, listening to the caller.
-                loud = frame_rms >= vad_rms
-                if loud:
-                    st["last_loud_at"] = now
-                    st["speech_ms"] += fm
-                    st["silence_ms"] = 0
-                    if st["speech_ms"] >= MIN_SPEECH_MS or st["in_speech"]:
-                        st["in_speech"] = True
-                else:
-                    st["silence_ms"] += fm
-                    if not st["in_speech"]:
-                        st["speech_ms"] = 0
-
-                if st["in_speech"]:
-                    st["buf"] += frame
-                    await flush_if_due()
+            is_playing = st["playing"] and now < st["play_until"]
+            await absorb(cap.feed(frame, fm, rms(frame), now, is_playing))
     finally:
+        cap.reset()
+        sync_stats()
         # Bounded: a worker that does not honour cancellation must never keep the socket handler (and the call) alive.
         pending = set(local)
         for wait_s in (WORKER_STOP_S, WORKER_STOP_S / 2):
@@ -391,6 +506,9 @@ async def serve_loop(ws: WebSocket, ai, rt, io, rate: int, frame_ms: int, *, vad
                 break
         if pending:
             log.error("conversation worker did not stop after cancellation; abandoning it so the socket handler can end")
+        for dropped in queue.cancel_all("call_ended"):
+            m.AI_UTTERANCES.labels(CANCELLED).inc()
+        m.AI_QUEUE_DEPTH.set(0)
 
 
 # ---------------------------------------------------------------------------------- native protocol
@@ -432,7 +550,15 @@ async def handle_media(ws: WebSocket, app, session_id: str, *, vad_rms: float = 
         rt.ws = ws
         await ai.media_connected(rt, {"sample_rate": rate, "frame_ms": frame_ms})
         await send({"type": "ready"})
-        await serve_loop(ws, ai, rt, NativeIO(ws, rate, frame_ms, realtime), rate, frame_ms, vad_rms=vad_rms, silence_ms=silence_ms)
+        eff_silence = getattr(s, "ai_silence_ms", silence_ms)
+        eff_short_silence = getattr(s, "ai_silence_short_ms", SHORT_SILENCE_MS)
+        eff_pre_roll = getattr(s, "ai_vad_pre_roll_ms", PRE_ROLL_MS)
+        eff_max_utt = getattr(s, "ai_max_utterance_ms", MAX_UTTERANCE_MS)
+        await serve_loop(ws, ai, rt, NativeIO(ws, rate, frame_ms, realtime), rate, frame_ms,
+                         vad_rms=vad_rms, silence_ms=eff_silence, short_silence_ms=eff_short_silence,
+                         pre_roll_ms=eff_pre_roll, max_utterance_ms=eff_max_utt,
+                         min_valid_ms=getattr(s, "ai_vad_min_valid_ms", MIN_VALID_MS), queue_max=getattr(s, "ai_queue_max", QUEUE_MAX),
+                         queue_expire_s=getattr(s, "ai_queue_expire_s", QUEUE_EXPIRE_S))
     except WebSocketDisconnect:
         if rt:
             await ai.media_disconnected(rt)
@@ -474,7 +600,15 @@ async def handle_fs_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, silen
         rt.ws = ws
         await ai.media_connected(rt, {"sample_rate": rate, "frame_ms": 20, "flavor": "mod_audio_stream"})
         io = FsIO(ws, app.state.controller.esl_cmd, call["fs_uuid"], rt)
-        await serve_loop(ws, ai, rt, io, rate, 20, vad_rms=vad_rms, silence_ms=silence_ms)
+        eff_silence = getattr(s, "ai_silence_ms", silence_ms)
+        eff_short_silence = getattr(s, "ai_silence_short_ms", SHORT_SILENCE_MS)
+        eff_pre_roll = getattr(s, "ai_vad_pre_roll_ms", PRE_ROLL_MS)
+        eff_max_utt = getattr(s, "ai_max_utterance_ms", MAX_UTTERANCE_MS)
+        await serve_loop(ws, ai, rt, io, rate, 20,
+                         vad_rms=vad_rms, silence_ms=eff_silence, short_silence_ms=eff_short_silence,
+                         pre_roll_ms=eff_pre_roll, max_utterance_ms=eff_max_utt,
+                         min_valid_ms=getattr(s, "ai_vad_min_valid_ms", MIN_VALID_MS), queue_max=getattr(s, "ai_queue_max", QUEUE_MAX),
+                         queue_expire_s=getattr(s, "ai_queue_expire_s", QUEUE_EXPIRE_S))
     except WebSocketDisconnect:
         if rt:
             await ai.media_disconnected(rt)
@@ -593,6 +727,11 @@ async def handle_plivo_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, si
             log.warning("plivo stream start rejected: call %s not found or not answered", call_id)
             return await ws.close(code=1008)
 
+        if call.get("ai_outbound") and t is None:  # outbound AI calls never open a stream without the signed ticket
+            reason = "bad_ticket"
+            log.warning("plivo stream start rejected: outbound AI call needs a ticket")
+            return await ws.close(code=1008)
+
         if t and (call["tenant_id"] != t.tenant_id or call.get("session_id") != t.session_id):
             reason = "session_mismatch"
             log.warning("plivo stream start rejected: ticket does not match call session")
@@ -624,7 +763,15 @@ async def handle_plivo_media(ws: WebSocket, app, *, vad_rms: float = VAD_RMS, si
         await repos.add_event(call, "stream.connected", "plivo", f"stream:{stream_id}:connected", {})
         m.PLIVO_STREAMS.labels("connected").inc()
         io = PlivoIO(ws, stream_id)
-        end = await serve_loop(ws, ai, rt, io, codec.MULAW_RATE, 20, vad_rms=vad_rms, silence_ms=silence_ms)
+        eff_silence = getattr(s, "ai_silence_ms", silence_ms)
+        eff_short_silence = getattr(s, "ai_silence_short_ms", SHORT_SILENCE_MS)
+        eff_pre_roll = getattr(s, "ai_vad_pre_roll_ms", PRE_ROLL_MS)
+        eff_max_utt = getattr(s, "ai_max_utterance_ms", MAX_UTTERANCE_MS)
+        end = await serve_loop(ws, ai, rt, io, codec.MULAW_RATE, 20,
+                               vad_rms=vad_rms, silence_ms=eff_silence, short_silence_ms=eff_short_silence,
+                               pre_roll_ms=eff_pre_roll, max_utterance_ms=eff_max_utt,
+                         min_valid_ms=getattr(s, "ai_vad_min_valid_ms", MIN_VALID_MS), queue_max=getattr(s, "ai_queue_max", QUEUE_MAX),
+                         queue_expire_s=getattr(s, "ai_queue_expire_s", QUEUE_EXPIRE_S))
         reason = end or "stream_ended"
     except WebSocketDisconnect:
         reason = "ws_disconnected"

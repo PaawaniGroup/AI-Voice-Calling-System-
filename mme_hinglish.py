@@ -166,7 +166,27 @@ _roman_to_mixed_base = roman_to_mixed
 
 
 def roman_to_mixed(text: str) -> str:
-    """Roman Hindi words -> Devanagari. Context rules for "main": after baare/andar/... it is the typo for में; before course/campus/... it stays English."""
-    t = re.sub(r"\b(" + "|".join(_POSTPOSITION_BEFORE) + r")(\s+)main\b", r"\1\2mein", text, flags=re.I)
+    """Roman Hindi words -> Devanagari.
+    Protects proper education terms (JEE Main, JEE Mains, B.Tech, IELTS, TOEFL) so they
+    are never incorrectly transliterated into Hindi pronouns (e.g. 'JEE मैं').
+    Context rules for 'main': after baare/andar/... it is the typo for में; before course/campus/... it stays English.
+    """
+    saved_terms: dict[str, str] = {}
+
+    def _protect(m: re.Match) -> str:
+        tok = f"___PROT_{len(saved_terms)}___"
+        saved_terms[tok] = m.group(0)
+        return tok
+
+    # Protect JEE Main / JEE Mains (case-insensitive)
+    t = re.sub(r"\bJEE\s+Mains?\b", _protect, text, flags=re.I)
+    # Protect B.Tech, IELTS, TOEFL
+    t = re.sub(r"\b(?:B\.?Tech|IELTS|TOEFL)\b", _protect, t, flags=re.I)
+    # Context rules for standalone "main"
+    t = re.sub(r"\b(" + "|".join(_POSTPOSITION_BEFORE) + r")(\s+)main\b", r"\1\2mein", t, flags=re.I)
     t = re.sub(r"\bmain(?=\s+(?:" + "|".join(_ENGLISH_AFTER_MAIN) + r")\b)", "MAINENGLISH", t, flags=re.I)
-    return _roman_to_mixed_base(t).replace("MAINENGLISH", "main")
+
+    out = _roman_to_mixed_base(t).replace("MAINENGLISH", "main")
+    for placeholder, original in saved_terms.items():
+        out = out.replace(placeholder, original)
+    return out

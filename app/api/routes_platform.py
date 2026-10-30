@@ -181,10 +181,17 @@ async def call_session(request: Request, call_id: str, p: Principal = Depends(re
 # ================================================================== transcripts / recording / summary
 @router.get("/calls/{call_id}/transcript")
 async def transcript(request: Request, call_id: str, p: Principal = Depends(require_user)):
-    if not await request.app.state.repos.get_call(call_id, p.tenant_id):
+    call = await request.app.state.repos.get_call(call_id, p.tenant_id)
+    if not call:
         raise NotFound("call not found")
-    raise NotFound("no transcript is stored for this call: transcripts are produced only by an AI session, "
-                   "and persistence of transcripts is not implemented (consent/retention policy pending)", code="transcript_not_available")
+    store_words = bool(getattr(request.app.state.settings, "ai_store_transcripts", False))
+    if not store_words:
+        raise NotFound("no transcript is stored for this call: transcripts are produced only by an AI session, "
+                       "and persistence of transcripts is not implemented (consent/retention policy pending)", code="transcript_not_available")
+    sess = await request.app.state.db["ai_sessions"].find_one({"call_id": call_id, "tenant_id": p.tenant_id})
+    if not sess or not sess.get("transcript"):
+        return {"call_id": call_id, "turns": 0, "transcript": []}
+    return {"call_id": call_id, "turns": len(sess.get("transcript", [])), "transcript": sess.get("transcript", [])}
 
 
 @router.get("/calls/{call_id}/summary")
@@ -356,6 +363,8 @@ class AiConfigIn(Strict):
     models: dict[str, str] | None = None
     timeouts: dict[str, float] | None = None
     paths: dict[str, str] | None = None
+    tts_overlap: bool | None = None   # synthesize clauses in the background while the LLM streams (off by default)
+    tts_stream: bool | None = None    # play TTS audio chunk by chunk as the worker produces it (off by default; needs a streaming worker)
 
 
 @router.get("/ai/config")

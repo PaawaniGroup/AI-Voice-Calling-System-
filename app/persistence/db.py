@@ -117,6 +117,7 @@ class Database:
             [("endpoint_id", ASCENDING), ("event_id", ASCENDING)], name="uniq_event", unique=True)
         await self["webhook_deliveries"].create_index([("tenant_id", ASCENDING), ("created_at", DESCENDING)], name="tenant")
         await self["webhook_deliveries"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)
+        await self["usage_counters"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)   # additive: daily outbound-AI quota counters
         await self["provider_dedup"].create_index([("key", ASCENDING)], name="key", unique=True)
         await self["provider_dedup"].create_index([("purge_at", ASCENDING)], name="purge_ttl", expireAfterSeconds=0)
         await self["sessions"].create_index([("tenant_id", ASCENDING), ("call_ref", ASCENDING)], name="uniq_call_ref", unique=True,
