@@ -101,6 +101,8 @@ class PolicyIn(Strict):
     deny_prefixes: list[str] = Field(default_factory=list, max_length=200)
     allow_prefixes: list[str] = Field(default_factory=list, max_length=200)
     caller_ids: list[str] = Field(default_factory=list, max_length=50)
+    allowed_callers: list[str] = Field(default_factory=list, max_length=50,
+                                       description="Inbound Plivo calls: when non-empty, ONLY these caller numbers are answered; everyone else is rejected before a call exists.")
     transfer_destinations: list[str] = Field(default_factory=list, max_length=200)
     recording: Literal["on", "off"] = "off"
 

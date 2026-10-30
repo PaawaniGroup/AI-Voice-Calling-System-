@@ -34,6 +34,7 @@ def fingerprint(payload: dict[str, Any]) -> str:
 class Repos:
     def __init__(self, db: Database, settings: Settings):
         self.db, self.s = db, settings
+        self.activity = None  # ActivityBus, set by the app factory: live dashboard feed (never affects call handling)
 
     # ---------------------------------------------------------------- idempotency
     async def claim_idempotency(self, tenant_id: str, operation: str, key: str, fp: str, call_id: str) -> dict | None:
@@ -208,9 +209,11 @@ class Repos:
         }
         try:
             await self.db["call_events"].insert_one(doc)
-            return True
         except DuplicateKeyError:
             return False
+        if self.activity is not None:  # only genuinely new events reach the live feed (duplicates are not re-announced)
+            self.activity.publish(call["tenant_id"], etype, call_id=call["_id"], data={"source": source, **(payload or {})})
+        return True
 
     async def list_events(self, call_id: str, tenant_id: str, limit: int = 500) -> list[dict]:
         return await self.db["call_events"].find({"call_id": call_id, "tenant_id": tenant_id}).sort("ts", 1).limit(limit).to_list(limit)

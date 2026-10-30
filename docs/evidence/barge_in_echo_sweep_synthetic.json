@@ -1,0 +1,183 @@
+{
+ "sweep": [
+  {
+   "stat": "max",
+   "ratio": 0.0,
+   "false_echo_-6dB": 20.67,
+   "false_echo_-10dB": 18.0,
+   "false_echo_-14dB": 2.0,
+   "heard_quiet_line": 1.0,
+   "latency_quiet_ms": 340,
+   "heard_with_echo_-10dB": 0.7,
+   "false_in_S5": 14.67
+  },
+  {
+   "stat": "max",
+   "ratio": 0.2,
+   "false_echo_-6dB": 18.67,
+   "false_echo_-10dB": 12.67,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.96,
+   "latency_quiet_ms": 340,
+   "heard_with_echo_-10dB": 0.65,
+   "false_in_S5": 8.67
+  },
+  {
+   "stat": "max",
+   "ratio": 0.3,
+   "false_echo_-6dB": 12.67,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.91,
+   "latency_quiet_ms": 500,
+   "heard_with_echo_-10dB": 0.96,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "max",
+   "ratio": 0.4,
+   "false_echo_-6dB": 1.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.78,
+   "latency_quiet_ms": 580,
+   "heard_with_echo_-10dB": 0.78,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "max",
+   "ratio": 0.5,
+   "false_echo_-6dB": 0.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.48,
+   "latency_quiet_ms": 580,
+   "heard_with_echo_-10dB": 0.52,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "max",
+   "ratio": 0.6,
+   "false_echo_-6dB": 0.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.22,
+   "latency_quiet_ms": 380,
+   "heard_with_echo_-10dB": 0.39,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "max",
+   "ratio": 0.8,
+   "false_echo_-6dB": 0.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.13,
+   "latency_quiet_ms": 900,
+   "heard_with_echo_-10dB": 0.22,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "max",
+   "ratio": 1.0,
+   "false_echo_-6dB": 0.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.13,
+   "latency_quiet_ms": 920,
+   "heard_with_echo_-10dB": 0.13,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.0,
+   "false_echo_-6dB": 20.67,
+   "false_echo_-10dB": 18.0,
+   "false_echo_-14dB": 2.0,
+   "heard_quiet_line": 1.0,
+   "latency_quiet_ms": 340,
+   "heard_with_echo_-10dB": 0.7,
+   "false_in_S5": 14.67
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.2,
+   "false_echo_-6dB": 20.67,
+   "false_echo_-10dB": 18.0,
+   "false_echo_-14dB": 2.0,
+   "heard_quiet_line": 1.0,
+   "latency_quiet_ms": 340,
+   "heard_with_echo_-10dB": 0.7,
+   "false_in_S5": 14.67
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.3,
+   "false_echo_-6dB": 20.67,
+   "false_echo_-10dB": 17.33,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 1.0,
+   "latency_quiet_ms": 340,
+   "heard_with_echo_-10dB": 0.74,
+   "false_in_S5": 13.67
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.4,
+   "false_echo_-6dB": 20.33,
+   "false_echo_-10dB": 10.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.96,
+   "latency_quiet_ms": 340,
+   "heard_with_echo_-10dB": 0.78,
+   "false_in_S5": 7.0
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.5,
+   "false_echo_-6dB": 18.0,
+   "false_echo_-10dB": 2.33,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.96,
+   "latency_quiet_ms": 400,
+   "heard_with_echo_-10dB": 0.91,
+   "false_in_S5": 1.33
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.6,
+   "false_echo_-6dB": 12.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.91,
+   "latency_quiet_ms": 420,
+   "heard_with_echo_-10dB": 1.0,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "mean",
+   "ratio": 0.8,
+   "false_echo_-6dB": 1.33,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.87,
+   "latency_quiet_ms": 520,
+   "heard_with_echo_-10dB": 0.83,
+   "false_in_S5": 0.0
+  },
+  {
+   "stat": "mean",
+   "ratio": 1.0,
+   "false_echo_-6dB": 0.0,
+   "false_echo_-10dB": 0.0,
+   "false_echo_-14dB": 0.0,
+   "heard_quiet_line": 0.57,
+   "latency_quiet_ms": 640,
+   "heard_with_echo_-10dB": 0.61,
+   "false_in_S5": 0.0
+  }
+ ],
+ "minutes": 3.0,
+ "seed": 7,
+ "note": "synthetic caller audio; levels are assumptions"
+}

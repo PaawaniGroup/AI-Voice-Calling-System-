@@ -29,7 +29,7 @@ def decode_token(token: str, s: Settings) -> Principal:
         raise Unauthorized("authentication not configured", code="auth_not_configured")
     opts = {"require": ["exp", "sub"], "verify_aud": bool(s.jwt_audience), "verify_iss": bool(s.jwt_issuer)}
     try:
-        claims = jwt.decode(token, secret, algorithms=[s.jwt_algorithm], options=opts,
+        claims = jwt.decode(token, secret, algorithms=[s.jwt_algorithm], options=opts, leeway=s.jwt_leeway_s,
                             audience=s.jwt_audience or None, issuer=s.jwt_issuer or None)
     except jwt.PyJWTError:
         raise Unauthorized("invalid or expired token") from None

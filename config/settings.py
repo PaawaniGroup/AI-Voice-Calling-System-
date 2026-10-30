@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     jwt_algorithm: Literal["HS256"] = F("HS256", "JWT algorithm.")
     jwt_issuer: str = F("", "Expected 'iss' claim; empty disables the check.")
     jwt_audience: str = F("", "Expected 'aud' claim; empty disables the check.")
+    jwt_leeway_s: int = F(0, "Clock-skew tolerance in seconds applied to exp/nbf/iat when verifying tokens. Default 0 (strict). Raise only for a "
+                             "host whose clock is known to step (a WSL2 dev machine flips by about 52 s, so 60) or an issuer whose clock differs; "
+                             "it extends the validity of an expired token by that many seconds, so never more than a few minutes.", ge=0, le=300)
     jwt_tenant_claim: str = F("tenant_id", "Claim carrying the tenant id.")
     jwt_roles_claim: str = F("roles", "Claim carrying the role list.")
     role_admin: str = F("telephony:admin", "Role granting tenant-admin operations.")
@@ -207,6 +210,16 @@ class Settings(BaseSettings):
     ai_stt_model: str = F("Oriserve/Whisper-Hindi2Hinglish-Prime", "STT model identifier (informational; the model server owns the weights).")
     ai_brain_model: str = F("Qwen3-30B-A3B-Instruct-2507", "Brain/LLM model identifier.")
     ai_tts_model: str = F("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "TTS model identifier.")
+    ai_tts_reference_wav: str = F("", "Path to the reference voice WAV sent to RunPod TTS workers (voice cloning; the worker rejects requests without one).")
+    ai_tts_normalize: bool = F(True, "Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence.")
+    ai_trace_evidence_path: str = F("", "File to which each finished turn appends ONE numbers-only JSON line (job timings, counts; never words). Empty = off. Used for supervised latency calls.")
+    ai_greeting: str = F("Welcome to MME AI Voice Calling Agent.", "Greeting spoken when an inbound call answers before connecting to AI services.")
+    ai_script_enforcement: bool = F(False, "Enforce script policy: Hindi/Hinglish in Devanagari, English in Latin. Default False.")
+    ai_counsellor_gender: Literal["masculine", "feminine"] = F("masculine", "Gender for Hindi verb forms in counsellor replies ('masculine' or 'feminine').")
+    ai_counsellor_name: str = F("MME AI counsellor", "Counsellor name used in system prompt.")
+    ai_temperature: float = F(0.3, "Sampling temperature for Brain replies (default 0.3).", ge=0.0, le=2.0)
+    ai_script_allowlist_path: str = F("config/script_allowlist_terms.txt", "Path to editable allow-listed English terms file.")
+    ai_hint_placement: Literal["user_suffix", "system_message"] = F("user_suffix", "Placement for per-turn mode hint.")
 
     @property
     def is_prod_like(self) -> bool:

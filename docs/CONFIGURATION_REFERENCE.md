@@ -16,6 +16,7 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_AI_BRAIN_MODEL` | str | no | 'Qwen3-30B-A3B-Instruct-2507' | no | - | yes | all | Brain/LLM model identifier. |
 | `MME_TEL_AI_ENABLED` | bool | no | False | no | - | yes | all | Global AI switch. Default off. Even when true, an AI session only starts when the media bridge is ready. |
 | `MME_TEL_AI_FS_AUTOSTART` | bool | no | False | no | - | yes | all | Start the AI conversation automatically when a FreeSWITCH-delivered INBOUND call whose route action is 'ai' is answered. Requires AI_ENABLED and AI_MEDIA_BRIDGE=ws_fork. Replaces the prototype's MME_FS_MEDIA_ENABLED media service: never run both against the same FreeSWITCH. |
+| `MME_TEL_AI_GREETING` | str | no | 'Welcome to MME AI Voice Calling Agent.' | no | - | yes | all | Greeting spoken when an inbound call answers before connecting to AI services. |
 | `MME_TEL_AI_MAX_CONCURRENCY` | int | no | 4 | no | ge=1, le=64 | yes | all | Max concurrent model requests per process. |
 | `MME_TEL_AI_MEDIA_BRIDGE` | enum | no | 'none' | no | one of 'none', 'ws_fork' | yes | all | Media bridge implementation. 'none' = not available (default). 'ws_fork' needs a FreeSWITCH media-fork module that is NOT installed on the audited host. |
 | `MME_TEL_AI_MEDIA_SAMPLE_RATE` | enum | no | 16000 | no | one of 8000, 16000 | yes | all | Sample rate requested from the media module. |
@@ -24,6 +25,8 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_AI_REQUEST_TIMEOUT_S` | float | no | 15.0 | no | gt=0, le=120 | yes | all | Default timeout for model service requests. |
 | `MME_TEL_AI_STT_MODEL` | str | no | 'Oriserve/Whisper-Hindi2Hinglish-Prime' | no | - | yes | all | STT model identifier (informational; the model server owns the weights). |
 | `MME_TEL_AI_TTS_MODEL` | str | no | 'Qwen/Qwen3-TTS-12Hz-1.7B-Base' | no | - | yes | all | TTS model identifier. |
+| `MME_TEL_AI_TTS_NORMALIZE` | bool | no | True | no | - | yes | all | Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence. |
+| `MME_TEL_AI_TTS_REFERENCE_WAV` | str | no | `""` | no | - | yes | all | Path to the reference voice WAV sent to RunPod TTS workers (voice cloning; the worker rejects requests without one). |
 ## API/runtime
 
 | Variable | Type | Required | Default | Secret | Valid range / values | Restart | Env | Purpose |
@@ -48,6 +51,7 @@ Non-secret policy: `config/telephony.yaml`. Provider structure: `config/provider
 | `MME_TEL_JWT_ALGORITHM` | enum | no | 'HS256' | no | one of 'HS256' | yes | all | JWT algorithm. |
 | `MME_TEL_JWT_AUDIENCE` | str | no | `""` | no | - | yes | all | Expected 'aud' claim; empty disables the check. |
 | `MME_TEL_JWT_ISSUER` | str | no | `""` | no | - | yes | all | Expected 'iss' claim; empty disables the check. |
+| `MME_TEL_JWT_LEEWAY_S` | int | no | 0 | no | ge=0, le=300 | yes | all | Clock-skew tolerance in seconds applied to exp/nbf/iat when verifying tokens. Default 0 (strict). Raise only for a host whose clock is known to step (a WSL2 dev machine flips by about 52 s, so 60) or an issuer whose clock differs; it extends the validity of an expired token by that many seconds, so never more than a few minutes. |
 | `MME_TEL_JWT_ROLES_CLAIM` | str | no | 'roles' | no | - | yes | all | Claim carrying the role list. |
 | `MME_TEL_JWT_SECRET` | pydantic.types.SecretStr | prod | (secret) | **yes** | - | yes | all | HS256 verification secret shared with MME identity (secret). Required. |
 | `MME_TEL_JWT_TENANT_CLAIM` | str | no | 'tenant_id' | no | - | yes | all | Claim carrying the tenant id. |

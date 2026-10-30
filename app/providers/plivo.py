@@ -69,9 +69,9 @@ def stream_wss_url(s: Settings) -> str:
 def verify_ws_signature(s: Settings, *, nonce: str, signature: str, query: str = "") -> bool:
     """Validate Plivo's handshake signature for the media WebSocket (method GET over the public URL).
 
-    The SDK's `validate_v3_signature` only accepts http(s) URIs, while the URL Plivo connects to is `wss://`. The HMAC
-    primitive is the SDK's own (`get_signature_v3`); we try the wss:// form and its https:// twin, both built from config.
-    UNVERIFIED against a real Plivo handshake (which of the two Plivo signs is not stated in its reference).
+    The SDK's `validate_v3_signature` computes HMAC-SHA256 (`get_signature_v3`). In live Plivo audio streams,
+    Plivo signs the handshake using the `http://` scheme for the stream URL, but we also check https://,
+    wss://, and ws:// with and without query parameters to guarantee compatibility.
     """
     import hmac
 
@@ -80,8 +80,21 @@ def verify_ws_signature(s: Settings, *, nonce: str, signature: str, query: str =
     token = s.plivo_auth_token.get_secret_value()
     if not (token and nonce and signature) or len(signature) > 512 or len(nonce) > 256:
         return False
-    wss = stream_wss_url(s) + (f"?{query}" if query else "")
-    candidates = [wss, "https://" + wss[len("wss://"):]]
+    wss = stream_wss_url(s)
+    raw = wss[len("wss://"):]
+    candidates = [
+        f"http://{raw}",
+        f"https://{raw}",
+        f"wss://{raw}",
+        f"ws://{raw}",
+    ]
+    if query:
+        candidates.extend([
+            f"http://{raw}?{query}",
+            f"https://{raw}?{query}",
+            f"wss://{raw}?{query}",
+            f"ws://{raw}?{query}",
+        ])
     offered = [x.strip() for x in signature.split(",") if x.strip()]
     for uri in candidates:
         try:

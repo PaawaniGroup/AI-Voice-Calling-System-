@@ -69,6 +69,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(base, default=str)
 
 
+FORCED_WARNING_LOGGERS = ("httpx", "httpcore", "uvicorn.access")
+
+
 def setup_logging(level: str = "INFO", fmt: str = "json", service: str = "mme-telephony", env: str = "development") -> None:
     root = logging.getLogger()
     for h in list(root.handlers):
@@ -80,8 +83,8 @@ def setup_logging(level: str = "INFO", fmt: str = "json", service: str = "mme-te
     )
     root.addHandler(h)
     root.setLevel(level)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    for name in FORCED_WARNING_LOGGERS:       # whatever LOG_LEVEL is: HTTP client debug output carries request headers (the Authorization key) and sizes
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 class RingHandler(logging.Handler):

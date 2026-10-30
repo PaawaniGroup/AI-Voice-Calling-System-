@@ -1,5 +1,6 @@
 """Test helpers: in-loop real HTTP/WebSocket server and mock model services (MOCKS: only ever used in tests)."""
 import asyncio
+import base64
 import contextlib
 import io
 import json
@@ -57,14 +58,75 @@ class MockModels:
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
         self.stt_delay = 0.0
+        self.brain_delay = 0.0
+        self.tts_delay = 0.0
+        self.cancelled: list[str] = []  # services whose in-flight request was cancelled (the client gave up)
+        self.jobs: dict[str, dict] = {}        # RunPod-style serverless jobs (POST /run -> GET /status/{id} -> POST /cancel/{id})
+        self.cancel_calls: list[str] = []      # service of each job the client explicitly cancelled with /cancel
         self.healthy = {"stt", "brain", "tts", "rag"}
         self.reply = "Namaste! BTech ke liye eligibility 12th mein 50% hai."
+        self.reply_queue: list[str] = []   # replies handed out first (one per Brain request) before `reply` is used again
+        self.tts_worker = "v3"                 # RunPod-style TTS worker generation (see _tts_output)
+        self.tts_voices = {"utkarsh", "priya"}  # voices the v3 worker "has baked"
+        self.tts_error: str | None = None      # when set, the RunPod-style TTS worker answers {"error": ...}
+        self.brain_sse = False  # True: answer stream=true Brain requests as a server-sent-event token stream
+        self.stt_text = "mujhe BTech ke baare mein batao"
         self.tts_ms = 300
         self.fail: dict[str, int] = {}  # service name -> HTTP status to answer with (failure injection)
         self.bad: dict[str, bytes] = {}  # service name -> body returned with HTTP 200 (malformed-response injection)
 
+    def _next_reply(self) -> str:
+        return self.reply_queue.pop(0) if self.reply_queue else self.reply
+
+    def _tts_output(self, inp: dict) -> dict:
+        """MOCK of the TTS worker. `tts_worker`: "v2" (WAV only: refuses output_format ulaw8k like handler (5)) or "v3" (voices by name, ulaw8k)."""
+        if self.tts_error:
+            return {"error": self.tts_error}
+        if inp.get("output_format") == "ulaw8k":
+            if self.tts_worker != "v3":
+                return {"error": "output_format must be 'wav' or 'pcm16'"}
+            import audioop
+            voice = inp.get("voice", "utkarsh")
+            if voice not in self.tts_voices:
+                return {"error": f"Unknown voice: {voice!r}", "voices": sorted(self.tts_voices)}
+            ulaw = audioop.lin2ulaw(pcm_tone(self.tts_ms, 8000), 2)
+            return {"audio_base64": base64.b64encode(ulaw).decode(), "format": "ulaw8k", "sample_rate": 8000, "voice": voice}
+        return {"audio_base64": base64.b64encode(tone_wav(self.tts_ms)).decode(), "format": "wav"}
+
+    def _runpod(self, request: httpx.Request, host_path: str) -> httpx.Response:
+        svc = request.url.host.split(".")[0]          # stt.test / brain.test / tts.test
+        now = asyncio.get_event_loop().time()
+        if host_path.endswith("/run") and request.method == "POST":
+            body = json.loads(request.content or b"{}")
+            self.calls.append((svc, {"auth": request.headers.get("authorization"), **body}))
+            jid = f"job-{len(self.jobs) + 1}"
+            self.jobs[jid] = {"svc": svc, "ready_at": now + getattr(self, f"{svc}_delay", 0.0), "cancelled": False, "input": body.get("input") or {}}
+            return httpx.Response(200, json={"id": jid, "status": "IN_QUEUE"})
+        jid = host_path.rsplit("/", 1)[-1]
+        job = self.jobs.get(jid)
+        if job is None:
+            return httpx.Response(404)
+        if "/cancel/" in host_path:
+            job["cancelled"] = True
+            self.cancel_calls.append(job["svc"])
+            return httpx.Response(200, json={"id": jid, "status": "CANCELLED"})
+        if job["cancelled"]:
+            return httpx.Response(200, json={"id": jid, "status": "CANCELLED"})
+        if now < job["ready_at"]:
+            return httpx.Response(200, json={"id": jid, "status": "IN_PROGRESS"})
+        out = {"stt": {"transcription": self.stt_text, "language": "hi"},
+               "brain": [{"choices": [{"message": {"content": self._next_reply()}}]}],
+               "tts": self._tts_output(job["input"])}[job["svc"]]
+        return httpx.Response(200, json={"id": jid, "status": "COMPLETED", "delayTime": 5, "executionTime": 7, "output": out})
+
     async def handler(self, request: httpx.Request) -> httpx.Response:
         host_path = request.url.path
+        if host_path.startswith("/v2/") and (host_path.endswith("/run") or "/status/" in host_path or "/cancel/" in host_path):
+            return self._runpod(request, host_path)
+        if "/openai/v1/" in host_path:   # RunPod's OpenAI-compatible route of a vLLM endpoint: /v2/<id>/openai/v1/...
+            host_path = "/v1/" + host_path.split("/openai/v1/", 1)[1]
+            if host_path == "/v1/models":
+                return httpx.Response(200, json={"data": [{"id": "Qwen3-30B-A3B-Instruct-2507"}]})
         svc = {"/v1/audio/transcriptions": "stt", "/v1/chat/completions": "brain", "/v1/audio/speech": "tts", "/search": "rag"}.get(host_path)
         if host_path == "/health":
             name = request.url.host.split(".")[0]
@@ -77,11 +139,21 @@ class MockModels:
             return httpx.Response(self.fail[svc])
         if svc in self.bad:
             return httpx.Response(200, content=self.bad[svc], headers={"content-type": "application/json" if svc != "tts" else "audio/wav"})
+        if svc in ("stt", "brain", "tts") and getattr(self, f"{svc}_delay"):
+            try:
+                await asyncio.sleep(getattr(self, f"{svc}_delay"))
+            except asyncio.CancelledError:
+                self.cancelled.append(svc)
+                raise
         if svc == "stt":
-            await asyncio.sleep(self.stt_delay)
-            return httpx.Response(200, json={"text": "mujhe BTech ke baare mein batao", "language": "hi"})
+            return httpx.Response(200, json={"text": self.stt_text, "language": "hi"})
         if svc == "brain":
-            return httpx.Response(200, json={"choices": [{"message": {"content": self.reply}}]})
+            if self.brain_sse and body.get("stream"):   # OpenAI-style token stream (3 characters per event) instead of one JSON body
+                text = self._next_reply()
+                events = [{"choices": [{"delta": {"content": text[i:i + 3]}}]} for i in range(0, len(text), 3)]
+                sse = "".join(f"data: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events) + "data: [DONE]\n\n"
+                return httpx.Response(200, content=sse.encode("utf-8"), headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json={"choices": [{"message": {"content": self._next_reply()}}]})
         if svc == "tts":
             return httpx.Response(200, content=tone_wav(self.tts_ms), headers={"content-type": "audio/wav"})
         if svc == "rag":

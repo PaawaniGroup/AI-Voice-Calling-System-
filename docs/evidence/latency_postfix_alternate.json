@@ -1,0 +1,538 @@
+{
+  "started_at": "2026-10-24T12:54:28.595270+00:00",
+  "tag": "postfix-alternate",
+  "path": "legacy",
+  "turns": 2,
+  "errors": {
+    "brain_budget": 1
+  },
+  "runpod_mode": "alternate",
+  "mode_per_turn": [
+    "run",
+    "runsync"
+  ],
+  "by_mode_turns_2plus": {
+    "run": {
+      "turns": 0,
+      "post_endpoint_v2v": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "stt": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "llm_first_token": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "tts_first_chunk": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      }
+    },
+    "runsync": {
+      "turns": 1,
+      "post_endpoint_v2v": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "stt": {
+        "n": 1,
+        "p50": 2339.7,
+        "p95": 2339.7,
+        "min": 2339.7,
+        "max": 2339.7
+      },
+      "llm_first_token": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "tts_first_chunk": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      }
+    }
+  },
+  "clip_s": 4.0,
+  "idle_s": 0.0,
+  "halted": "budget cap $0.50 reached (estimated $0.1859 spent + idle tails + cold-start reserve)",
+  "endpoints": {
+    "stt": "ua9l3gus6qjnmg",
+    "brain": "hu8qhrvlxbv314",
+    "tts": "93tqgnxb5dyhvx"
+  },
+  "all": {
+    "llm_first_token": {
+      "n": 1,
+      "p50": 137527.0,
+      "p95": 137527.0,
+      "min": 137527.0,
+      "max": 137527.0
+    },
+    "post_endpoint_v2v": {
+      "n": 1,
+      "p50": 265139.6,
+      "p95": 265139.6,
+      "min": 265139.6,
+      "max": 265139.6
+    },
+    "runpod_brain_delay": {
+      "n": 1,
+      "p50": 135675.0,
+      "p95": 135675.0,
+      "min": 135675.0,
+      "max": 135675.0
+    },
+    "runpod_brain_exec": {
+      "n": 1,
+      "p50": 646.0,
+      "p95": 646.0,
+      "min": 646.0,
+      "max": 646.0
+    },
+    "runpod_stt_delay": {
+      "n": 2,
+      "p50": 15907.0,
+      "p95": 30103.6,
+      "min": 133.0,
+      "max": 31681.0
+    },
+    "runpod_stt_exec": {
+      "n": 2,
+      "p50": 1021.5,
+      "p95": 1149.8,
+      "min": 879.0,
+      "max": 1164.0
+    },
+    "runpod_tts_delay": {
+      "n": 1,
+      "p50": 90175.0,
+      "p95": 90175.0,
+      "min": 90175.0,
+      "max": 90175.0
+    },
+    "runpod_tts_exec": {
+      "n": 1,
+      "p50": 2155.0,
+      "p95": 2155.0,
+      "min": 2155.0,
+      "max": 2155.0
+    },
+    "stt": {
+      "n": 2,
+      "p50": 17996.9,
+      "p95": 32088.4,
+      "min": 2339.7,
+      "max": 33654.1
+    },
+    "tts_first_chunk": {
+      "n": 1,
+      "p50": 93951.5,
+      "p95": 93951.5,
+      "min": 93951.5,
+      "max": 93951.5
+    },
+    "turn_total": {
+      "n": 2,
+      "p50": 133753.8,
+      "p95": 252022.3,
+      "min": 2344.3,
+      "max": 265163.3
+    }
+  },
+  "first_turn": {
+    "stt": 33654.1,
+    "llm_first_token": 137527.0,
+    "tts_first_chunk": 93951.5,
+    "post_endpoint_v2v": 265139.6,
+    "turn_total": 265163.3,
+    "runpod_stt_delay": 31681.0,
+    "runpod_stt_exec": 879.0,
+    "runpod_brain_delay": 135675.0,
+    "runpod_brain_exec": 646.0,
+    "runpod_tts_delay": 90175.0,
+    "runpod_tts_exec": 2155.0
+  },
+  "warm_turns_2plus": {
+    "llm_first_token": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "post_endpoint_v2v": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "runpod_brain_delay": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "runpod_brain_exec": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "runpod_stt_delay": {
+      "n": 1,
+      "p50": 133.0,
+      "p95": 133.0,
+      "min": 133.0,
+      "max": 133.0
+    },
+    "runpod_stt_exec": {
+      "n": 1,
+      "p50": 1164.0,
+      "p95": 1164.0,
+      "min": 1164.0,
+      "max": 1164.0
+    },
+    "runpod_tts_delay": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "runpod_tts_exec": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "stt": {
+      "n": 1,
+      "p50": 2339.7,
+      "p95": 2339.7,
+      "min": 2339.7,
+      "max": 2339.7
+    },
+    "tts_first_chunk": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "min": null,
+      "max": null
+    },
+    "turn_total": {
+      "n": 1,
+      "p50": 2344.3,
+      "p95": 2344.3,
+      "min": 2344.3,
+      "max": 2344.3
+    }
+  },
+  "stage_split_all": {
+    "stt": {
+      "calls": 2,
+      "delay_ms": {
+        "n": 2,
+        "p50": 15907.0,
+        "p95": 30103.6,
+        "min": 133.0,
+        "max": 31681.0
+      },
+      "exec_ms": {
+        "n": 2,
+        "p50": 1021.5,
+        "p95": 1149.8,
+        "min": 879.0,
+        "max": 1164.0
+      },
+      "client_ms": {
+        "n": 2,
+        "p50": 17996.7,
+        "p95": 32088.1,
+        "min": 2339.5,
+        "max": 33653.8
+      },
+      "sum_delay_s": 31.81,
+      "sum_exec_s": 2.04,
+      "delay_share_of_service": 0.94,
+      "share_of_all_runpod_time": 0.129
+    },
+    "brain": {
+      "calls": 1,
+      "delay_ms": {
+        "n": 1,
+        "p50": 135675.0,
+        "p95": 135675.0,
+        "min": 135675.0,
+        "max": 135675.0
+      },
+      "exec_ms": {
+        "n": 1,
+        "p50": 646.0,
+        "p95": 646.0,
+        "min": 646.0,
+        "max": 646.0
+      },
+      "client_ms": {
+        "n": 1,
+        "p50": 137524.6,
+        "p95": 137524.6,
+        "min": 137524.6,
+        "max": 137524.6
+      },
+      "sum_delay_s": 135.68,
+      "sum_exec_s": 0.65,
+      "delay_share_of_service": 0.995,
+      "share_of_all_runpod_time": 0.519
+    },
+    "tts": {
+      "calls": 1,
+      "delay_ms": {
+        "n": 1,
+        "p50": 90175.0,
+        "p95": 90175.0,
+        "min": 90175.0,
+        "max": 90175.0
+      },
+      "exec_ms": {
+        "n": 1,
+        "p50": 2155.0,
+        "p95": 2155.0,
+        "min": 2155.0,
+        "max": 2155.0
+      },
+      "client_ms": {
+        "n": 1,
+        "p50": 93950.5,
+        "p95": 93950.5,
+        "min": 93950.5,
+        "max": 93950.5
+      },
+      "sum_delay_s": 90.17,
+      "sum_exec_s": 2.15,
+      "delay_share_of_service": 0.977,
+      "share_of_all_runpod_time": 0.352
+    }
+  },
+  "stage_split_turns_2plus": {
+    "stt": {
+      "calls": 1,
+      "delay_ms": {
+        "n": 1,
+        "p50": 133.0,
+        "p95": 133.0,
+        "min": 133.0,
+        "max": 133.0
+      },
+      "exec_ms": {
+        "n": 1,
+        "p50": 1164.0,
+        "p95": 1164.0,
+        "min": 1164.0,
+        "max": 1164.0
+      },
+      "client_ms": {
+        "n": 1,
+        "p50": 2339.5,
+        "p95": 2339.5,
+        "min": 2339.5,
+        "max": 2339.5
+      },
+      "sum_delay_s": 0.13,
+      "sum_exec_s": 1.16,
+      "delay_share_of_service": 0.103,
+      "share_of_all_runpod_time": 0.995
+    },
+    "brain": {
+      "calls": 0,
+      "delay_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "exec_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "client_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "sum_delay_s": 0.0,
+      "sum_exec_s": 0.0,
+      "delay_share_of_service": null,
+      "share_of_all_runpod_time": 0.0
+    },
+    "tts": {
+      "calls": 0,
+      "delay_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "exec_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "client_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "sum_delay_s": 0.0,
+      "sum_exec_s": 0.0,
+      "delay_share_of_service": null,
+      "share_of_all_runpod_time": 0.0
+    }
+  },
+  "cost": {
+    "per_service": {
+      "stt": {
+        "job_s": 33.86,
+        "idle_s": 231.51,
+        "tail_s": 300.0,
+        "usd": 0.2171
+      },
+      "brain": {
+        "job_s": 136.32,
+        "idle_s": 0.0,
+        "tail_s": 300.0,
+        "usd": 0.21205
+      },
+      "tts": {
+        "job_s": 92.33,
+        "idle_s": 0.0,
+        "tail_s": 300.0,
+        "usd": 0.07533
+      }
+    },
+    "usd_estimated_total": 0.50448,
+    "budget_usd": 0.5,
+    "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+  },
+  "calls": [
+    {
+      "service": "stt",
+      "turn": 0,
+      "role": "turn",
+      "request_id": "04c6c8c5-e0e1-42b9-82df-e6c2d97d3129-e1",
+      "delay_ms": 31681.0,
+      "exec_ms": 879.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 33653.8,
+      "cold_delay": true,
+      "cold_inferred": false,
+      "cold": true
+    },
+    {
+      "service": "brain",
+      "turn": 0,
+      "role": "turn",
+      "request_id": "ba3f21df-02ac-4f7b-8d81-b82ddeda8f2b-e2",
+      "delay_ms": 135675.0,
+      "exec_ms": 646.0,
+      "prompt_tokens": 131,
+      "completion_tokens": 17,
+      "error": null,
+      "client_ms": 137524.6,
+      "cold_delay": true,
+      "cold_inferred": false,
+      "cold": true
+    },
+    {
+      "service": "tts",
+      "turn": 0,
+      "role": "turn",
+      "request_id": "e8add1f8-f8b1-4973-9f8e-789e75e1d815-e2",
+      "delay_ms": 90175.0,
+      "exec_ms": 2155.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 93950.5,
+      "cold_delay": true,
+      "cold_inferred": false,
+      "cold": true
+    },
+    {
+      "service": "stt",
+      "turn": 1,
+      "role": "turn",
+      "request_id": "sync-b185affc-2436-4d0c-9287-06e18eaad710-e2",
+      "delay_ms": 133.0,
+      "exec_ms": 1164.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "error": null,
+      "client_ms": 2339.5,
+      "cold_delay": false,
+      "cold_inferred": false,
+      "cold": false
+    }
+  ],
+  "per_turn": [
+    {
+      "stt": 33654.1,
+      "llm_first_token": 137527.0,
+      "tts_first_chunk": 93951.5,
+      "post_endpoint_v2v": 265139.6,
+      "turn_total": 265163.3,
+      "runpod_stt_delay": 31681.0,
+      "runpod_stt_exec": 879.0,
+      "runpod_brain_delay": 135675.0,
+      "runpod_brain_exec": 646.0,
+      "runpod_tts_delay": 90175.0,
+      "runpod_tts_exec": 2155.0
+    },
+    {
+      "stt": 2339.7,
+      "turn_total": 2344.3,
+      "runpod_stt_delay": 133.0,
+      "runpod_stt_exec": 1164.0
+    }
+  ],
+  "note": "post_endpoint_v2v excludes the end-of-speech silence window and the Plivo hop; see the script docstring"
+}

@@ -131,6 +131,7 @@ class WebhookWorker:
     def __init__(self, db: Database, s: Settings):
         self.db, self.s = db, s
         self._sem = asyncio.Semaphore(s.webhook_concurrency)
+        self.activity = None  # ActivityBus (live dashboard feed), set by the app factory
         self._task: asyncio.Task | None = None
         self._http: httpx.AsyncClient | None = None
         self._stop = False
@@ -224,6 +225,9 @@ class WebhookWorker:
                 upd["next_attempt_at"] = utcnow() + timedelta(seconds=delay)
                 m.WEBHOOK_DELIVERIES.labels("retry").inc()
             await self.db["webhook_deliveries"].update_one({"_id": d["_id"]}, {"$set": upd, "$push": {"attempts": attempt}})
+            if self.activity is not None:
+                self.activity.publish(d["tenant_id"], f"webhook.{upd['status']}", call_id=(d.get("payload", {}).get("data") or {}).get("call_id"),
+                                      data={"event": d.get("event_type"), "attempt": n, "http": status_code, "error": err})
 
     async def replay(self, delivery_id: str, tenant_id: str) -> bool:
         """Safe replay: resets the same delivery (same event id => consumers dedupe via Idempotency-Key)."""

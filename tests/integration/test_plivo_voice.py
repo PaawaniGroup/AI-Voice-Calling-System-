@@ -527,6 +527,33 @@ async def test_full_turn_caller_audio_to_stt_brain_tts_and_playaudio_back(pv):
     await ws.close()
 
 
+async def test_turn_latency_trace_is_stored_with_voice_to_voice(pv):
+    """Step 0: every turn record carries the monotonic-relative trace; voice_to_voice == first Plivo frame - speech end."""
+    a = await answered_stream(pv, call_uuid="TRACE-1")
+    ws = await connect(pv, a)
+    await until(lambda: _active(pv, a.sid))
+    await send_media(ws, utterance())
+    await recv_until(ws, lambda m: m.get("event") == "checkpoint")
+
+    async def traced():
+        d = await ai_doc(pv, a.sid)
+        e = (d.get("transcript") or [None])[0]
+        return e if e and "t_turn_end" in e["timings_ms"] else None
+    entry = await until(traced)
+    assert entry, "turn trace was not finalized"
+    tm = entry["timings_ms"]
+    order = ["t_speech_end", "t_endpoint", "t_stt_sent", "t_stt_final", "t_llm_sent", "t_llm_first_token", "t_llm_first_clause",
+             "t_tts_sent", "t_tts_first_chunk", "t_first_frame_to_plivo", "t_turn_end"]
+    assert all(k in tm for k in order), sorted(tm)
+    vals = [tm[k] for k in order]
+    assert vals == sorted(vals) and tm["t_speech_end"] == 0
+    assert tm["voice_to_voice"] == tm["t_first_frame_to_plivo"] > 0
+    assert tm["endpoint_silence_ms"] == 700  # legacy window is logged per turn
+    # the mock model servers are not RunPod: no delayTime/executionTime keys are invented
+    assert not any(k.endswith("_delay_ms") for k in tm)
+    await ws.close()
+
+
 async def test_second_turn_keeps_conversation_context(pv):
     a = await answered_stream(pv, call_uuid="TURN-2")
     ws = await connect(pv, a)

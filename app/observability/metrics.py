@@ -43,6 +43,18 @@ PLIVO_STREAMS_ACTIVE = Gauge("mme_tel_plivo_streams_active", "Open Plivo media s
 AI_TURN_SECONDS = Histogram("mme_tel_ai_turn_seconds", "End of caller speech -> reply audio ready (STT+RAG+Brain+TTS)", registry=REGISTRY,
                             buckets=(0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 13, 20, 30))
 AI_TURN_ERRORS = Counter("mme_tel_ai_turn_errors_total", "AI turns that produced no audio", ["code"], registry=REGISTRY)
+AI_TURNS_CANCELLED = Counter("mme_tel_ai_turns_cancelled_total", "Turns cancelled because the caller spoke again (barge_in, merged, superseded)",
+                             ["reason"], registry=REGISTRY)
+STREAM_TURNS = Counter("mme_tel_stream_turns_total", "Token-streaming turns by outcome", ["outcome"], registry=REGISTRY)
+STREAM_FIRST_FRAME = Histogram("mme_tel_stream_first_frame_seconds", "Streaming turn: LLM request start -> first audio frame written", registry=REGISTRY,
+                               buckets=(0.5, 1, 2, 3, 4, 5, 6, 8, 10, 15, 30))
+STREAM_UNDERRUNS = Counter("mme_tel_stream_underruns_total", "Playout underruns (the next clause was not ready when the far end ran dry)", registry=REGISTRY)
+STREAM_GAP_SECONDS = Histogram("mme_tel_stream_gap_seconds", "Length of each playout underrun gap", registry=REGISTRY,
+                               buckets=(0.1, 0.25, 0.5, 1, 2, 3, 5, 8))
+STREAM_TTS_RTF = Histogram("mme_tel_stream_tts_rtf", "TTS wall time / audio length per clause (client side, includes dispatch)", registry=REGISTRY,
+                           buckets=(0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3))
+STREAM_BARGE_SILENCE = Histogram("mme_tel_stream_barge_in_to_last_frame_seconds", "Interruption -> last audio frame sent", registry=REGISTRY,
+                                 buckets=(0.005, 0.02, 0.05, 0.1, 0.25, 0.5, 1))
 AI_RUNTIMES = Gauge("mme_tel_ai_runtimes", "AI conversations holding resources in this process", registry=REGISTRY)
 DRAINING = Gauge("mme_tel_draining", "1 while the service is draining for shutdown", registry=REGISTRY)
 RECOVERY = Counter("mme_tel_recovery_total", "Startup recovery actions", ["action"], registry=REGISTRY)

@@ -121,21 +121,24 @@ def test_policy_file_loads():
     assert load_policy_file(ROOT / "nonexistent.yaml") == {}
 
 
-def run_validate(env: dict, *args):
+def run_validate(env: dict, *args, cwd=None):
+    """cwd: Settings reads `.env` from the CURRENT directory, so a hermetic caller passes an empty temp directory (the developer's real .env is then ignored)."""
     import os
     e = {k: v for k, v in os.environ.items() if not k.startswith("MME_TEL_")}
     e.update(env)
     return subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "validate_config.py"), *args], capture_output=True,
-                          text=True, env=e, cwd=str(ROOT.parent) if False else str(ROOT), timeout=60)
+                          text=True, env=e, cwd=str(cwd or ROOT), timeout=60)
 
 
 def test_validate_config_script_exit_codes(tmp_path):
-    ok = run_validate({"PYTHONPATH": str(ROOT)})
+    """Hermetic: no MME_TEL_* variable from the caller's environment and no .env file (cwd is an empty temp dir), so a developer's local .env cannot change the result."""
+    assert not (tmp_path / ".env").exists()
+    ok = run_validate({"PYTHONPATH": str(ROOT)}, cwd=tmp_path)
     assert ok.returncode == 0 and "config OK" in ok.stdout
-    strict = run_validate({"PYTHONPATH": str(ROOT)}, "--strict")
+    strict = run_validate({"PYTHONPATH": str(ROOT)}, "--strict", cwd=tmp_path)
     assert strict.returncode == 1  # dev defaults produce warnings
-    bad = run_validate({"PYTHONPATH": str(ROOT), "MME_TEL_ENV": "production", "MME_TEL_JWT_SECRET": "topsecret-value-123"})
+    bad = run_validate({"PYTHONPATH": str(ROOT), "MME_TEL_ENV": "production", "MME_TEL_JWT_SECRET": "topsecret-value-123"}, cwd=tmp_path)
     assert bad.returncode == 1 and "MONGO_URI" in bad.stdout + bad.stderr
     assert "topsecret-value-123" not in bad.stdout + bad.stderr  # secrets never echoed
-    garbage = run_validate({"PYTHONPATH": str(ROOT), "MME_TEL_BIND_PORT": "notanumber"})
+    garbage = run_validate({"PYTHONPATH": str(ROOT), "MME_TEL_BIND_PORT": "notanumber"}, cwd=tmp_path)
     assert garbage.returncode == 1 and "BIND_PORT" in garbage.stdout

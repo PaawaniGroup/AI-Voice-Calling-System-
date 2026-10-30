@@ -23,6 +23,63 @@ const t = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 const dur = (s) => (s == null ? '—' : s >= 60 ? Math.floor(s / 60) + 'm ' + Math.round(s % 60) + 's' : Math.round(s) + 's');
 const isRole = (r) => me && (r === 'viewer' || (r === 'operator' && (me.operator || me.admin)) || (r === 'admin' && me.admin));
 
+// Accepts the legacy flat keys (stt_ms ...) and the stored `timings_ms` of a turn (stt, brain, tts, turn_ms, voice_to_voice, <svc>_delay_ms ...).
+function normTim(x) {
+  if (!x) return null;
+  const tm = x.timings_ms || x.timings || x;
+  const pick = (...ks) => { for (const k of ks) if (tm[k] != null) return tm[k]; return null; };
+  return { stt_ms: pick('stt_ms', 'stt'), brain_ms: pick('brain_ms', 'brain'), tts_ms: pick('tts_ms', 'tts'), turn_ms: pick('turn_ms'),
+    voice_to_voice: pick('voice_to_voice'), stt_delay_ms: pick('stt_delay_ms'), stt_exec_ms: pick('stt_exec_ms'),
+    brain_delay_ms: pick('brain_delay_ms'), brain_exec_ms: pick('brain_exec_ms'), tts_delay_ms: pick('tts_delay_ms'), tts_exec_ms: pick('tts_exec_ms') };
+}
+
+function latencyStrip(raw) {
+  const timings = normTim(raw);
+  if (!timings || (timings.stt_ms == null && timings.brain_ms == null && timings.tts_ms == null && timings.turn_ms == null && timings.voice_to_voice == null)) return null;
+  const f = (n) => (n != null ? Math.round(n) + ' ms' : '—');
+  const rp = (svc) => (timings[svc + '_delay_ms'] != null || timings[svc + '_exec_ms'] != null)
+    ? h('span', { class: 'lat-rp', title: 'RunPod ' + svc.toUpperCase() + ': delayTime (queue + cold start) / executionTime (compute)' },
+      ' (q ' + f(timings[svc + '_delay_ms']) + ' / run ' + f(timings[svc + '_exec_ms']) + ')') : null;
+  return h('div', { class: 'latency-strip' },
+    timings.voice_to_voice != null ? h('span', { class: 'lat-badge lat-v2v', title: 'Voice-to-voice: caller stopped speaking -> first audio frame sent to Plivo' }, '🗣️→🔊 ', h('span', { class: 'lat-val' }, f(timings.voice_to_voice))) : null,
+    timings.voice_to_voice != null ? h('span', { class: 'lat-arrow' }, '|') : null,
+    h('span', { class: 'lat-badge lat-stt', title: 'Whisper STT processing latency' }, '🎙️ STT ', h('span', { class: 'lat-val' }, f(timings.stt_ms)), rp('stt')),
+    h('span', { class: 'lat-arrow' }, '→'),
+    h('span', { class: 'lat-badge lat-brain', title: 'Qwen Brain / LLM generation latency' }, '🧠 Brain ', h('span', { class: 'lat-val' }, f(timings.brain_ms)), rp('brain')),
+    h('span', { class: 'lat-arrow' }, '→'),
+    h('span', { class: 'lat-badge lat-tts', title: 'Chatterbox TTS synthesis latency' }, '🔊 TTS ', h('span', { class: 'lat-val' }, f(timings.tts_ms)), rp('tts')),
+    h('span', { class: 'lat-arrow' }, '='),
+    h('span', { class: 'lat-badge lat-total', title: 'Total end-to-end turn turnaround latency' }, '⚡ Turn ', h('span', { class: 'lat-val' }, f(timings.turn_ms)))
+  );
+}
+
+function renderTranscript(transcript, lastExchange, isLive = false) {
+  const turns = (transcript && Array.isArray(transcript) && transcript.length) ? transcript : (lastExchange ? [lastExchange] : []);
+  if (!turns.length) {
+    return h('div', { class: 'card' },
+      h('p', { class: 'muted' }, isLive ? 'Waiting for caller to speak… (Conversation turns will appear here live)' : 'No message exchange recorded for this call.')
+    );
+  }
+  return h('div', { class: 'transcript-card' }, turns.map((ex, idx) => {
+    const turnNum = ex.turn != null ? ex.turn : idx + 1;
+    const tim = normTim(ex);
+    return h('div', { class: 'exchange-turn' },
+      h('div', { class: 'exchange-header' },
+        h('span', { class: 'mono' }, `Turn #${turnNum}${ex.at ? ' · ' + t(ex.at) : ''}`),
+        latencyStrip(tim)
+      ),
+      h('div', { class: 'bubble bubble-user' },
+        h('span', { class: 'bubble-sender' }, '👤 Caller / Student'),
+        h('span', { class: 'bubble-text' }, ex.heard || '—')
+      ),
+      h('div', { class: 'bubble bubble-ai' },
+        h('span', { class: 'bubble-sender' }, '🤖 MME AI Counsellor'),
+        h('span', { class: 'bubble-text' }, ex.reply || '—')
+      )
+    );
+  }));
+}
+
 async function api(path, opts = {}) {
   const headers = { Accept: 'application/json', ...(opts.headers || {}) };
   if (token) headers.Authorization = 'Bearer ' + token;
@@ -67,7 +124,7 @@ $('#login-form').addEventListener('submit', async (ev) => {
 $('#logout').addEventListener('click', logout);
 window.addEventListener('hashchange', route);
 
-const pages = { overview, live, call: callDetail, sessions, session: sessionDetail, controls, recordings, ai: aiPage, logs, users };
+const pages = { overview, ops, live, call: callDetail, sessions, session: sessionDetail, controls, recordings, ai: aiPage, logs, users };
 let renderSeq = 0;
 function route() {
   if (!me) return;
@@ -159,37 +216,254 @@ async function live(main) {
   } catch (e) { if (!ctl.signal.aborted) startPolling(); }
 }
 
+// ---------------------------------------------------------------- live operations (every flow, live)
+const STAGE_ICON = { done: '✓', active: '●', failed: '✕', waiting: '○', skipped: '–' };
+function flowChips(flow) {
+  return h('div', { class: 'chips' }, flow.stages.map((s) => h('div', { class: 'chip ' + s.status, title: [s.label, s.status, s.at ? t(s.at) : null, s.detail].filter(Boolean).join(' · ') },
+    h('span', { class: 'ico' }, STAGE_ICON[s.status] || '?'), h('span', {}, s.label),
+    s.detail && (s.status === 'active' || s.status === 'failed' || s.key === 'ai') ? h('small', {}, s.detail) : null)));
+}
+function spark(values, w = 200, hgt = 34) {
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${hgt}`); svg.setAttribute('width', w); svg.setAttribute('height', hgt); svg.setAttribute('class', 'spark');
+  if (values.length > 1) {
+    const max = Math.max(1, ...values);
+    const pl = document.createElementNS(ns, 'polyline');
+    pl.setAttribute('points', values.map((v, i) => `${(i / (values.length - 1) * (w - 2) + 1).toFixed(1)},${(hgt - 2 - (v / max) * (hgt - 4)).toFixed(1)}`).join(' '));
+    pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', 'currentColor'); pl.setAttribute('stroke-width', '1.5'); svg.append(pl);
+  }
+  return svg;
+}
+const GROUPS = [['edge', 'Entry'], ['telephony', 'Telephony'], ['core', 'Platform'], ['models', 'AI models']];
+const compact = (o) => Object.entries(o || {}).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ').slice(0, 160);
+
+async function ops(main) {
+  const S = { snap: null, feed: [], held: [], paused: false, mode: 'connecting', lost: 0, seq: 0, updated: null, hist: { calls: [], ai: [] }, showEnded: true };
+  const badge = h('span', { class: 'pill' }), age = h('span', { class: 'muted' });
+  const q = h('input', { placeholder: 'Filter feed: call id, event, text', oninput: drawFeed });
+  const cat = h('select', { onchange: drawFeed }, ['', 'state', 'session', 'ai', 'media', 'stream', 'webhook', 'transfer', 'recording', 'origination', 'provider'].map((x) => h('option', { value: x }, x || 'All categories')));
+  const lvl = h('select', { onchange: drawFeed }, [['', 'All levels'], ['warn', 'Warnings + errors'], ['error', 'Errors only']].map(([v, l]) => h('option', { value: v }, l)));
+  const pause = h('button', { class: 'ghost', onclick: () => { S.paused = !S.paused; if (!S.paused) { S.feed = [...S.held.reverse(), ...S.feed].slice(0, 300); S.held = []; } drawHead(); drawFeed(); } }, 'Pause feed');
+  const ended = h('input', { type: 'checkbox', checked: true, onchange: () => { S.showEnded = ended.checked; drawFlows(); } });
+  const banner = h('div'), topo = h('div'), kpis = h('div'), sparks = h('div', { class: 'row' }), flows = h('div'), feed = h('div'), errs = h('div');
+  main.replaceChildren(h('h1', {}, 'Live operations'), h('div', { class: 'row' }, badge, age, pause),
+    banner, h('h2', {}, 'System flow'), topo, kpis, sparks,
+    h('h2', {}, 'Calls and their pipeline'), h('label', { class: 'inline' }, ended, ' show recently ended'), flows,
+    h('h2', {}, 'Live event feed'), h('div', { class: 'row' }, q, cat, lvl), feed, errs);
+
+  function drawHead() {
+    badge.textContent = S.mode; badge.className = 'pill ' + (S.mode === 'live' ? 'up' : S.mode === 'polling' ? 'ringing' : 'down');
+    if (S.lost) banner.replaceChildren(h('div', { class: 'banner' }, `${S.lost} event(s) were missed because the feed buffer overflowed; see each call's timeline for the full history.`));
+    else banner.replaceChildren();
+  }
+  function tickAge() { age.textContent = S.updated == null ? 'waiting for data…' : `updated ${Math.round((performance.now() - S.updated) / 1000)} s ago`; }
+  function drawTopo() {
+    const cs = (S.snap && S.snap.components) || [];
+    topo.replaceChildren(h('div', { class: 'topo' }, GROUPS.flatMap(([g, name], i) => [
+      i ? h('div', { class: 'arrow' }, '→') : null,
+      h('div', { class: 'col' }, h('div', { class: 'gl' }, name), cs.filter((c) => c.group === g).map((c) => h('div', { class: 'tile', 'data-key': c.key },
+        h('div', {}, c.label), pill(c.status), c.detail ? h('small', { class: 'muted' }, c.detail) : null)))])));
+  }
+  function drawKpis() {
+    const g = (S.snap && S.snap.gauges) || {}, p = S.snap && S.snap.process, sv = (S.snap && S.snap.service) || {};
+    const sec = (v) => (v == null ? null : v.toFixed(2) + ' s');
+    kpis.replaceChildren(h('div', { class: 'grid' }, stat(g.active_calls, 'Active calls'), stat(g.queued_calls, 'Queued'), stat(g.active_sessions, 'Active sessions'),
+      stat(g.active_ai_sessions, 'AI conversations live'), stat(g.calls_today, 'Calls today (UTC)'), stat(g.completed_today, 'Completed'), stat(g.failed_today, 'Failed'), stat(g.missed_today, 'Missed'),
+      ...(p ? [stat(sec(p.ai_turn_seconds_p50), 'AI turn p50 (process)'), stat(sec(p.ai_turn_seconds_p95), 'AI turn p95 (process)'), stat(p.ai_turns, 'AI turns since start'), stat(p.ai_turn_errors, 'AI turn errors'),
+        stat(p.plivo_streams_active, 'Plivo streams open'), stat(p.esl_reconnects, 'ESL reconnects')] : [])),
+      h('p', { class: 'muted' }, `Service ${sv.name || '—'} ${sv.version || ''} · env ${sv.env || '—'} · real calls ${sv.real_calls_enabled ? 'ENABLED' : 'off'} · AI ${sv.ai_enabled ? 'on' : 'off'}${sv.draining ? ' · DRAINING' : ''}`));
+  }
+  function drawSparks() {
+    sparks.replaceChildren(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Active calls (last ~5 min)'), spark(S.hist.calls)),
+      h('div', { class: 'card' }, h('div', { class: 'muted' }, 'AI conversations live (last ~5 min)'), spark(S.hist.ai)));
+  }
+  function drawFlows() {
+    const rows = ((S.snap && S.snap.flows) || []).filter((f) => f.active || S.showEnded);
+    flows.replaceChildren(...(rows.length ? rows.map((f) => {
+      const liveAi = f.active && f.call.ai_enabled;
+      const ex = f.flow && f.flow.last_exchange;
+      const timings = f.flow && f.flow.ai_timings;
+      return h('div', { class: 'card flow ' + (f.active ? 'live' : 'ended'), onclick: () => { location.hash = '#/call/' + f.call.id; } },
+        h('div', { class: 'row tight' },
+          liveAi ? h('span', { class: 'live-pulse', title: 'Live active call' }) : null,
+          h('span', { class: 'mono' }, f.call.id), pill(f.call.state),
+          h('span', { class: 'muted' }, `${f.call.direction} · ${f.call.provider} · ${f.call.from_number || '—'} → ${f.call.to_number || '—'}`),
+          f.call.ai_enabled ? pill('ai') : null
+        ),
+        flowChips(f.flow),
+        timings ? latencyStrip(timings) : null,
+        ex ? h('div', { class: 'flow-exchange-preview' },
+          h('div', {}, h('b', {}, '👤 Caller: '), ex.heard || '—'),
+          h('div', {}, h('b', {}, '🤖 AI: '), ex.reply || '—')
+        ) : null
+      );
+    }) : [h('p', { class: 'muted' }, 'No calls to show. Calls appear here the moment they are created.')]));
+  }
+  const keep = (e) => (!cat.value || e.category === cat.value) && (!lvl.value || (lvl.value === 'error' ? e.level === 'error' : e.level !== 'info'))
+    && (!q.value || (e.kind + ' ' + (e.call_id || '') + ' ' + (e.session_id || '') + ' ' + compact(e.data)).toLowerCase().includes(q.value.trim().toLowerCase()));
+  function feedDetail(e) {
+    if (e.kind === 'ai.turn' && e.data) {
+      const d = e.data;
+      const tim = normTim(d);
+      return h('div', { class: 'col-gap' },
+        h('div', {},
+          h('b', {}, `Turn ${d.turn != null ? d.turn : ''}: `),
+          h('span', {}, `🗣️ "${d.heard || '—'}" ➔ 🤖 "${d.reply || '—'}"`)
+        ),
+        latencyStrip(tim)
+      );
+    }
+    if (e.kind === 'ai.turn_latency' && e.data) {
+      return latencyStrip(e.data) || h('span', { class: 'muted' }, compact(e.data));
+    }
+    return h('span', { class: 'muted' }, compact(e.data));
+  }
+  function drawFeed() {
+    feed.replaceChildren(table([{ h: 'Time', f: (e) => new Date(e.ts).toLocaleTimeString() }, { h: '', f: (e) => h('span', { class: 'dot ' + e.level, title: e.level }, '●') },
+      { h: 'Event', f: (e) => h('b', {}, e.kind) }, { h: 'Call', f: (e) => e.call_id ? h('a', { href: '#/call/' + e.call_id, class: 'mono' }, e.call_id.slice(0, 14)) : '—' },
+      { h: 'Session', f: (e) => e.session_id ? h('a', { href: '#/session/' + e.session_id, class: 'mono' }, e.session_id.slice(0, 8)) : '—' },
+      { h: 'Detail', f: (e) => feedDetail(e) }], S.feed.filter(keep).slice(0, 150)));
+  }
+  function drawErrors() {
+    const r = S.snap && S.snap.recent_errors;
+    errs.replaceChildren(...(r ? [h('h2', {}, 'Recent warnings and errors (this process, redacted)'), table([{ h: 'Time', f: (x) => x.ts }, { h: 'Level', f: (x) => pill(x.level) }, { h: 'Source', f: (x) => x.logger }, { h: 'Message', f: (x) => x.msg }], r)] : []));
+  }
+  function onSnapshot(s) {
+    S.snap = s; S.updated = performance.now();
+    S.hist.calls.push((s.gauges || {}).active_calls || 0); S.hist.ai.push((s.gauges || {}).active_ai_sessions || 0);
+    for (const k of ['calls', 'ai']) if (S.hist[k].length > 150) S.hist[k].shift();
+    drawHead(); drawTopo(); drawKpis(); drawSparks(); drawFlows(); drawErrors(); tickAge();
+  }
+  function addActivity(items) {
+    if (!items || !items.length) return;
+    for (const e of items) S.seq = Math.max(S.seq, e.seq);
+    if (S.paused) { S.held = [...S.held, ...items].slice(-300); drawHead(); return; }
+    S.feed = [...items.slice().reverse(), ...S.feed].slice(0, 300); drawFeed();
+  }
+  function onBlock(blk) {
+    const ev = (blk.match(/^event: (.*)$/m) || [])[1], dl = blk.split('\n').find((l) => l.startsWith('data: '));
+    if (!ev || !dl) return;
+    const d = JSON.parse(dl.slice(6));
+    if (ev === 'hello') S.seq = d.last_seq;
+    else if (ev === 'backlog') { S.feed = d.slice().reverse(); for (const e of d) S.seq = Math.max(S.seq, e.seq); drawFeed(); }
+    else if (ev === 'activity') { if (d.lost) { S.lost += d.lost; drawHead(); } addActivity(d.items); }
+    else if (ev === 'snapshot') onSnapshot(d);
+  }
+  const ctl = new AbortController(); let poll = null, retry = null, closed = false;
+  const tick = setInterval(tickAge, 1000);
+  stopLive = () => { closed = true; ctl.abort(); clearInterval(poll); clearInterval(tick); clearTimeout(retry); };
+  function startPolling() {
+    if (poll) return;
+    S.mode = 'polling'; drawHead();
+    const go = async () => {
+      try { onSnapshot(await api('/v1/live/snapshot')); const a = await api('/v1/live/activity?after=' + S.seq); if (a.lost) S.lost += a.lost; addActivity(a.items); S.seq = Math.max(S.seq, a.last_seq); } catch (e) { S.mode = 'error: ' + e.message; drawHead(); }
+    };
+    go(); poll = setInterval(go, 3000);
+  }
+  async function connect() {
+    try {
+      const r = await fetch('/v1/live/stream', { headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal });
+      if (!r.ok || !r.body) throw new Error('stream unavailable (' + r.status + ')');
+      clearInterval(poll); poll = null; S.mode = 'live'; drawHead();
+      const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+      for (;;) {
+        const { value, done } = await rd.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i; while ((i = buf.indexOf('\n\n')) >= 0) { const blk = buf.slice(0, i); buf = buf.slice(i + 2); onBlock(blk); }
+      }
+    } catch (e) { /* aborted or dropped */ }
+    if (closed) return;
+    startPolling(); retry = setTimeout(connect, 15000);
+  }
+  drawHead(); drawTopo(); drawKpis(); drawSparks(); drawFlows(); drawFeed(); tickAge();
+  connect();
+}
+
 // ---------------------------------------------------------------- call details
 async function callDetail(main, id) {
-  const [c, ev, rec] = await Promise.all([api('/v1/calls/' + id), safe(api(`/v1/calls/${id}/events`)), safe(api(`/v1/calls/${id}/recordings`))]);
-  const sess = c.session_id ? await safe(api('/v1/sessions/' + c.session_id)) : null;
-  const aiS = c.session_id ? await safe(api('/v1/ai/sessions/' + c.session_id)) : null;
-  const kv = (o) => h('div', { class: 'kv' }, Object.entries(o).flatMap(([k, v]) => [h('div', {}, k), h('div', {}, v == null || v === '' ? '—' : v)]));
+  let timer = null;
+  const ctl = new AbortController();
+  stopLive = () => { ctl.abort(); if (timer) { clearInterval(timer); timer = null; } };
+
   const actions = h('div', { class: 'row' });
-  const live = !['completed', 'failed', 'cancelled', 'busy', 'no_answer'].includes(c.state);
-  if (isRole('operator') && live) {
-    actions.append(h('button', { class: 'danger', onclick: async () => { if (confirm('Hang up this call?')) { await doAct(() => api(`/v1/calls/${id}/hangup`, { method: 'POST' })); } } }, 'Hang up'));
-    if (['answered', 'bridged'].includes(c.state)) actions.append(h('button', { class: 'ghost', onclick: async () => { const d = prompt('Transfer to (E.164, must be an allowed destination):'); if (d && confirm('Transfer call to ' + d + '?')) await doAct(() => api(`/v1/calls/${id}/transfer`, { method: 'POST', body: { destination: d } })); } }, 'Transfer'));
-  }
-  if (isRole('operator') && c.session_id && ['answered', 'bridged'].includes(c.state)) {
-    actions.append(h('button', { class: 'ghost', onclick: () => doAct(() => api(`/v1/ai/sessions/${c.session_id}/start`, { method: 'POST', body: {} })) }, 'Start AI'),
-      h('button', { class: 'ghost', onclick: () => doAct(() => api(`/v1/ai/sessions/${c.session_id}/stop`, { method: 'POST' })) }, 'Stop AI'));
-  }
   const msg = h('p', { class: 'err' });
-  async function doAct(fn) { msg.textContent = ''; try { await fn(); route(); } catch (e) { msg.textContent = e.message; } }
-  main.replaceChildren(h('h1', {}, 'Call ' + c.id), actions, msg,
-    h('div', { class: 'card' }, kv({ State: pill(c.state), Direction: c.direction, Caller: c.from_number, Destination: c.to_number, Provider: c.provider,
-      'FreeSWITCH UUID': c.fs_uuid, 'Provider call id': c.provider_call_id, Created: t(c.created_at), Answered: t(c.answered_at), Ended: t(c.ended_at),
-      'Ring duration': dur(c.ring_duration_s), 'Connected duration': dur(c.connected_duration_s), 'Hangup cause': c.hangup_cause, 'Failure reason': c.failure_reason,
-      Language: c.language, 'AI requested': c.ai_enabled ? 'yes' : 'no', Session: c.session_id ? h('a', { href: '#/session/' + c.session_id }, c.session_id) : '—' })),
-    h('h2', {}, 'AI pipeline'),
-    aiS && !aiS.__error ? h('div', { class: 'card' }, kv({ State: pill(aiS.state), Language: aiS.language, Turns: aiS.turns, 'Last timings (ms)': JSON.stringify(aiS.timings_ms || {}),
-      'Media bridge': `${aiS.media.bridge} — ${aiS.media.bridge_ready ? 'ready' : 'not ready: ' + aiS.media.bridge_reason}`, Error: aiS.error })) : h('p', { class: 'muted' }, aiS ? aiS.__error : 'No session'),
-    h('h2', {}, 'Lifecycle timeline'),
-    ev.__error ? h('p', { class: 'err' }, ev.__error) : h('div', { class: 'card tl' }, ev.items.length ? ev.items.map((e) => h('div', {}, `${t(e.ts)} · `, h('b', {}, e.type), ` · ${e.source}`, e.payload && Object.keys(e.payload).length ? ' · ' + JSON.stringify(e.payload) : '')) : 'No events'),
-    h('h2', {}, 'Recording'), rec.__error ? h('p', { class: 'muted' }, rec.__error) : table([{ h: 'Id', f: (r) => r.id }, { h: 'Status', f: (r) => pill(r.status) }, { h: 'Duration', f: (r) => dur(r.duration_s) }, { h: 'Retention until', f: (r) => t(r.retention_until) },
-      { h: '', f: (r) => isRole('operator') && r.status === 'available' ? h('button', { class: 'ghost', onclick: async () => { try { const u = await api('/v1/recordings/' + r.id + '/download-url'); window.open(u.url, '_blank', 'noopener'); } catch (e) { alert(e.message); } } }, 'Play / download') : '' }], rec.items),
-    h('h2', {}, 'Transcript & summary'), h('p', { class: 'muted' }, 'Not available: transcripts and AI summaries are not stored by this release.'));
+  async function doAct(fn) { msg.textContent = ''; try { await fn(); await loadAndDraw(); } catch (e) { msg.textContent = e.message; } }
+
+  async function loadAndDraw() {
+    const [c, ev, rec, flow] = await Promise.all([
+      api('/v1/calls/' + id, { signal: ctl.signal }),
+      safe(api(`/v1/calls/${id}/events`, { signal: ctl.signal })),
+      safe(api(`/v1/calls/${id}/recordings`, { signal: ctl.signal })),
+      safe(api(`/v1/live/calls/${id}/flow`, { signal: ctl.signal }))
+    ]);
+    const sess = c.session_id ? await safe(api('/v1/sessions/' + c.session_id, { signal: ctl.signal })) : null;
+    const aiS = c.session_id ? await safe(api('/v1/ai/sessions/' + c.session_id, { signal: ctl.signal })) : null;
+    draw(c, ev, rec, flow, sess, aiS);
+
+    const live = !['completed', 'failed', 'cancelled', 'busy', 'no_answer'].includes(c.state);
+    if (live && !timer && !ctl.signal.aborted) {
+      timer = setInterval(loadAndDraw, 2500);
+    } else if (!live && timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  function draw(c, ev, rec, flow, sess, aiS) {
+    const live = !['completed', 'failed', 'cancelled', 'busy', 'no_answer'].includes(c.state);
+    const kv = (o) => h('div', { class: 'kv' }, Object.entries(o).flatMap(([k, v]) => [h('div', {}, k), h('div', {}, v == null || v === '' ? '—' : v)]));
+    actions.replaceChildren();
+    if (isRole('operator') && live) {
+      actions.append(h('button', { class: 'danger', onclick: async () => { if (confirm('Hang up this call?')) { await doAct(() => api(`/v1/calls/${id}/hangup`, { method: 'POST' })); } } }, 'Hang up'));
+      if (['answered', 'bridged'].includes(c.state)) actions.append(h('button', { class: 'ghost', onclick: async () => { const d = prompt('Transfer to (E.164, must be an allowed destination):'); if (d && confirm('Transfer call to ' + d + '?')) await doAct(() => api(`/v1/calls/${id}/transfer`, { method: 'POST', body: { destination: d } })); } }, 'Transfer'));
+    }
+    if (isRole('operator') && c.session_id && ['answered', 'bridged'].includes(c.state)) {
+      if (!aiS || aiS.state !== 'active') {
+        actions.append(h('button', { class: 'ghost', onclick: () => doAct(() => api(`/v1/ai/sessions/${c.session_id}/start`, { method: 'POST', body: {} })) }, 'Start AI'));
+      }
+      if (aiS && aiS.state === 'active') {
+        actions.append(h('button', { class: 'ghost', onclick: () => doAct(() => api(`/v1/ai/sessions/${c.session_id}/stop`, { method: 'POST' })) }, 'Stop AI'));
+      }
+    }
+
+    const timings = (aiS && !aiS.__error && aiS.timings_ms) || (flow && !flow.__error && flow.ai_timings);
+    const transcript = (aiS && !aiS.__error && aiS.transcript) || (flow && !flow.__error && flow.transcript) || [];
+    const lastExchange = (aiS && !aiS.__error && aiS.last_exchange) || (flow && !flow.__error && flow.last_exchange);
+
+    main.replaceChildren(
+      h('h1', {}, live && c.ai_enabled ? h('span', { class: 'live-pulse', title: 'Live active call' }) : null, 'Call ' + c.id),
+      actions, msg,
+      h('div', { class: 'card' }, kv({
+        State: pill(c.state), Direction: c.direction, Caller: c.from_number, Destination: c.to_number, Provider: c.provider,
+        'FreeSWITCH UUID': c.fs_uuid, 'Provider call id': c.provider_call_id, Created: t(c.created_at), Answered: t(c.answered_at), Ended: t(c.ended_at),
+        'Ring duration': dur(c.ring_duration_s), 'Connected duration': dur(c.connected_duration_s), 'Hangup cause': c.hangup_cause, 'Failure reason': c.failure_reason,
+        Language: c.language, 'AI requested': c.ai_enabled ? 'yes' : 'no', Session: c.session_id ? h('a', { href: '#/session/' + c.session_id }, c.session_id) : '—'
+      })),
+      h('h2', {}, 'Flow'), flow.__error ? h('p', { class: 'muted' }, flow.__error) : h('div', { class: 'card' }, flowChips(flow)),
+      h('h2', {}, 'AI Pipeline & Live Model Latencies'),
+      aiS && !aiS.__error ? h('div', { class: 'card' },
+        kv({
+          State: pill(aiS.state),
+          Language: aiS.language,
+          Turns: aiS.turns,
+          'Media bridge': `${aiS.media.bridge} — ${aiS.media.bridge_ready ? 'ready' : 'not ready: ' + aiS.media.bridge_reason}`,
+          Error: aiS.error || '—'
+        }),
+        timings ? h('div', { class: 'lat-box' },
+          h('div', { class: 'muted lat-note' }, 'Latest Request Flow Model Latencies:'),
+          latencyStrip(timings)
+        ) : null
+      ) : h('p', { class: 'muted' }, aiS ? aiS.__error : 'No AI session'),
+      h('h2', {}, 'Conversation Exchange & Transcript', live && c.ai_enabled ? h('span', { class: 'live-pulse', title: 'Live active exchange' }) : null),
+      renderTranscript(transcript, lastExchange, live && c.ai_enabled),
+      h('h2', {}, 'Lifecycle timeline'),
+      ev.__error ? h('p', { class: 'err' }, ev.__error) : h('div', { class: 'card tl' }, ev.items.length ? ev.items.map((e) => h('div', {}, `${t(e.ts)} · `, h('b', {}, e.type), ` · ${e.source}`, e.payload && Object.keys(e.payload).length ? ' · ' + JSON.stringify(e.payload) : '')) : 'No events'),
+      h('h2', {}, 'Recording'), rec.__error ? h('p', { class: 'muted' }, rec.__error) : table([{ h: 'Id', f: (r) => r.id }, { h: 'Status', f: (r) => pill(r.status) }, { h: 'Duration', f: (r) => dur(r.duration_s) }, { h: 'Retention until', f: (r) => t(r.retention_until) },
+        { h: '', f: (r) => isRole('operator') && r.status === 'available' ? h('button', { class: 'ghost', onclick: async () => { try { const u = await api('/v1/recordings/' + r.id + '/download-url'); window.open(u.url, '_blank', 'noopener'); } catch (e) { alert(e.message); } } }, 'Play / download') : '' }], rec.items)
+    );
+  }
+
+  await loadAndDraw();
 }
 
 // ---------------------------------------------------------------- sessions
@@ -204,9 +478,31 @@ async function sessions(main) {
 }
 async function sessionDetail(main, id) {
   const s = await api('/v1/sessions/' + id), a = await safe(api('/v1/ai/sessions/' + id));
-  main.replaceChildren(h('h1', {}, 'Session ' + id), h('div', { class: 'card kv' }, Object.entries({ Status: pill(s.status), Call: s.call_id ? h('a', { href: '#/call/' + s.call_id }, s.call_id) : '—', Tenant: s.tenant_id,
-    Caller: s.caller, Language: s.language, Created: t(s.created_at), Answered: t(s.answered_at), Ended: t(s.ended_at), 'End reason': s.end_reason, 'AI state': a.__error ? a.__error : a.state }).flatMap(([k, v]) => [h('div', {}, k), h('div', {}, v == null || v === '' ? '—' : v)])),
-    h('h2', {}, 'History'), h('div', { class: 'card tl' }, s.history.map((x) => h('div', {}, `${t(x.ts)} · ${x.state} · ${x.source}`))));
+  const timings = a && !a.__error && a.timings_ms;
+  const transcript = a && !a.__error && a.transcript;
+  const lastEx = a && !a.__error && a.last_exchange;
+  main.replaceChildren(
+    h('h1', {}, 'Session ' + id),
+    h('div', { class: 'card kv' }, Object.entries({
+      Status: pill(s.status),
+      Call: s.call_id ? h('a', { href: '#/call/' + s.call_id }, s.call_id) : '—',
+      Tenant: s.tenant_id,
+      Caller: s.caller,
+      Language: s.language,
+      Created: t(s.created_at),
+      Answered: t(s.answered_at),
+      Ended: t(s.ended_at),
+      'End reason': s.end_reason,
+      'AI state': a.__error ? a.__error : a.state,
+      'AI turns': a && !a.__error ? a.turns : '—'
+    }).flatMap(([k, v]) => [h('div', {}, k), h('div', {}, v == null || v === '' ? '—' : v)])),
+    h('h2', {}, 'Live Model Latencies'),
+    timings ? latencyStrip(timings) : h('p', { class: 'muted' }, 'No timing data recorded yet for this session.'),
+    h('h2', {}, 'Conversation Exchange & Transcript'),
+    renderTranscript(transcript, lastEx, s.status === 'active'),
+    h('h2', {}, 'History'),
+    h('div', { class: 'card tl' }, s.history.map((x) => h('div', {}, `${t(x.ts)} · ${x.state} · ${x.source}`)))
+  );
 }
 
 // ---------------------------------------------------------------- call controls
@@ -247,7 +543,7 @@ async function aiPage(main) {
   f.en.checked = !!cfg.enabled; f.lang.value = cfg.default_language;
   const msg = h('p');
   const save = async () => { msg.className = ''; try { await api('/v1/ai/config', { method: 'PUT', body: { stt_url: f.stt.value, brain_url: f.brain.value, tts_url: f.tts.value, rag_url: f.rag.value, enabled: f.en.checked, default_language: f.lang.value } }); msg.textContent = 'Saved (audited).'; route(); } catch (e) { msg.className = 'err'; msg.textContent = `${e.code || ''} ${e.message}`; } };
-  const mb = hl.media_bridge;
+  const mb = (hl.plivo_stream && hl.plivo_stream.ready) ? hl.plivo_stream : hl.media_bridge;
   main.replaceChildren(h('h1', {}, 'AI configuration'),
     !mb.ready ? h('div', { class: 'banner' }, 'Media bridge not ready: ' + mb.reason + '. AI sessions cannot start.') : null,
     h('p', { class: 'muted' }, `Global AI switch: ${hl.ai_enabled_global ? 'on' : 'off'} · tenant: ${hl.ai_enabled_tenant ? 'enabled' : 'disabled'} · checked ${t(hl.checked_at)}`),

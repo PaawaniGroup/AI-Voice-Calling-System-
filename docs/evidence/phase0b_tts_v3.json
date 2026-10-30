@@ -1,0 +1,1187 @@
+{
+ "endpoint": "6bmxas8ccwzhrv",
+ "started": "2026-10-25T13:54:59Z",
+ "poll_cap_s": 0.15,
+ "voice": "utkarsh",
+ "rows": [
+  {
+   "mode": "run",
+   "wall_ms": 2962.7,
+   "delay_ms": 555,
+   "exec_ms": 1618,
+   "polls": 7,
+   "submit_ms": 296.8,
+   "overhead_ms": 789.7,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 1.96,
+   "format": "ulaw8k",
+   "request_bytes": 313,
+   "result_b64_bytes": 20908,
+   "worker_timing": {
+    "audio_s": 1.96,
+    "generate_s": 1.56,
+    "total_s": 1.565
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2861.5,
+   "delay_ms": 312,
+   "exec_ms": 1514,
+   "polls": 6,
+   "submit_ms": 302.7,
+   "overhead_ms": 1035.5,
+   "variant": "B",
+   "words": 4,
+   "audio_s": 1.96,
+   "format": "wav",
+   "request_bytes": 286,
+   "result_b64_bytes": 125500,
+   "worker_timing": {
+    "audio_s": 1.96,
+    "generate_s": 1.398,
+    "total_s": 1.4
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4377.4,
+   "delay_ms": 143,
+   "exec_ms": 2494,
+   "polls": 8,
+   "submit_ms": 1015.4,
+   "overhead_ms": 1740.4,
+   "variant": "C",
+   "words": 4,
+   "audio_s": 2.0,
+   "format": "wav",
+   "request_bytes": 768356,
+   "result_b64_bytes": 128060,
+   "worker_timing": {
+    "audio_s": 2,
+    "generate_s": 1.71,
+    "total_s": 1.711
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3109.7,
+   "delay_ms": 135,
+   "exec_ms": 2219,
+   "polls": 7,
+   "submit_ms": 421.2,
+   "overhead_ms": 755.7,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 2.48,
+   "format": "ulaw8k",
+   "request_bytes": 501,
+   "result_b64_bytes": 26456,
+   "worker_timing": {
+    "audio_s": 2.48,
+    "generate_s": 2.067,
+    "total_s": 2.071
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3872.8,
+   "delay_ms": 453,
+   "exec_ms": 2027,
+   "polls": 8,
+   "submit_ms": 297.5,
+   "overhead_ms": 1392.8,
+   "variant": "B",
+   "words": 8,
+   "audio_s": 2.36,
+   "format": "wav",
+   "request_bytes": 474,
+   "result_b64_bytes": 151100,
+   "worker_timing": {
+    "audio_s": 2.36,
+    "generate_s": 1.935,
+    "total_s": 1.936
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4649.5,
+   "delay_ms": 145,
+   "exec_ms": 2830,
+   "polls": 10,
+   "submit_ms": 512.8,
+   "overhead_ms": 1674.5,
+   "variant": "C",
+   "words": 8,
+   "audio_s": 2.76,
+   "format": "wav",
+   "request_bytes": 768544,
+   "result_b64_bytes": 176700,
+   "worker_timing": {
+    "audio_s": 2.76,
+    "generate_s": 2.13,
+    "total_s": 2.131
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4230.2,
+   "delay_ms": 127,
+   "exec_ms": 3205,
+   "polls": 10,
+   "submit_ms": 285.4,
+   "overhead_ms": 898.2,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 4.4,
+   "format": "ulaw8k",
+   "request_bytes": 493,
+   "result_b64_bytes": 46936,
+   "worker_timing": {
+    "audio_s": 4.4,
+    "generate_s": 3.117,
+    "total_s": 3.124
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4513.9,
+   "delay_ms": 208,
+   "exec_ms": 2832,
+   "polls": 10,
+   "submit_ms": 315.4,
+   "overhead_ms": 1473.9,
+   "variant": "B",
+   "words": 12,
+   "audio_s": 3.76,
+   "format": "wav",
+   "request_bytes": 466,
+   "result_b64_bytes": 240700,
+   "worker_timing": {
+    "audio_s": 3.76,
+    "generate_s": 2.716,
+    "total_s": 2.718
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5895.0,
+   "delay_ms": 150,
+   "exec_ms": 3568,
+   "polls": 12,
+   "submit_ms": 951.6,
+   "overhead_ms": 2177.0,
+   "variant": "C",
+   "words": 12,
+   "audio_s": 4.0,
+   "format": "wav",
+   "request_bytes": 768536,
+   "result_b64_bytes": 256060,
+   "worker_timing": {
+    "audio_s": 4,
+    "generate_s": 2.843,
+    "total_s": 2.845
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4359.5,
+   "delay_ms": 125,
+   "exec_ms": 3146,
+   "polls": 10,
+   "submit_ms": 307.9,
+   "overhead_ms": 1088.5,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 4.32,
+   "format": "ulaw8k",
+   "request_bytes": 849,
+   "result_b64_bytes": 46080,
+   "worker_timing": {
+    "audio_s": 4.32,
+    "generate_s": 3.055,
+    "total_s": 3.061
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5261.9,
+   "delay_ms": 146,
+   "exec_ms": 3556,
+   "polls": 12,
+   "submit_ms": 395.6,
+   "overhead_ms": 1559.9,
+   "variant": "B",
+   "words": 16,
+   "audio_s": 4.68,
+   "format": "wav",
+   "request_bytes": 822,
+   "result_b64_bytes": 299580,
+   "worker_timing": {
+    "audio_s": 4.68,
+    "generate_s": 3.209,
+    "total_s": 3.211
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5586.8,
+   "delay_ms": 134,
+   "exec_ms": 3784,
+   "polls": 12,
+   "submit_ms": 537.2,
+   "overhead_ms": 1668.8,
+   "variant": "C",
+   "words": 16,
+   "audio_s": 4.72,
+   "format": "wav",
+   "request_bytes": 768892,
+   "result_b64_bytes": 302140,
+   "worker_timing": {
+    "audio_s": 4.72,
+    "generate_s": 3.331,
+    "total_s": 3.333
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2604.4,
+   "delay_ms": 142,
+   "exec_ms": 1661,
+   "polls": 5,
+   "submit_ms": 329.8,
+   "overhead_ms": 801.4,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 1.6,
+   "format": "ulaw8k",
+   "request_bytes": 289,
+   "result_b64_bytes": 17068,
+   "worker_timing": {
+    "audio_s": 1.6,
+    "generate_s": 1.515,
+    "total_s": 1.518
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2890.2,
+   "delay_ms": 320,
+   "exec_ms": 1560,
+   "polls": 6,
+   "submit_ms": 294.4,
+   "overhead_ms": 1010.2,
+   "variant": "B",
+   "words": 4,
+   "audio_s": 1.52,
+   "format": "wav",
+   "request_bytes": 262,
+   "result_b64_bytes": 97340,
+   "worker_timing": {
+    "audio_s": 1.52,
+    "generate_s": 1.469,
+    "total_s": 1.47
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3543.9,
+   "delay_ms": 143,
+   "exec_ms": 2128,
+   "polls": 6,
+   "submit_ms": 503.9,
+   "overhead_ms": 1272.9,
+   "variant": "C",
+   "words": 4,
+   "audio_s": 1.48,
+   "format": "wav",
+   "request_bytes": 768332,
+   "result_b64_bytes": 94780,
+   "worker_timing": {
+    "audio_s": 1.48,
+    "generate_s": 1.436,
+    "total_s": 1.437
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3610.8,
+   "delay_ms": 137,
+   "exec_ms": 2688,
+   "polls": 9,
+   "submit_ms": 293.4,
+   "overhead_ms": 785.8,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 3.28,
+   "format": "ulaw8k",
+   "request_bytes": 499,
+   "result_b64_bytes": 34988,
+   "worker_timing": {
+    "audio_s": 3.28,
+    "generate_s": 2.535,
+    "total_s": 2.54
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4212.7,
+   "delay_ms": 319,
+   "exec_ms": 2616,
+   "polls": 9,
+   "submit_ms": 305.4,
+   "overhead_ms": 1277.7,
+   "variant": "B",
+   "words": 8,
+   "audio_s": 3.32,
+   "format": "wav",
+   "request_bytes": 472,
+   "result_b64_bytes": 212540,
+   "worker_timing": {
+    "audio_s": 3.32,
+    "generate_s": 2.485,
+    "total_s": 2.486
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4762.0,
+   "delay_ms": 139,
+   "exec_ms": 2980,
+   "polls": 10,
+   "submit_ms": 502.3,
+   "overhead_ms": 1643.0,
+   "variant": "C",
+   "words": 8,
+   "audio_s": 3.28,
+   "format": "wav",
+   "request_bytes": 768542,
+   "result_b64_bytes": 209980,
+   "worker_timing": {
+    "audio_s": 3.28,
+    "generate_s": 2.414,
+    "total_s": 2.415
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4376.2,
+   "delay_ms": 134,
+   "exec_ms": 3116,
+   "polls": 10,
+   "submit_ms": 363.6,
+   "overhead_ms": 1126.2,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 4.24,
+   "format": "ulaw8k",
+   "request_bytes": 673,
+   "result_b64_bytes": 45228,
+   "worker_timing": {
+    "audio_s": 4.24,
+    "generate_s": 3.007,
+    "total_s": 3.013
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4561.8,
+   "delay_ms": 139,
+   "exec_ms": 3040,
+   "polls": 10,
+   "submit_ms": 293.3,
+   "overhead_ms": 1382.8,
+   "variant": "B",
+   "words": 12,
+   "audio_s": 4.08,
+   "format": "wav",
+   "request_bytes": 646,
+   "result_b64_bytes": 261180,
+   "worker_timing": {
+    "audio_s": 4.08,
+    "generate_s": 2.905,
+    "total_s": 2.906
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4920.2,
+   "delay_ms": 146,
+   "exec_ms": 3116,
+   "polls": 10,
+   "submit_ms": 678.5,
+   "overhead_ms": 1658.2,
+   "variant": "C",
+   "words": 12,
+   "audio_s": 3.92,
+   "format": "wav",
+   "request_bytes": 768716,
+   "result_b64_bytes": 250940,
+   "worker_timing": {
+    "audio_s": 3.92,
+    "generate_s": 2.779,
+    "total_s": 2.781
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5037.2,
+   "delay_ms": 136,
+   "exec_ms": 3782,
+   "polls": 11,
+   "submit_ms": 320.4,
+   "overhead_ms": 1119.2,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 5.52,
+   "format": "ulaw8k",
+   "request_bytes": 751,
+   "result_b64_bytes": 58880,
+   "worker_timing": {
+    "audio_s": 5.52,
+    "generate_s": 3.681,
+    "total_s": 3.687
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4953.3,
+   "delay_ms": 128,
+   "exec_ms": 3465,
+   "polls": 11,
+   "submit_ms": 279.0,
+   "overhead_ms": 1360.3,
+   "variant": "B",
+   "words": 16,
+   "audio_s": 5.4,
+   "format": "wav",
+   "request_bytes": 724,
+   "result_b64_bytes": 345660,
+   "worker_timing": {
+    "audio_s": 5.4,
+    "generate_s": 3.108,
+    "total_s": 3.11
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5455.1,
+   "delay_ms": 152,
+   "exec_ms": 3639,
+   "polls": 9,
+   "submit_ms": 646.6,
+   "overhead_ms": 1664.1,
+   "variant": "C",
+   "words": 16,
+   "audio_s": 5.28,
+   "format": "wav",
+   "request_bytes": 768794,
+   "result_b64_bytes": 337980,
+   "worker_timing": {
+    "audio_s": 5.28,
+    "generate_s": 3.042,
+    "total_s": 3.044
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2493.8,
+   "delay_ms": 138,
+   "exec_ms": 1620,
+   "polls": 5,
+   "submit_ms": 404.3,
+   "overhead_ms": 735.8,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 1.64,
+   "format": "ulaw8k",
+   "request_bytes": 335,
+   "result_b64_bytes": 17496,
+   "worker_timing": {
+    "audio_s": 1.64,
+    "generate_s": 1.526,
+    "total_s": 1.529
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3473.2,
+   "delay_ms": 378,
+   "exec_ms": 1812,
+   "polls": 7,
+   "submit_ms": 301.0,
+   "overhead_ms": 1283.2,
+   "variant": "B",
+   "words": 4,
+   "audio_s": 1.88,
+   "format": "wav",
+   "request_bytes": 308,
+   "result_b64_bytes": 120380,
+   "worker_timing": {
+    "audio_s": 1.88,
+    "generate_s": 1.691,
+    "total_s": 1.692
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3813.3,
+   "delay_ms": 145,
+   "exec_ms": 2268,
+   "polls": 8,
+   "submit_ms": 470.8,
+   "overhead_ms": 1400.3,
+   "variant": "C",
+   "words": 4,
+   "audio_s": 1.68,
+   "format": "wav",
+   "request_bytes": 768378,
+   "result_b64_bytes": 107580,
+   "worker_timing": {
+    "audio_s": 1.68,
+    "generate_s": 1.565,
+    "total_s": 1.565
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3343.3,
+   "delay_ms": 144,
+   "exec_ms": 2262,
+   "polls": 8,
+   "submit_ms": 315.7,
+   "overhead_ms": 937.3,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 2.68,
+   "format": "ulaw8k",
+   "request_bytes": 499,
+   "result_b64_bytes": 28588,
+   "worker_timing": {
+    "audio_s": 2.68,
+    "generate_s": 2.181,
+    "total_s": 2.184
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3605.4,
+   "delay_ms": 199,
+   "exec_ms": 2309,
+   "polls": 8,
+   "submit_ms": 282.4,
+   "overhead_ms": 1097.4,
+   "variant": "B",
+   "words": 8,
+   "audio_s": 2.84,
+   "format": "wav",
+   "request_bytes": 472,
+   "result_b64_bytes": 181820,
+   "worker_timing": {
+    "audio_s": 2.84,
+    "generate_s": 2.188,
+    "total_s": 2.189
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4622.8,
+   "delay_ms": 136,
+   "exec_ms": 3181,
+   "polls": 9,
+   "submit_ms": 510.7,
+   "overhead_ms": 1305.8,
+   "variant": "C",
+   "words": 8,
+   "audio_s": 3.24,
+   "format": "wav",
+   "request_bytes": 768542,
+   "result_b64_bytes": 207420,
+   "worker_timing": {
+    "audio_s": 3.24,
+    "generate_s": 2.452,
+    "total_s": 2.453
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4454.8,
+   "delay_ms": 158,
+   "exec_ms": 3420,
+   "polls": 10,
+   "submit_ms": 321.0,
+   "overhead_ms": 876.8,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 4.88,
+   "format": "ulaw8k",
+   "request_bytes": 553,
+   "result_b64_bytes": 52056,
+   "worker_timing": {
+    "audio_s": 4.88,
+    "generate_s": 3.309,
+    "total_s": 3.314
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4685.1,
+   "delay_ms": 268,
+   "exec_ms": 2816,
+   "polls": 10,
+   "submit_ms": 339.6,
+   "overhead_ms": 1601.1,
+   "variant": "B",
+   "words": 12,
+   "audio_s": 4.44,
+   "format": "wav",
+   "request_bytes": 526,
+   "result_b64_bytes": 284220,
+   "worker_timing": {
+    "audio_s": 4.44,
+    "generate_s": 2.666,
+    "total_s": 2.667
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5362.9,
+   "delay_ms": 134,
+   "exec_ms": 3705,
+   "polls": 11,
+   "submit_ms": 564.0,
+   "overhead_ms": 1523.9,
+   "variant": "C",
+   "words": 12,
+   "audio_s": 4.64,
+   "format": "wav",
+   "request_bytes": 768596,
+   "result_b64_bytes": 297020,
+   "worker_timing": {
+    "audio_s": 4.64,
+    "generate_s": 3.397,
+    "total_s": 3.399
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5235.1,
+   "delay_ms": 138,
+   "exec_ms": 3943,
+   "polls": 12,
+   "submit_ms": 306.5,
+   "overhead_ms": 1154.1,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 5.96,
+   "format": "ulaw8k",
+   "request_bytes": 703,
+   "result_b64_bytes": 63576,
+   "worker_timing": {
+    "audio_s": 5.96,
+    "generate_s": 3.875,
+    "total_s": 3.88
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5113.4,
+   "delay_ms": 137,
+   "exec_ms": 3507,
+   "polls": 11,
+   "submit_ms": 385.1,
+   "overhead_ms": 1469.4,
+   "variant": "B",
+   "words": 16,
+   "audio_s": 5.96,
+   "format": "wav",
+   "request_bytes": 676,
+   "result_b64_bytes": 381500,
+   "worker_timing": {
+    "audio_s": 5.96,
+    "generate_s": 3.397,
+    "total_s": 3.399
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 6190.0,
+   "delay_ms": 139,
+   "exec_ms": 4266,
+   "polls": 14,
+   "submit_ms": 488.0,
+   "overhead_ms": 1785.0,
+   "variant": "C",
+   "words": 16,
+   "audio_s": 5.48,
+   "format": "wav",
+   "request_bytes": 768746,
+   "result_b64_bytes": 350780,
+   "worker_timing": {
+    "audio_s": 5.48,
+    "generate_s": 3.468,
+    "total_s": 3.469
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2673.4,
+   "delay_ms": 127,
+   "exec_ms": 1659,
+   "polls": 6,
+   "submit_ms": 368.8,
+   "overhead_ms": 887.4,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 2.08,
+   "format": "ulaw8k",
+   "request_bytes": 359,
+   "result_b64_bytes": 22188,
+   "worker_timing": {
+    "audio_s": 2.08,
+    "generate_s": 1.555,
+    "total_s": 1.558
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3433.2,
+   "delay_ms": 230,
+   "exec_ms": 2229,
+   "polls": 8,
+   "submit_ms": 298.4,
+   "overhead_ms": 974.2,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 3.2,
+   "format": "ulaw8k",
+   "request_bytes": 463,
+   "result_b64_bytes": 34136,
+   "worker_timing": {
+    "audio_s": 3.2,
+    "generate_s": 2.065,
+    "total_s": 2.069
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4006.9,
+   "delay_ms": 144,
+   "exec_ms": 2974,
+   "polls": 9,
+   "submit_ms": 305.5,
+   "overhead_ms": 888.9,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 4.92,
+   "format": "ulaw8k",
+   "request_bytes": 637,
+   "result_b64_bytes": 52480,
+   "worker_timing": {
+    "audio_s": 4.92,
+    "generate_s": 2.914,
+    "total_s": 2.919
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4794.0,
+   "delay_ms": 237,
+   "exec_ms": 3503,
+   "polls": 11,
+   "submit_ms": 295.7,
+   "overhead_ms": 1054.0,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 4.92,
+   "format": "ulaw8k",
+   "request_bytes": 683,
+   "result_b64_bytes": 52480,
+   "worker_timing": {
+    "audio_s": 4.92,
+    "generate_s": 3.427,
+    "total_s": 3.44
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2582.4,
+   "delay_ms": 145,
+   "exec_ms": 1661,
+   "polls": 6,
+   "submit_ms": 300.7,
+   "overhead_ms": 776.4,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 1.56,
+   "format": "ulaw8k",
+   "request_bytes": 265,
+   "result_b64_bytes": 16640,
+   "worker_timing": {
+    "audio_s": 1.56,
+    "generate_s": 1.575,
+    "total_s": 1.578
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3343.8,
+   "delay_ms": 342,
+   "exec_ms": 2249,
+   "polls": 8,
+   "submit_ms": 377.7,
+   "overhead_ms": 752.8,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 2.84,
+   "format": "ulaw8k",
+   "request_bytes": 379,
+   "result_b64_bytes": 30296,
+   "worker_timing": {
+    "audio_s": 2.84,
+    "generate_s": 2.131,
+    "total_s": 2.135
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4319.0,
+   "delay_ms": 363,
+   "exec_ms": 3112,
+   "polls": 10,
+   "submit_ms": 344.6,
+   "overhead_ms": 844.0,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 4.36,
+   "format": "ulaw8k",
+   "request_bytes": 685,
+   "result_b64_bytes": 46508,
+   "worker_timing": {
+    "audio_s": 4.36,
+    "generate_s": 3.017,
+    "total_s": 3.021
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5510.8,
+   "delay_ms": 279,
+   "exec_ms": 4197,
+   "polls": 13,
+   "submit_ms": 278.6,
+   "overhead_ms": 1034.8,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 5.28,
+   "format": "ulaw8k",
+   "request_bytes": 901,
+   "result_b64_bytes": 56320,
+   "worker_timing": {
+    "audio_s": 5.28,
+    "generate_s": 4.114,
+    "total_s": 4.121
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2649.1,
+   "delay_ms": 135,
+   "exec_ms": 1741,
+   "polls": 6,
+   "submit_ms": 318.3,
+   "overhead_ms": 773.1,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 2.24,
+   "format": "ulaw8k",
+   "request_bytes": 397,
+   "result_b64_bytes": 23896,
+   "worker_timing": {
+    "audio_s": 2.24,
+    "generate_s": 1.623,
+    "total_s": 1.626
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2975.7,
+   "delay_ms": 341,
+   "exec_ms": 1826,
+   "polls": 7,
+   "submit_ms": 322.7,
+   "overhead_ms": 808.7,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 2.36,
+   "format": "ulaw8k",
+   "request_bytes": 523,
+   "result_b64_bytes": 25176,
+   "worker_timing": {
+    "audio_s": 2.36,
+    "generate_s": 1.733,
+    "total_s": 1.736
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4124.9,
+   "delay_ms": 338,
+   "exec_ms": 2842,
+   "polls": 10,
+   "submit_ms": 314.8,
+   "overhead_ms": 944.9,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 3.64,
+   "format": "ulaw8k",
+   "request_bytes": 591,
+   "result_b64_bytes": 38828,
+   "worker_timing": {
+    "audio_s": 3.64,
+    "generate_s": 2.761,
+    "total_s": 2.766
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5075.4,
+   "delay_ms": 176,
+   "exec_ms": 4129,
+   "polls": 11,
+   "submit_ms": 399.5,
+   "overhead_ms": 770.4,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 5.64,
+   "format": "ulaw8k",
+   "request_bytes": 747,
+   "result_b64_bytes": 60160,
+   "worker_timing": {
+    "audio_s": 5.64,
+    "generate_s": 4.038,
+    "total_s": 4.044
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3124.7,
+   "delay_ms": 331,
+   "exec_ms": 2113,
+   "polls": 7,
+   "submit_ms": 292.9,
+   "overhead_ms": 680.7,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 1.76,
+   "format": "ulaw8k",
+   "request_bytes": 277,
+   "result_b64_bytes": 18776,
+   "worker_timing": {
+    "audio_s": 1.76,
+    "generate_s": 1.987,
+    "total_s": 1.99
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3810.8,
+   "delay_ms": 438,
+   "exec_ms": 2655,
+   "polls": 9,
+   "submit_ms": 390.2,
+   "overhead_ms": 717.8,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 2.6,
+   "format": "ulaw8k",
+   "request_bytes": 403,
+   "result_b64_bytes": 27736,
+   "worker_timing": {
+    "audio_s": 2.6,
+    "generate_s": 2.568,
+    "total_s": 2.572
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 4625.9,
+   "delay_ms": 399,
+   "exec_ms": 3356,
+   "polls": 11,
+   "submit_ms": 279.2,
+   "overhead_ms": 870.9,
+   "variant": "A",
+   "words": 12,
+   "audio_s": 4.68,
+   "format": "ulaw8k",
+   "request_bytes": 581,
+   "result_b64_bytes": 49920,
+   "worker_timing": {
+    "audio_s": 4.68,
+    "generate_s": 3.248,
+    "total_s": 3.254
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 5326.1,
+   "delay_ms": 228,
+   "exec_ms": 3757,
+   "polls": 12,
+   "submit_ms": 304.0,
+   "overhead_ms": 1341.1,
+   "variant": "A",
+   "words": 16,
+   "audio_s": 5.48,
+   "format": "ulaw8k",
+   "request_bytes": 649,
+   "result_b64_bytes": 58456,
+   "worker_timing": {
+    "audio_s": 5.48,
+    "generate_s": 3.593,
+    "total_s": 3.599
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 2247.8,
+   "delay_ms": 127,
+   "exec_ms": 1545,
+   "polls": 5,
+   "submit_ms": 345.3,
+   "overhead_ms": 575.8,
+   "variant": "A",
+   "words": 4,
+   "audio_s": 2.0,
+   "format": "ulaw8k",
+   "request_bytes": 337,
+   "result_b64_bytes": 21336,
+   "worker_timing": {
+    "audio_s": 2,
+    "generate_s": 1.439,
+    "total_s": 1.442
+   },
+   "voice": "utkarsh"
+  },
+  {
+   "mode": "run",
+   "wall_ms": 3518.7,
+   "delay_ms": 546,
+   "exec_ms": 2234,
+   "polls": 8,
+   "submit_ms": 351.9,
+   "overhead_ms": 738.7,
+   "variant": "A",
+   "words": 8,
+   "audio_s": 3.36,
+   "format": "ulaw8k",
+   "request_bytes": 473,
+   "result_b64_bytes": 35840,
+   "worker_timing": {
+    "audio_s": 3.36,
+    "generate_s": 2.148,
+    "total_s": 2.152
+   },
+   "voice": "utkarsh"
+  }
+ ],
+ "workers_before": {
+  "idle": 1,
+  "ready": 1,
+  "running": 1,
+  "initializing": 0
+ },
+ "health_http": 200,
+ "warmup": {
+  "delay_ms": 41098,
+  "exec_ms": 141,
+  "wall_ms": 41727.0
+ },
+ "cost": {
+  "per_service": {
+   "stt": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "brain": {
+    "job_s": 0.0,
+    "idle_s": 0.0,
+    "tail_s": 0.0,
+    "usd": 0.0
+   },
+   "tts": {
+    "job_s": 202.42,
+    "idle_s": 0.09,
+    "tail_s": 60.0,
+    "usd": 0.0504
+   }
+  },
+  "usd_estimated_total": 0.0504,
+  "budget_usd": 0.15,
+  "basis": "estimate from RunPod delayTime+executionTime, idle gaps (capped at the idle timeout) and one idle tail per used endpoint; NOT an invoice"
+ },
+ "listen_files": [
+  "all5_ulaw8k.wav",
+  "reply1_4words_ulaw8k.wav",
+  "reply2_8words_ulaw8k.wav",
+  "reply3_12words_ulaw8k.wav",
+  "reply4_12words_ulaw8k.wav",
+  "reply5_16words_ulaw8k.wav"
+ ]
+}

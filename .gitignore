@@ -10,3 +10,20 @@ recordings/
 data/
 *.pem
 *.key
+
+Utkarsh_voice.wav
+Utkarsh_voice_ref12s_24k.wav
+# Audio and notebooks that can embed audio: never commit by accident (guard: scripts/check_commit_guard.py, hook: .githooks/pre-commit).
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+*.opus
+MME_Chatterbox_V3_TEST_COLAB_(3).ipynb
+# Allowlist for needed fixtures (keep in step with .audio-allowlist):
+# !tests/fixtures/audio/*.wav
+
+# Local scripts that embed live RunPod keys: never commit (rotate the keys, then delete these).
+scripts/save_confirmed_models.py
+scripts/update_new_tts.py

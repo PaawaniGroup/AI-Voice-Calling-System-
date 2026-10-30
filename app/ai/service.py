@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,15 +21,22 @@ from pymongo.errors import DuplicateKeyError
 from app.ai.clients import SERVICES, ModelClients, validate_service_url
 from app.ai.media import MediaBridge, UnavailableBridge
 from app.ai.pipeline import Conversation
+from app.ai.duplex import DUPLEX_KEYS, duplex_config_from
+from app.ai.streaming.config import STREAM_KEYS, stream_config_from
+from app.ai.streaming.ramp import apply_to_conversation as apply_ramp_rule
 from app.core.errors import Conflict, NotFound, Unprocessable
 from app.core.ids import new_uuid, utcnow
 from app.observability import metrics as m
+from app.observability.activity import strip_words
 from config.settings import Settings
 
 log = logging.getLogger("mme_telephony.ai")
 
 AI_TERMINAL = {"stopped", "failed"}
 LANGS = ["auto", "hi", "en", "hinglish"]
+
+
+LATENCY_FLAGS = ("trace_evidence", "stream_ramp", "stt_raw_pcm", "tts_adaptive_poll")   # per-tenant booleans of the latency work, all OFF by default (stream_ramp etc. are added with their work package)
 
 
 @dataclass
@@ -42,6 +50,8 @@ class Runtime:
     sent_at: float | None = None  # monotonic time the last reply was handed to the media module
     watchdog: asyncio.Task | None = None
     tasks: list = field(default_factory=list)
+    call_id: str | None = None
+    trace_evidence: bool = False   # tenant flag `trace_evidence` (and MME_TEL_AI_TRACE_EVIDENCE_PATH set): append the numbers-only turn evidence line
 
 
 class AiService:
@@ -54,6 +64,7 @@ class AiService:
         self.last_health: dict | None = None
         self.connect_s = 30.0
         self.reconnect_s = 30.0
+        self.activity = None  # ActivityBus (live dashboard feed), set by the app factory
 
     # ------------------------------------------------------------------ configuration
     def default_config(self, tenant_id: str) -> dict:
@@ -61,17 +72,26 @@ class AiService:
                 "models": {"stt": self.s.ai_stt_model, "brain": self.s.ai_brain_model, "tts": self.s.ai_tts_model},
                 "timeouts": {"stt": self.s.ai_request_timeout_s, "brain": self.s.ai_request_timeout_s * 2,
                              "tts": self.s.ai_request_timeout_s, "rag": 5.0},
-                "paths": {}, "languages": LANGS[1:], "default_language": "auto"}
+                "paths": {}, "keys": {}, "key_refs": {}, "languages": LANGS[1:], "default_language": "auto",
+                "devanagari_hindi": False, "runpod_mode": "run",
+                "streaming_pipeline": False,   # token-streaming voice pipeline (Plivo calls only); OFF unless a tenant turns it on
+                "tts_ulaw8k": False,           # RunPod TTS worker v3: voice by name + 8 kHz mu-law answer, no reference audio sent; OFF by default
+                "tts_voice": None,             # name of the worker's voice for tts_ulaw8k (None = the worker's default, "utkarsh")
+                **{k: None for k in STREAM_KEYS},   # None = the built-in provisional default (set after the TTS re-measurement)
+                **{k: False for k in LATENCY_FLAGS},   # latency-work flags: per tenant, default OFF
+                "full_duplex_input": False,        # listen while the assistant speaks: min voiced time, echo guard, kept speech, hysteresis; OFF by default
+                **{k: None for k in DUPLEX_KEYS}}  # None = the provisional defaults of app/ai/duplex.py (to be tuned on real call recordings)
 
     async def get_config(self, tenant_id: str) -> dict:
         doc = await self.db["ai_config"].find_one({"tenant_id": tenant_id})
         cfg = self.default_config(tenant_id)
         if doc:
-            for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by"):
+            for k in ("enabled", "stt_url", "brain_url", "tts_url", "rag_url", "default_language", "updated_at", "updated_by",
+                      "devanagari_hindi", "runpod_mode", "streaming_pipeline", "tts_ulaw8k", "tts_voice", "full_duplex_input", *LATENCY_FLAGS, *STREAM_KEYS, *DUPLEX_KEYS):   # per-tenant switches (Devanagari replies; RunPod transport; streaming)
                 if k in doc:
                     cfg[k] = doc[k]
-            for k in ("models", "timeouts", "paths"):
-                cfg[k] = {**cfg[k], **doc.get(k, {})}
+            for k in ("models", "timeouts", "paths", "keys", "key_refs"):
+                cfg[k] = {**cfg.get(k, {}), **doc.get(k, {})}
             cfg["languages"] = doc.get("languages", cfg["languages"])
         return cfg
 
@@ -84,6 +104,32 @@ class AiService:
                 cfg[key] = validate_service_url(v, self.s) if v else ""
         if "enabled" in body:
             cfg["enabled"] = bool(body["enabled"])
+        if body.get("devanagari_hindi") is not None:
+            cfg["devanagari_hindi"] = bool(body["devanagari_hindi"])
+        if body.get("runpod_mode") is not None:
+            if body["runpod_mode"] not in ("run", "runsync"):
+                raise Unprocessable("runpod_mode must be run or runsync", code="invalid_config")
+            cfg["runpod_mode"] = body["runpod_mode"]
+        if body.get("streaming_pipeline") is not None:
+            cfg["streaming_pipeline"] = bool(body["streaming_pipeline"])
+        if body.get("tts_ulaw8k") is not None:
+            cfg["tts_ulaw8k"] = bool(body["tts_ulaw8k"])
+        if "tts_voice" in body:
+            v = body["tts_voice"]
+            if v is not None and not (isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", v)):
+                raise Unprocessable("tts_voice must be 1-40 letters, digits, '_' or '-'", code="invalid_config")
+            cfg["tts_voice"] = v
+        if body.get("full_duplex_input") is not None:
+            cfg["full_duplex_input"] = bool(body["full_duplex_input"])
+        for flag in LATENCY_FLAGS:
+            if body.get(flag) is not None:
+                cfg[flag] = bool(body[flag])
+        for k, (lo, hi) in {**STREAM_KEYS, **DUPLEX_KEYS}.items():
+            if k in body and body[k] is not None:
+                v = float(body[k]) if isinstance(lo, float) else int(body[k])
+                if not (lo <= v <= hi):
+                    raise Unprocessable(f"{k} must be between {lo} and {hi}", code="invalid_config")
+                cfg[k] = v
         if "default_language" in body:
             if body["default_language"] not in LANGS:
                 raise Unprocessable("unsupported language", code="invalid_language", details={"supported": LANGS})
@@ -107,13 +153,18 @@ class AiService:
                 if name not in SERVICES or not isinstance(val, str) or not val.startswith("/") or "//" in val or ".." in val or len(val) > 100:
                     raise Unprocessable("invalid service path", code="invalid_config")
                 cfg["paths"][name] = val
+        if "keys" in body and isinstance(body["keys"], dict):
+            cfg.setdefault("keys", {})
+            for name, val in body["keys"].items():
+                if name in SERVICES and isinstance(val, str):
+                    cfg["keys"][name] = val.strip()
         cfg["updated_at"], cfg["updated_by"] = utcnow(), principal
         await self.db["ai_config"].update_one({"tenant_id": tenant_id}, {"$set": cfg}, upsert=True)
         return cfg
 
     def public_config(self, cfg: dict, detail: bool) -> dict:
         """Never includes secrets (none are stored). Viewers only learn whether each service is configured."""
-        out = {k: v for k, v in cfg.items() if k not in ("_id",)}
+        out = {k: v for k, v in cfg.items() if k not in ("_id", "keys")}
         if not detail:
             for svc in SERVICES:
                 out[f"{svc}_url"] = "configured" if cfg.get(f"{svc}_url") else ""
@@ -141,6 +192,34 @@ class AiService:
             out["plivo_stream"] = {"ready": p_ready, "reason": p_reason}
         self.last_health = out
         return out
+
+    async def warmup(self, tenant_id: str) -> None:
+        """Non-blocking background warm-up of tenant model endpoints (e.g. while call greeting plays)."""
+        try:
+            cfg = await self.get_config(tenant_id)
+            c = self._clients(cfg)
+            try:
+                tasks = []
+                stt_url = cfg.get("stt_url") or ""
+                brain_url = cfg.get("brain_url") or ""
+                tts_url = cfg.get("tts_url") or ""
+                if "/runsync" in stt_url:
+                    tasks.append(c.transcribe(b"\x00" * 1600, 8000, "hi"))
+                else:
+                    tasks.append(c.health("stt"))
+                if "/runsync" in brain_url:
+                    tasks.append(c.chat([{"role": "user", "content": "hello"}]))
+                else:
+                    tasks.append(c.health("brain"))
+                if "/runsync" in tts_url:
+                    tasks.append(c.synthesize("haan", "hi"))
+                else:
+                    tasks.append(c.health("tts"))
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=25.0)
+            finally:
+                await c.aclose()
+        except Exception as e:
+            log.debug("tenant %s ai warmup failed: %s", tenant_id, e)
 
     # ------------------------------------------------------------------ lifecycle
     async def _get_ai(self, tenant_id: str, session_id: str) -> dict | None:
@@ -178,6 +257,9 @@ class AiService:
             raise Conflict("the call is not answered", code="call_not_answered")
         if not call.get("ai_enabled"):
             raise Conflict("this call was not flagged ai_enabled", code="call_not_ai_enabled")
+        existing = await self._get_ai(tenant_id, session_id)
+        if existing and existing.get("state") in ("starting", "active"):
+            return existing
         ready, reason = await (bridge or self.bridge).ready()
         if not ready:
             raise Conflict(f"media bridge unavailable: {reason}", code="media_bridge_unavailable", details={"reason": reason})
@@ -200,8 +282,22 @@ class AiService:
             else:
                 return existing
         clients = self._clients(cfg)
-        rt = Runtime(session_id, tenant_id, Conversation(clients, lang), clients)
-        rt.fs_uuid = call.get("fs_uuid")
+        conv = Conversation(
+            clients,
+            lang,
+            script_enforcement=getattr(self.s, "ai_script_enforcement", False),
+            counsellor_gender=getattr(self.s, "ai_counsellor_gender", "masculine"),
+            counsellor_name=getattr(self.s, "ai_counsellor_name", "MME AI counsellor"),
+            hint_placement=getattr(self.s, "ai_hint_placement", "user_suffix"),
+            devanagari_hindi=bool(cfg.get("devanagari_hindi")),   # per tenant: Devanagari prompt + reply_mode tag + reply check/retry
+            streaming=stream_config_from(cfg) if cfg.get("streaming_pipeline") else None,   # per tenant, default OFF: token-streaming voice pipeline
+            duplex=duplex_config_from(cfg) if cfg.get("full_duplex_input") else None,        # per tenant, default OFF: full-duplex input handling
+        )
+        rt = Runtime(session_id, tenant_id, conv, clients)
+        if cfg.get("stream_ramp") and cfg.get("streaming_pipeline"):
+            apply_ramp_rule(conv)                                  # optional Brain block, appended to the system message of THIS call only
+        rt.trace_evidence = bool(cfg.get("trace_evidence")) and bool(getattr(self.s, "ai_trace_evidence_path", ""))
+        rt.fs_uuid, rt.call_id = call.get("fs_uuid"), sess.get("call_id")
         self.runtime[session_id] = rt
         m.AI_RUNTIMES.set(len(self.runtime))
         rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.connect_s, "media_connect_timeout"))
@@ -230,11 +326,9 @@ class AiService:
         return _jwt.encode(payload, self.s.jwt_secret.get_secret_value(), algorithm=self.s.jwt_algorithm)
 
     async def _media_deadline(self, rt: Runtime, seconds: float, reason: str) -> None:
-        try:
-            await asyncio.sleep(seconds)
-            await self._finish(rt.tenant_id, rt.session_id, "failed", reason, error=reason)
-        except asyncio.CancelledError:
-            pass
+        """Fail the AI session if the media socket does not (re)connect in time. Cancelled (and ends as cancelled) when it does."""
+        await asyncio.sleep(seconds)
+        await self._finish(rt.tenant_id, rt.session_id, "failed", reason, error=reason)
 
     async def attach_media(self, tenant_id: str, session_id: str) -> Runtime:
         ai = await self._get_ai(tenant_id, session_id)
@@ -265,11 +359,66 @@ class AiService:
         if r.modified_count:
             rt.watchdog = asyncio.create_task(self._media_deadline(rt, self.reconnect_s, "media_reconnect_timeout"))
 
-    async def record_turn(self, rt: Runtime, timings: dict, count: bool = True) -> None:
-        upd: dict = {"$set": {"last_turn_at": utcnow(), **{f"timings_ms.{k}": v for k, v in timings.items()}}}
+    async def finalize_turn(self, rt: Runtime, trace_id: str, trace_ms: dict, reply: str | None = None) -> None:
+        """Second write of a turn: the complete latency trace (known only after the audio was sent) is merged into the turn
+        record created by `record_turn`, found by `trace_id`. Also refreshes the session-level `timings_ms` and the live feed."""
+        nums = {k: v for k, v in trace_ms.items() if isinstance(v, (int, float))}
+        if not nums and not reply:
+            return
+        set_fields = {**{f"transcript.$[e].timings_ms.{k}": v for k, v in nums.items()},
+                      **{f"timings_ms.{k}": v for k, v in nums.items()}}
+        if reply:  # the length only: conversation text is not stored (see record_turn)
+            set_fields["transcript.$[e].reply_chars"] = len(reply)
+            set_fields["last_exchange.reply_chars"] = len(reply)
+        await self.db["ai_sessions"].update_one(
+            {"session_id": rt.session_id, "tenant_id": rt.tenant_id},
+            {"$set": set_fields},
+            array_filters=[{"e.trace_id": trace_id}])
+        if self.activity is not None:
+            self.activity.publish(rt.tenant_id, "ai.turn_latency", call_id=rt.call_id, session_id=rt.session_id,
+                                  data={"trace_id": trace_id, "reply_chars": len(reply or ""), **nums})
+
+    async def record_turn(self, rt: Runtime, timings: dict, count: bool = True, heard: str | None = None, reply: str | None = None,
+                          trace_id: str | None = None) -> None:
+        now = utcnow()
+        turn_num = len(rt.conversation.turns)
+        entry = {   # NO conversation text is stored (privacy): sizes and timings only. `heard` / `reply` are accepted but never written.
+            "turn": turn_num,
+            "heard_chars": len(heard or ""),
+            "reply_chars": len(reply or ""),
+            "timings_ms": {k: v for k, v in timings.items() if isinstance(v, (int, float))},
+            "ts": now.isoformat()
+        }
+        if trace_id:
+            entry["trace_id"] = trace_id
+        upd: dict = {
+            "$set": {
+                "last_turn_at": now,
+                "last_exchange": entry,
+                **{f"timings_ms.{k}": v for k, v in timings.items() if isinstance(v, (int, float))}
+            },
+            "$push": {
+                "transcript": entry
+            }
+        }
         if count:
             upd["$inc"] = {"turns": 1}
         await self.db["ai_sessions"].update_one({"session_id": rt.session_id, "tenant_id": rt.tenant_id}, upd)
+        if self.activity is not None and count:
+            self.activity.publish(rt.tenant_id, "ai.turn", call_id=rt.call_id, session_id=rt.session_id,
+                                  data={
+                                      "turn": turn_num,
+                                      "stt_ms": timings.get("stt"),
+                                      "brain_ms": timings.get("brain"),
+                                      "tts_ms": timings.get("tts"),
+                                      "turn_ms": timings.get("turn_ms"),
+                                      **{k: v for k, v in timings.items() if isinstance(v, (int, float))}
+                                  })
+
+    def note_error(self, rt: Runtime, code: str) -> None:
+        """A turn produced no audio (model timeout, bad reply, ...). Feed only; the metrics counter is incremented by the caller."""
+        if self.activity is not None:
+            self.activity.publish(rt.tenant_id, "ai.turn_error", call_id=rt.call_id, session_id=rt.session_id, data={"code": str(code)[:60]})
 
     async def stop(self, tenant_id: str, session_id: str, reason: str = "requested") -> dict:
         ai = await self._get_ai(tenant_id, session_id)
@@ -290,13 +439,20 @@ class AiService:
             rt.conversation.cancel()
             if rt.fs_uuid and hasattr(self.bridge, "end"):
                 await self.bridge.end(rt.fs_uuid)  # stop media bug + playback on FreeSWITCH
-            if rt.watchdog:
+            me = asyncio.current_task()  # the media watchdog calls _finish from its own task: it must never cancel itself,
+            if rt.watchdog and rt.watchdog is not me:  # or the rest of this method (session transition, event/webhook) is skipped
                 rt.watchdog.cancel()
             for t in rt.tasks:
-                t.cancel()
+                if t is not me:
+                    t.cancel()
             if rt.ws is not None:
                 try:
                     await rt.ws.close(code=1000)
+                except Exception:
+                    pass
+            if rt.conversation._task and not rt.conversation._task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(rt.conversation._task), timeout=0.2)
                 except Exception:
                     pass
             await rt.clients.aclose()
@@ -310,15 +466,24 @@ class AiService:
         return upd
 
     async def get(self, tenant_id: str, session_id: str, detail: bool) -> dict:
-        await self.sessions.get(tenant_id, session_id)  # 404 for other tenants / unknown ids
+        sess = await self.sessions.get(tenant_id, session_id)  # 404 for other tenants / unknown ids
         ai = await self._get_ai(tenant_id, session_id)
-        ready, reason = await self.bridge.ready()
+        call = await self.repos.get_call(sess["call_id"], tenant_id) if sess.get("call_id") else None
+        if call and call.get("provider") == "plivo_api":
+            from app.ai.media import PlivoStreamBridge
+            bridge = PlivoStreamBridge(self.s)
+        else:
+            bridge = self.bridge
+        ready, reason = await bridge.ready()
         cfg = await self.get_config(tenant_id)
         out: dict[str, Any] = {"session_id": session_id, "state": ai["state"] if ai else "not_started",
                                "language": ai["language"] if ai else None, "turns": ai["turns"] if ai else 0,
-                               "timings_ms": ai.get("timings_ms") if ai else {}, "error": ai.get("error") if ai else None,
+                               "timings_ms": ai.get("timings_ms") if ai else {},
+                               "last_exchange": strip_words(ai.get("last_exchange")) if ai else None,   # timings only: no words live
+                               "transcript": strip_words(ai.get("transcript", [])) if ai else [],
+                               "error": ai.get("error") if ai else None,
                                "stop_reason": ai.get("stop_reason") if ai else None,
-                               "media": {"connected": bool(ai and ai["media"]["connected"]), "bridge": self.bridge.name,
+                               "media": {"connected": bool(ai and ai["media"]["connected"]), "bridge": bridge.name,
                                          "bridge_ready": ready, "bridge_reason": reason},
                                "models": cfg["models"], "ai_enabled_global": self.s.ai_enabled, "ai_enabled_tenant": cfg["enabled"]}
         if detail:
@@ -338,6 +503,8 @@ class AiService:
             log.exception("AI cleanup on call end failed")
 
     async def _emit(self, tenant_id: str, etype: str, session_id: str, reason: str | None = None) -> None:
+        if self.activity is not None:
+            self.activity.publish(tenant_id, etype, session_id=session_id, data={"reason": reason})
         if self.emitter:
             await self.emitter.emit_generic(tenant_id, etype, f"{session_id}:{etype}:{hashlib.sha1(str(utcnow()).encode()).hexdigest()[:8]}",
                                             {"session_id": session_id, "reason": reason})
