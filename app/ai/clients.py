@@ -12,6 +12,8 @@ import base64
 import io
 import json
 import logging
+import os
+import re
 import struct
 import time
 import wave
@@ -91,6 +93,33 @@ def validate_service_url(url: str, s: Settings) -> str:
     return url.rstrip("/")
 
 
+def resolve_stt_model(s: Settings, cfg: dict) -> dict:
+    """Which STT model NAME the application uses, where it comes from, and what it does and does not prove. No secrets.
+
+    Precedence of the NAME (highest first): tenant `ai_config.models.stt` > process environment `MME_TEL_AI_STT_MODEL` > `.env` file > application default.
+    (Environment beats the .env file in pydantic-settings; the tenant document is merged over the settings value in `AiService.get_config`.)
+    IMPORTANT: for RunPod `/runsync` endpoints the name is NOT sent in the request at all (the endpoint decides which model runs); it is only sent as the
+    `model` form field to OpenAI-style `/v1/audio/transcriptions` servers. So it is a label for logs/dashboards/config checks, never proof of what is
+    loaded: verify the loaded model with the worker's health response (`model_id`, `model_commit_hash`)."""
+    models = (cfg or {}).get("models") or {}
+    effective = models.get("stt") or s.ai_stt_model
+    if (cfg or {}).get("_stt_model_source") == "tenant":
+        source = "tenant ai_config.models.stt"
+    elif "MME_TEL_AI_STT_MODEL" in os.environ:
+        source = "process environment MME_TEL_AI_STT_MODEL"
+    elif "ai_stt_model" in getattr(s, "model_fields_set", set()):
+        source = ".env file (MME_TEL_AI_STT_MODEL)"
+    else:
+        source = "application default"
+    url = (cfg or {}).get("stt_url") or ""
+    path = ((cfg or {}).get("paths") or {}).get("stt", "")
+    runsync = url.rstrip("/").endswith("/runsync") or path.endswith("/runsync")
+    return {"effective_name": effective, "source": source, "settings_expected_model_id": s.ai_stt_model,
+            "name_equals_settings_expected": effective == s.ai_stt_model, "name_sent_to_provider": not runsync,
+            "default_language": (cfg or {}).get("default_language", "auto"),
+            "runtime_model_verified_by_this_value": False}
+
+
 def pcm16_to_wav(pcm: bytes, rate: int) -> bytes:
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
@@ -162,6 +191,51 @@ class ServiceEndpoint:
     timeout: float
 
 
+# A tenant's `key_refs[service]` names an ENVIRONMENT VARIABLE of the service process that holds the API key. Only names of this shape are honoured: a tenant setting
+# must never be able to make the service read (and send to a model host) an arbitrary environment secret such as the JWT or webhook key.
+KEY_REF_RE = re.compile(r"^(?:RUNPOD|MME_TEL_KEY)_[A-Z0-9_]{1,50}$")
+_PLAINTEXT_WARNED: set[str] = set()
+
+
+def resolve_key_ref(name) -> str | None:
+    """The value of the environment variable `name`, or None if the name is not an allowed reference, or the variable is unset/blank. Never logs."""
+    if not isinstance(name, str) or not KEY_REF_RE.fullmatch(name):
+        return None
+    v = os.environ.get(name)
+    return v.strip() if v and v.strip() else None
+
+
+def credential_status(cfg: dict, s) -> dict:
+    """Where each service's API key comes from, WITHOUT any value: {service: {source, ref_name, ref_resolves}}. `ref_name` is an environment-variable NAME."""
+    out = {}
+    refs = cfg.get("key_refs") if isinstance(cfg.get("key_refs"), dict) else {}
+    keys = cfg.get("keys") if isinstance(cfg.get("keys"), dict) else {}
+    for svc in SERVICES:
+        ref = refs.get(svc)
+        resolves = bool(ref) and resolve_key_ref(ref) is not None
+        if resolves:
+            source = "key_ref"
+        elif keys.get(svc):
+            source = "plaintext_tenant_key"
+        elif cfg.get(f"{svc}_api_key"):
+            source = "tenant_api_key_field"
+        elif getattr(s, "ai_api_key", None) and s.ai_api_key.get_secret_value():
+            source = "service_environment_key"
+        else:
+            source = "none"
+        out[svc] = {"source": source, "ref_name": ref if isinstance(ref, str) and KEY_REF_RE.fullmatch(ref) else None, "ref_resolves": resolves,
+                    "plaintext_present": bool(keys.get(svc))}
+    return out
+
+
+# Endpoints whose TTS worker answered with a BAKED voice (response `voice` other than "request"): such a worker ignores `reference_audio_base64`
+# (handler contract: ignored unless ALLOW_REQUEST_REF=1, in which case it answers voice="request"), so the ~1 MB upload per request is skipped for them.
+# Keyed by endpoint URL, per process, bounded, and re-probed after REF_SKIP_TTL_S so a worker that is redeployed with ALLOW_REQUEST_REF=1 is noticed.
+_REF_SKIP: dict[str, float] = {}
+REF_SKIP_TTL_S = 900.0
+REF_SKIP_MAX = 64
+
+
 class ModelClients:
     """Bounded-concurrency, timeout-guarded access to the model services of ONE tenant configuration."""
 
@@ -176,12 +250,22 @@ class ModelClients:
         self.job_counts: dict[str, int] = {}                    # model requests STARTED by this call's clients, per service (usage accounting, not a bill)
 
     def _auth_headers(self, service: str | None = None) -> dict:
+        """Bearer header for one model service. Order: (1) the tenant's `key_refs[service]` = the NAME of an environment variable of the service process
+        (restricted to RUNPOD_* / MME_TEL_KEY_*, see KEY_REF_RE); (2) LEGACY plaintext `keys[service]` stored in the tenant document (deprecated: warned once, never
+        logged); (3) legacy `<service>_api_key`; (4) the service-wide MME_TEL_AI_API_KEY. A reference whose variable is unset falls through, so migrating never causes an
+        outage."""
         key = None
-        if service and isinstance(self.cfg.get("keys"), dict) and self.cfg["keys"].get(service):
+        refs = self.cfg.get("key_refs")
+        if service and isinstance(refs, dict) and refs.get(service):
+            key = resolve_key_ref(refs[service])
+        if not key and service and isinstance(self.cfg.get("keys"), dict) and self.cfg["keys"].get(service):
             key = self.cfg["keys"][service]
-        elif service and self.cfg.get(f"{service}_api_key"):
+            if service not in _PLAINTEXT_WARNED:
+                _PLAINTEXT_WARNED.add(service)
+                log.warning("tenant plaintext API key in use for %s: migrate it to key_refs (an environment-variable reference)", service)
+        if not key and service and self.cfg.get(f"{service}_api_key"):
             key = self.cfg[f"{service}_api_key"]
-        elif self.s.ai_api_key:
+        if not key and self.s.ai_api_key:
             key = self.s.ai_api_key.get_secret_value()
         return {"Authorization": f"Bearer {key}"} if key else {}
 
@@ -196,9 +280,13 @@ class ModelClients:
             raise AiUnavailable(service, "not_configured")
         defaults = {"stt": "/v1/audio/transcriptions", "brain": "/v1/chat/completions", "tts": "/v1/audio/speech", "rag": "/search"}
         t = (self.cfg.get("timeouts") or {}).get(service, self.s.ai_request_timeout_s)
+        custom_path = (self.cfg.get("paths") or {}).get(service)
+        if custom_path:
+            base = url[:-8] if url.endswith("/runsync") else url
+            return ServiceEndpoint(base, custom_path, float(t))
         if url.endswith("/runsync"):
             return ServiceEndpoint(url[:-8], "/runsync", float(t))
-        return ServiceEndpoint(url, (self.cfg.get("paths") or {}).get(service, defaults[service]), float(t))
+        return ServiceEndpoint(url, defaults[service], float(t))
 
     def _runpod_mode(self) -> str:
         """Per-tenant `runpod_mode`: "run" (default: submit with /run, poll /status, cancellable) or "runsync" (one blocking call)."""
@@ -324,6 +412,7 @@ class ModelClients:
             return res
         except asyncio.TimeoutError:
             m.AI_REQUESTS.labels(service, "timeout").inc()
+            turn_trace.note_count(f"{service}_timeout")      # per-turn counter (STT/Brain/TTS/RAG), shown in the trace
             raise AiTimeout(service, "timeout") from None
         except AiError:
             m.AI_REQUESTS.labels(service, "error").inc()
@@ -368,23 +457,30 @@ class ModelClients:
                 b64 = base64.b64encode(wav_bytes).decode("ascii")
                 body = {
                     "input": {
-                        "audio_b64": b64,  # field the mme-stt-runpod handler requires (verified live 2026-10-23)
-                        "audio": b64,
-                        "audio_base64": b64,
-                        "language": {"hinglish": "hi"}.get(language, language) if language and language != "auto" else None,
+                        "audio_b64": b64,  # the ONLY audio field sent: what the mme-stt-runpod handler requires (verified live 2026-10-23; tools/stt_worker_v2 reads it too)
+                        # "hi"/"en"/... go through as they are (hinglish -> hi); "auto" is sent EXPLICITLY as "auto" (auto-detect) so a worker whose default
+                        # is "hi" cannot silently turn the tenant's auto into Hindi; only a missing language (None) means "the worker's default".
+                        "language": {"hinglish": "hi"}.get(language, language) if language else None,
                         "prompt": prompt_to_send,
                     }
                 }
+                if self.s.ai_stt_legacy_audio_aliases:   # escape hatch for an unknown old worker: the same audio again under two more names (3x the upload)
+                    body["input"]["audio"] = b64
+                    body["input"]["audio_base64"] = b64
                 j = await self._runpod_call("stt", ep, hdrs, body)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
                 if isinstance(out, dict):
                     text = out.get("transcription") or out.get("text") or ""
                     lang = out.get("language") or language
+                    effective = out.get("decode_language")
                 elif isinstance(out, str):
-                    text, lang = out, language
+                    text, lang, effective = out, language, None
                 else:
-                    text, lang = "", language
-                return {"text": text.strip(), "language": lang}
+                    text, lang, effective = "", language, None
+                res = {"text": text.strip(), "language": lang}
+                if effective:
+                    res["decode_language"] = effective          # the language the worker actually decoded with (new workers only)
+                return res
             else:
                 files = {"file": ("audio.wav", pcm16_to_wav(pcm, rate), "audio/wav")}
                 data = {"model": self.cfg.get("models", {}).get("stt", self.s.ai_stt_model)}
@@ -489,14 +585,18 @@ class ModelClients:
 
         # Fallback for RunPod /runsync or non-streaming paths:
         if ep.path.endswith("/runsync"):
-            res = await self.chat(messages, tools=tools, temperature=temperature)
-            if res.get("tool_calls"):
-                yield {"tool_calls": res["tool_calls"]}
-            txt = res.get("text", "")
-            if txt:
-                yield {"delta": txt}
-            yield {"done": True, "text": txt}
-            return
+            if not self.cfg.get("brain_stream"):
+                res = await self.chat(messages, tools=tools, temperature=temperature)
+                if res.get("tool_calls"):
+                    yield {"tool_calls": res["tool_calls"]}
+                txt = res.get("text", "")
+                if txt:
+                    yield {"delta": txt}
+                yield {"done": True, "text": txt}
+                return
+            # Tenant requested brain_stream on runsync endpoint: attempt streaming route
+            stream_path = (self.cfg.get("paths") or {}).get("brain_stream") or "/openai/v1/chat/completions"
+            ep = ServiceEndpoint(ep.url, stream_path, ep.timeout)
 
         body: dict = {
             "model": model,
@@ -525,6 +625,17 @@ class ModelClients:
         try:
             async with self._sem:
                 async with self._http.stream("POST", ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout) as resp:
+                    if resp.status_code in (404, 405) and self.cfg.get("brain_stream"):
+                        log.warning("brain_stream route %s%s unavailable (HTTP %d); falling back to synchronous chat", ep.url, ep.path, resp.status_code)
+                        res = await self.chat(messages, tools=tools, temperature=temperature)
+                        if res.get("tool_calls"):
+                            yield {"tool_calls": res["tool_calls"]}
+                        txt = res.get("text", "")
+                        if txt:
+                            yield {"delta": txt}
+                        yield {"done": True, "text": txt}
+                        return
+
                     if resp.status_code >= 400:
                         err_content = await resp.aread()
                         raise AiError("brain", "http_error", f"{resp.status_code}: {err_content.decode(errors='replace')[:160]}")
@@ -618,7 +729,33 @@ class ModelClients:
             m.AI_LATENCY.labels("brain").observe(time.perf_counter() - t0)
 
     # ------------------------------------------------------------------ TTS
-    def _tts_runpod_body(self, text: str, language: str, model: str) -> dict:
+    def _reference_not_needed(self, ep_key: str | None) -> bool:
+        if not ep_key or not self.s.ai_tts_reference_adaptive:
+            return False
+        exp = _REF_SKIP.get(ep_key)
+        if exp is None:
+            return False
+        if time.monotonic() >= exp:          # re-probe: send the reference once more and look at the answer
+            _REF_SKIP.pop(ep_key, None)
+            return False
+        return True
+
+    def _note_tts_voice(self, ep_key: str | None, out) -> None:
+        """Learn from the worker's own answer whether it used the reference we sent: voice == "request" means yes (keep sending), any other voice name means
+        it used its baked voice and ignored the upload (stop sending, re-probe later). No `voice` field (an older worker) changes nothing."""
+        if not ep_key or not self.s.ai_tts_reference_adaptive or not isinstance(out, dict) or not self._tts_reference_b64():
+            return
+        voice = out.get("voice")
+        if not isinstance(voice, str) or not voice:
+            return
+        if voice == "request":
+            _REF_SKIP.pop(ep_key, None)
+        else:
+            if len(_REF_SKIP) >= REF_SKIP_MAX and ep_key not in _REF_SKIP:
+                _REF_SKIP.pop(next(iter(_REF_SKIP)))
+            _REF_SKIP[ep_key] = time.monotonic() + REF_SKIP_TTL_S
+
+    def _tts_runpod_body(self, text: str, language: str, model: str, ep_key: str | None = None) -> dict:
         spoken, lang = text, language
         if self.s.ai_tts_normalize:
             # Chatterbox test: per-sentence hi/en tag (Hindi + Hinglish -> hi, plain English -> en) and numbers/rupees/dates/phones/
@@ -636,9 +773,11 @@ class ModelClients:
                 "model": model
             }
         }
-        ref = self._tts_reference_b64()
+        if self.s.ai_tts_output_format == "ulaw8k":
+            body["input"]["output_format"] = "ulaw8k"   # opt-in (MME_TEL_AI_TTS_OUTPUT_FORMAT); the reply's own `format` field says what actually came back
+        ref = None if self._reference_not_needed(ep_key) else self._tts_reference_b64()
         if ref:
-            body["input"]["reference_audio_base64"] = ref  # field the mme-tts-runpod handler requires
+            body["input"]["reference_audio_base64"] = ref  # older workers require it; v3/v4 handlers ignore it unless ALLOW_REQUEST_REF=1 (see _note_tts_voice)
         return body
 
     async def synthesize_stream(self, text: str, language: str) -> AsyncIterator[TtsAudioChunk]:
@@ -657,6 +796,8 @@ class ModelClients:
         model = self.cfg.get("models", {}).get("tts", self.s.ai_tts_model)
         body = self._tts_runpod_body(text, language, model)
         body["input"].update(stream=True, output_format="ulaw8k")
+        if os.getenv("ALLOW_UNWATERMARKED_STREAMING") == "1":
+            body["input"]["allow_unwatermarked"] = True
         t0 = time.perf_counter()
         self._count_job("tts")
         jid = None
@@ -703,11 +844,23 @@ class ModelClients:
                         finished = True
                         if status != "COMPLETED":
                             raise AiError("tts", "runpod_error", f"status={status}")
-                        if got_any:
-                            raise AiError("tts", "bad_response", "stream ended without a final chunk")
-                        done = await self._http.get(f"{ep.url}/status/{jid}", headers=hdrs, timeout=30)   # a non-streaming worker: whole result
+                        done = await self._http.get(f"{ep.url}/status/{jid}", headers=hdrs, timeout=30)
                         dj = done.json() if done.status_code < 400 else None
                         out = dj.get("output") if isinstance(dj, dict) else None
+                        if isinstance(out, list) and out:
+                            for item in out[expected:]:
+                                chunk = self._parse_tts_chunk(item)
+                                expected += 1
+                                yield chunk
+                                if chunk.final:
+                                    return
+                            if expected > 0:
+                                return
+                            out = out[0]
+                        dj = done.json() if done.status_code < 400 else None
+                        out = dj.get("output") if isinstance(dj, dict) else None
+                        if isinstance(out, list) and out:
+                            out = out[0]
                         if isinstance(out, dict) and out.get("error"):
                             raise AiError("tts", "runpod_error", str(out["error"])[:200])
                         b64 = (out.get("audio") or out.get("audio_base64")) if isinstance(out, dict) else None
@@ -772,18 +925,30 @@ class ModelClients:
             hdrs = self._auth_headers("tts")
             model = self.cfg.get("models", {}).get("tts", self.s.ai_tts_model)
             if ep.path.endswith("/runsync"):
-                body = self._tts_runpod_body(text, language, model)
+                body = self._tts_runpod_body(text, language, model, ep_key=ep.url)
                 j = await self._runpod_call("tts", ep, hdrs, body)
                 out = j.get("output", {}) if isinstance(j, dict) else {}
+                if isinstance(out, list) and out:
+                    out = out[0] if isinstance(out[0], dict) else {}
+                self._note_tts_voice(ep.url, out)
                 b64_audio = None
                 if isinstance(out, dict):
                     b64_audio = out.get("audio") or out.get("audio_base64")
                 elif isinstance(out, str):
                     b64_audio = out
                 if not b64_audio:
+                    if isinstance(out, dict) and out.get("error"):       # the handler answered with its own error (OOM, unknown voice, bad language ...)
+                        raise AiError("tts", "worker_error", str(out["error"])[:160])
                     raise AiError("tts", "bad_response", "missing audio in output")
-                wav_bytes = base64.b64decode(b64_audio)
-                return wav_to_pcm16(wav_bytes)
+                try:
+                    audio_bytes = base64.b64decode(b64_audio)
+                except ValueError:
+                    raise AiError("tts", "bad_audio", "audio is not base64") from None
+                if isinstance(out, dict) and out.get("format") == "ulaw8k":   # G.711 mu-law 8 kHz, as requested: no WAV, no resampling
+                    if not audio_bytes or len(audio_bytes) > 8000 * TTS_MAX_SECONDS:
+                        raise AiError("tts", "bad_audio", "empty or too long")
+                    return codec.mulaw_to_pcm16(audio_bytes), 8000
+                return wav_to_pcm16(audio_bytes)   # a worker that ignores output_format (or the default) still answers with a WAV
             else:
                 body = {"model": model, "input": text, "response_format": "wav", "language": language}
                 r = await self._http.post(ep.url + ep.path, json=body, headers=hdrs, timeout=ep.timeout)
