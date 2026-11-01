@@ -13,6 +13,7 @@ class StreamingClients(FakeClients):
         super().__init__()
         self.n_chunks, self.gap, self.fail_at = n_chunks, gap, fail_at
         self.stream_calls, self.closed, self.produced, self.clause_done_at = 0, [], 0, {}
+        self.s = type("SettingsShim", (), {"ai_tts_prebuffer_ms": 0})()
 
     async def synthesize_stream(self, text, language):
         self.stream_calls += 1
