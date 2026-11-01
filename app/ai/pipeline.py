@@ -844,8 +844,10 @@ class Conversation:
                 first_audio = True
                 prebuffer: list[tuple[bytes, int, float]] = []
                 prebuffered_ms = 0.0
-                target_prebuffer_ms = getattr(getattr(self.clients, "s", None), "ai_tts_prebuffer_ms", 400) if self.tts_stream else 0
+                configured_prebuffer = getattr(getattr(self.clients, "s", None), "ai_tts_prebuffer_ms", 400) if self.tts_stream else 0
+                target_prebuffer_ms = float(configured_prebuffer)
                 prebuffer_released = (target_prebuffer_ms <= 0)
+                t_clause_started = time.perf_counter()
 
                 def _build_chunk(audio_b: bytes, rate_i: int, sent_timing_ms: float) -> TurnChunk:
                     nonlocal is_first_chunk, first_audio
@@ -926,6 +928,10 @@ class Conversation:
                         chunk_ms = (len(audio) / 2 / srate) * 1000.0 if srate > 0 else 0.0
                         prebuffer.append((audio, srate, sent_ms))
                         prebuffered_ms += chunk_ms
+                        if len(prebuffer) == 1 and configured_prebuffer > 0:
+                            elapsed_c0 = (time.perf_counter() - t_clause_started) * 1000.0
+                            if elapsed_c0 < 350.0:
+                                target_prebuffer_ms = min(float(configured_prebuffer), 240.0)
                         if prebuffered_ms >= target_prebuffer_ms:
                             prebuffer_released = True
                             while prebuffer:

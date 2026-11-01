@@ -816,7 +816,7 @@ class ModelClients:
                 jid = j.get("id") if isinstance(j, dict) else None
                 if not jid:
                     raise AiError("tts", "bad_response", "no job id")
-                expected, got_any, delay = 0, False, 0.03
+                expected, got_any, delay = 0, False, 0.02
                 deadline = time.monotonic() + ep.timeout
                 while True:
                     sr = await self._http.get(f"{ep.url}/stream/{jid}", headers=hdrs, timeout=30)
@@ -832,7 +832,7 @@ class ModelClients:
                         if chunk.seq > expected:
                             raise AiError("tts", "bad_response", f"stream gap: expected seq {expected}, got {chunk.seq}")
                         expected += 1
-                        got_any, delay = True, 0.03
+                        got_any, delay = True, 0.015
                         if chunk.final:
                             finished = True
                         yield chunk
@@ -872,7 +872,12 @@ class ModelClients:
                     if time.monotonic() > deadline:
                         raise asyncio.TimeoutError
                     await asyncio.sleep(delay)
-                    delay = min(delay * 1.5, 0.15)
+                    # Adaptive dynamic polling: 15-35ms once streaming has started to minimize chunk pickup latency;
+                    # 20-50ms during initial worker cold startup.
+                    if got_any:
+                        delay = min(delay * 1.25, 0.035)
+                    else:
+                        delay = min(delay * 1.3, 0.05)
         except asyncio.TimeoutError:
             failed = True
             m.AI_REQUESTS.labels("tts", "timeout").inc()

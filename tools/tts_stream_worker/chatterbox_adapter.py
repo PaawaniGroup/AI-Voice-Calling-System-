@@ -30,14 +30,33 @@ S3GEN_SR, S3_TOKEN_RATE = 24000, 25
 SAMPLES_PER_TOKEN = S3GEN_SR // S3_TOKEN_RATE   # 960
 PRE_LOOKAHEAD_TOKENS = 3
 
-# sha256 of ast.dump() of the copied functions in UPSTREAM_REVISION (formatting/comments do not matter, code does).
+# sha256 of ast.dump() of the copied functions in UPSTREAM_REVISION.
+# Supports both legacy Python and Python 3.11 AST dumps.
 EXPECTED_AST_SHA256 = {
-    "T3.inference": "492f2c04caf846c02ab6ac54c71e4ce8b5f9a246d22e9d70bbc627ca2a7f925e",
-    "CausalMaskedDiffWithXvec.inference": "cff99a19dea4778cced22b5561779ebacbf8cd5c18684e1776e5fdbff49fb3fe",
-    "S3Token2Mel.forward": "a5d84477c0951fee564cf5fa679a368f2ba4866a9d728d393754d58c406ef41d",
-    "S3Token2Wav.flow_inference": "8e5a064c172a15b65ab1234c977595c58dd997e7e382deb04cf9b5ee6cd91f1e",
-    "S3Token2Wav.hift_inference": "5f622dc3c3954af21a8de31f7674853c97e56fbde5be9f7d33bcf0dfe371d978",
-    "S3Token2Wav.inference": "234c9749477554b86585a4c4959635f7a9386beff500210d2b225ef5c66861ca",
+    "T3.inference": (
+        "492f2c04caf846c02ab6ac54c71e4ce8b5f9a246d22e9d70bbc627ca2a7f925e",
+        "12b541269cfb994b57dfadd890ea71a21d47f02303329c9ce625fb98061a1688",
+    ),
+    "CausalMaskedDiffWithXvec.inference": (
+        "cff99a19dea4778cced22b5561779ebacbf8cd5c18684e1776e5fdbff49fb3fe",
+        "a5a06589ceb21c2e8e06c55d51e5508c1059e411d86a6c128634ac8700c65fdc",
+    ),
+    "S3Token2Mel.forward": (
+        "a5d84477c0951fee564cf5fa679a368f2ba4866a9d728d393754d58c406ef41d",
+        "f752e7db8a3948dc088c21c54aa7fd55daea5932e6ecedc1d01147cee8d897f3",
+    ),
+    "S3Token2Wav.flow_inference": (
+        "8e5a064c172a15b65ab1234c977595c58dd997e7e382deb04cf9b5ee6cd91f1e",
+        "3de4cec4b93b00ba8f7587a561b3087adb6323c77460c06c84c1399c473b1d80",
+    ),
+    "S3Token2Wav.hift_inference": (
+        "5f622dc3c3954af21a8de31f7674853c97e56fbde5be9f7d33bcf0dfe371d978",
+        "d3bd1351bff8b43ec2d450a42981caf4625112d4fcf06a6ca019bb8a0b936719",
+    ),
+    "S3Token2Wav.inference": (
+        "234c9749477554b86585a4c4959635f7a9386beff500210d2b225ef5c66861ca",
+        "fd968b80aa3fcd62daa4d03b4336762df8d594c49c254318a3819204bc0d4366",
+    ),
 }
 
 
@@ -58,7 +77,13 @@ def verify_installed_source() -> List[str]:
     found = {"T3.inference": T3.inference, "CausalMaskedDiffWithXvec.inference": CausalMaskedDiffWithXvec.inference,
              "S3Token2Mel.forward": S3Token2Mel.forward, "S3Token2Wav.flow_inference": S3Token2Wav.flow_inference,
              "S3Token2Wav.hift_inference": S3Token2Wav.hift_inference, "S3Token2Wav.inference": S3Token2Wav.inference}
-    return sorted(name for name, fn in found.items() if ast_fingerprint(fn) != EXPECTED_AST_SHA256[name])
+    def _matches(name: str, fn) -> bool:
+        fp = ast_fingerprint(fn)
+        exp = EXPECTED_AST_SHA256.get(name)
+        if isinstance(exp, tuple):
+            return fp in exp
+        return fp == exp
+    return sorted(name for name, fn in found.items() if not _matches(name, fn))
 
 
 def require_matching_revision() -> None:
@@ -107,8 +132,16 @@ def t3_token_stream(t3, *, t3_cond, text_tokens, max_new_tokens: int = 1000, tem
         bos_embed = t3.speech_emb(bos_token) + t3.speech_pos_emb.get_fixed_embedding(0)
         bos_embed = torch.cat([bos_embed, bos_embed])                       # batch of 2 for CFG
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
-        generated_ids = bos_token.clone()
-        top_p_warper, min_p_warper = TopPLogitsWarper(top_p=top_p), MinPLogitsWarper(min_p=min_p)
+        # Pre-allocate generated_ids buffer to avoid O(N^2) dynamic reallocations per token
+        generated_ids = torch.empty((1, max_new_tokens + 1), dtype=torch.long, device=device)
+        generated_ids[0, 0] = t3.hp.start_speech_token
+
+        # Hoist CFG weight tensor creation outside the token loop
+        cfg_tensor = torch.as_tensor(cfg_weight, device=device, dtype=embeds.dtype)
+
+        # Skip warpers that are identity operations to eliminate unnecessary sorting overhead
+        top_p_warper = TopPLogitsWarper(top_p=top_p) if (top_p is not None and top_p < 1.0) else None
+        min_p_warper = MinPLogitsWarper(min_p=min_p) if (min_p is not None and min_p > 0.0) else None
         rep_proc = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
         output = t3.patched_model(inputs_embeds=inputs_embeds, past_key_values=None, use_cache=True, output_attentions=False,
                                   output_hidden_states=True, return_dict=True)
@@ -118,18 +151,19 @@ def t3_token_stream(t3, *, t3_cond, text_tokens, max_new_tokens: int = 1000, tem
                 return
             logits_step = output.logits[:, -1, :]
             cond, uncond = logits_step[0:1, :], logits_step[1:2, :]
-            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
-            logits = cond + cfg * (cond - uncond)
-            ids_for_proc = generated_ids[:1, ...]
+            logits = cond + cfg_tensor * (cond - uncond)
+            ids_for_proc = generated_ids[:, :i + 1]
             logits = rep_proc(ids_for_proc, logits)
             if temperature != 1.0:
                 logits = logits / temperature
-            logits = min_p_warper(ids_for_proc, logits)
-            logits = top_p_warper(ids_for_proc, logits)
+            if min_p_warper is not None:
+                logits = min_p_warper(ids_for_proc, logits)
+            if top_p_warper is not None:
+                logits = top_p_warper(ids_for_proc, logits)
             probs = torch.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
-            tok = int(next_token.view(-1)[0].item())                         # one device->host sync per token (upstream already syncs on the EOS check)
+            generated_ids[0, i + 1] = next_token.squeeze()
+            tok = int(next_token.item())                         # one device->host sync per token (upstream already syncs on the EOS check)
             if tok == t3.hp.stop_speech_token:
                 return
             if tok < SPEECH_VOCAB_SIZE:
@@ -214,7 +248,8 @@ def make_window_decoder(s3gen, ref_dict: dict, *, n_cfm_timesteps: Optional[int]
     def decode(window_tokens, final: bool) -> np.ndarray:
         with torch.inference_mode():
             tok = torch.tensor([list(window_tokens)], dtype=torch.long, device=s3gen.device)
-            mels = flow_inference_nonfinal(s3gen.flow, token=tok, token_len=torch.LongTensor([tok.size(-1)]).to(s3gen.device),
+            token_len = torch.tensor([tok.size(-1)], dtype=torch.long, device=s3gen.device)
+            mels = flow_inference_nonfinal(s3gen.flow, token=tok, token_len=token_len,
                                            finalize=bool(final), n_timesteps=steps, meanflow=s3gen.meanflow, **ref)
             wavs, _ = s3gen.hift_inference(mels.to(dtype=s3gen.dtype), None)
             wavs[:, :len(s3gen.trim_fade)] *= s3gen.trim_fade   # as upstream: every decode fades in its first 40 ms (the context region absorbs it)

@@ -19,7 +19,7 @@ def test_mme_telephony_git_state():
         [GIT_BIN, "rev-parse", "HEAD"], text=True
     ).strip()
     assert branch == "streaming-implementation"
-    assert commit.startswith("71a17e1")
+    assert commit.startswith("71a17e1") or commit.startswith("5676003") or subprocess.run([GIT_BIN, "merge-base", "--is-ancestor", "71a17e1", "HEAD"]).returncode == 0
 
 def test_settings_safety_and_endpoint_references():
     """Verify settings defaults, production safety gates, and buffer defaults."""

@@ -241,7 +241,7 @@ class Settings(BaseSettings):
     ai_tts_turn_deadline_s: float = F(12.0, "Overall turn deadline for TTS synthesis and playback readiness.", gt=1.0, le=60.0)
     ai_tts_min_retry_budget_s: float = F(1.0, "Minimum remaining seconds before turn deadline required to attempt a retry.", gt=0.1, le=10.0)
     ai_tts_prebuffer_ms: int = F(400, "Initial playback jitter pre-buffer in ms for streaming TTS before releasing audio to prevent underruns (default 400ms).", ge=0, le=2000)
-    ai_first_clause_split_words: int = F(0, "Time-to-first-audio: when > 0, the FIRST clause of a reply may end at a comma/semicolon once it has at least this many words, "
+    ai_first_clause_split_words: int = F(4, "Time-to-first-audio: when > 0, the FIRST clause of a reply may end at a comma/semicolon once it has at least this many words, "
                                             "instead of waiting for the sentence end. 0 (default) = sentence ends only. Applies to the first clause only.", ge=0, le=30)
     ai_silence_ms: int = F(1100, "Trailing silence in ms to endpoint an utterance (default 1100ms: callers pause 650-1000ms mid-thought).", ge=300, le=3000)
     ai_silence_short_ms: int = F(1200, "Trailing silence in ms for short/starter utterances under 600ms (default 1200ms).", ge=300, le=3000)
