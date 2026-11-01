@@ -236,12 +236,34 @@ REF_SKIP_TTL_S = 900.0
 REF_SKIP_MAX = 64
 
 
+KNOWN_PRODUCTION_ENDPOINTS = {
+    "stt": "ua9l3gus6qjnmg",
+    "brain": "hu8qhrvlxbv314",
+    "tts": "6bmxas8ccwzhrv",
+}
+
+
+class ProductionEndpointFenced(AiUnavailable):
+    """Raised when development code attempts to route to shared production endpoints."""
+
+    def __init__(self, service: str, endpoint_id: str):
+        super().__init__(
+            service,
+            "production_endpoint_fenced",
+            f"Dedicated development {service.upper()} endpoint is not configured; "
+            f"silent usage of shared production endpoint '{endpoint_id}' is blocked by strict environment isolation."
+        )
+        self.endpoint_id = endpoint_id
+        self.code = "production_endpoint_fenced"
+
+
 class ModelClients:
     """Bounded-concurrency, timeout-guarded access to the model services of ONE tenant configuration."""
 
     def __init__(self, s: Settings, cfg: dict, transport: httpx.AsyncBaseTransport | None = None):
         self.s, self.cfg = s, cfg or {}
         self._sem = asyncio.Semaphore(s.ai_max_concurrency)
+        self._custom_transport = transport is not None
         limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=120.0)
         self._http = httpx.AsyncClient(transport=transport, follow_redirects=False, limits=limits,
                                        timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0))
@@ -278,15 +300,28 @@ class ModelClients:
         url = (self.cfg.get(f"{service}_url") or "").rstrip("/")
         if not url:
             raise AiUnavailable(service, "not_configured")
+
+        # Strict Environment Isolation Guard:
+        # In non-production environments, refuse to silently route live network requests to known production endpoints.
+        if getattr(self.s, "ai_strict_env_isolation", True) and not self.s.is_prod_like and not getattr(self, "_custom_transport", False):
+            prod_id = KNOWN_PRODUCTION_ENDPOINTS.get(service)
+            if prod_id and prod_id in url:
+                log.error("FENCING VIOLATION: development environment attempted to contact shared production %s endpoint %s", service, prod_id)
+                raise ProductionEndpointFenced(service, prod_id)
+
         defaults = {"stt": "/v1/audio/transcriptions", "brain": "/v1/chat/completions", "tts": "/v1/audio/speech", "rag": "/search"}
         t = (self.cfg.get("timeouts") or {}).get(service, self.s.ai_request_timeout_s)
         custom_path = (self.cfg.get("paths") or {}).get(service)
         if custom_path:
             base = url[:-8] if url.endswith("/runsync") else url
-            return ServiceEndpoint(base, custom_path, float(t))
-        if url.endswith("/runsync"):
-            return ServiceEndpoint(url[:-8], "/runsync", float(t))
-        return ServiceEndpoint(url, defaults[service], float(t))
+            ep = ServiceEndpoint(base, custom_path, float(t))
+        elif url.endswith("/runsync"):
+            ep = ServiceEndpoint(url[:-8], "/runsync", float(t))
+        else:
+            ep = ServiceEndpoint(url, defaults[service], float(t))
+
+        log.debug("Resolved %s endpoint: host=%s, path=%s, mode=%s (credentials redacted)", service, ep.url, ep.path, self._runpod_mode())
+        return ep
 
     def _runpod_mode(self) -> str:
         """Per-tenant `runpod_mode`: "run" (default: submit with /run, poll /status, cancellable) or "runsync" (one blocking call)."""

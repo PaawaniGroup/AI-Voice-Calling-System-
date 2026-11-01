@@ -258,6 +258,10 @@ class Settings(BaseSettings):
     ai_repetition_penalty: float = F(1.15, "Repetition penalty for Brain replies (default 1.15).", ge=1.0, le=2.0)
     ai_presence_penalty: float = F(0.3, "Presence penalty for Brain replies (default 0.3).", ge=0.0, le=2.0)
     ai_frequency_penalty: float = F(0.2, "Frequency penalty for Brain replies (default 0.2).", ge=0.0, le=2.0)
+    ai_dev_stt_endpoint_id: str = F("", "RunPod endpoint ID for dedicated development STT (separate from production ua9l3gus6qjnmg).")
+    ai_dev_brain_endpoint_id: str = F("", "RunPod endpoint ID for dedicated development Brain (separate from production hu8qhrvlxbv314).")
+    ai_dev_tts_endpoint_id: str = F("dzqzqas7frc0zt", "RunPod endpoint ID for dedicated development TTS (separate from production 6bmxas8ccwzhrv).")
+    ai_strict_env_isolation: bool = F(True, "When True in non-production environments, blocks requests to known production endpoints.")
 
     @property
     def is_prod_like(self) -> bool:
