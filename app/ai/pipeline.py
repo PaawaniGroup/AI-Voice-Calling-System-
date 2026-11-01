@@ -14,6 +14,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
+from app.ai import grounding as G
 from app.ai import turn_trace
 from app.observability import metrics as m
 from app.ai.clients import AiError, ModelClients
@@ -285,6 +286,10 @@ class TurnChunk:
     script_check: dict = field(default_factory=dict)
 
 
+RAG_UNAVAILABLE_NOTE = ("[The college knowledge base could not be reached for this question. Do NOT state specific fees, cutoffs, dates, seats, rankings or "
+                        "placement figures from memory. Say briefly that you will confirm those details, and offer a counsellor follow-up.]")
+
+
 def clean_for_tts(text: str) -> str:
     """Strips emojis (BMP and astral planes), special symbols, and excessive whitespace
     so TTS models receive clean phonetic text."""
@@ -325,21 +330,82 @@ def split_sentences(text: str) -> list[str]:
     return chunks
 
 
+TTS_MAX_CLAUSE_CHARS = 500      # below the TTS worker's own input limit (MAX_TEXT_CHARS=600 in the handler source, which truncates silently)
+
+
 class StreamingSentenceExtractor:
     """Incrementally extracts completed phonetic sentence clauses from streaming tokens.
     Preserves acronyms (B.Tech, M.B.A.), decimal numbers, and groups short prefixes (<3 words)."""
 
-    def __init__(self, min_words: int = 3):
+    # A full stop after one of these is NOT a clause end: "Rs. 50,000", "Dr. Sharma", "No. 5". Lower-case, without the dot.
+    ABBREVIATIONS = frozenset({"rs", "inr", "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "no", "st", "vs", "approx", "etc", "ex", "ca", "col", "gen", "lt", "mt", "ft"})
+
+    def __init__(self, min_words: int = 3, first_clause_words: int = 0):
         self.min_words = min_words
+        self.first_clause_words = max(0, int(first_clause_words))      # 0 = off; else the first clause may end at a comma/semicolon
+        self._emitted = False
         self.buffer = ""
         import re
+        self._soft = re.compile(r'(?<=[,;])\s+(?=\S)')                  # a comma only counts when followed by a space: "50,000" is never split
         self._pattern = re.compile(r'(?<=[।?!\n])\s+|(?<=[a-zA-Z0-9\u0900-\u097F]{2}\.)\s+(?=[A-Z0-9\u0900-\u097F])')
+
+    def _is_abbreviation_stop(self, end: int) -> bool:
+        """True when the boundary that starts at `end` follows an abbreviation's dot (see ABBREVIATIONS)."""
+        head = self.buffer[:end].rstrip()
+        if not head.endswith("."):
+            return False
+        words = head[:-1].split()
+        return bool(words) and words[-1].lower() in self.ABBREVIATIONS
+
+    def _soft_clause(self) -> list[str]:
+        """First clause only: cut at the first comma/semicolon boundary that leaves at least `first_clause_words` words before it."""
+        if not self.first_clause_words or self._emitted:
+            return []
+        for m in self._soft.finditer(self.buffer):
+            head = self.buffer[:m.start()].strip()
+            if len(head.split()) >= self.first_clause_words:
+                self.buffer = self.buffer[m.end():]
+                self._emitted = True
+                return [clean_for_tts(head)]
+        return []
+
+    @staticmethod
+    def _cut_point(text: str) -> int:
+        """Where to cut an over-long run of text: at the last space inside the limit (never inside a word), else at the limit."""
+        i = text.rfind(" ", 0, TTS_MAX_CLAUSE_CHARS)
+        return i if i > 0 else TTS_MAX_CLAUSE_CHARS
+
+    @classmethod
+    def _cap_text(cls, text: str) -> list[str]:
+        """One clause no longer than TTS_MAX_CLAUSE_CHARS: the TTS worker truncates input.text silently beyond its own limit (600 in the handler source)."""
+        out = []
+        while len(text) > TTS_MAX_CLAUSE_CHARS:
+            cut = cls._cut_point(text)
+            piece = clean_for_tts(text[:cut])
+            if piece:
+                out.append(piece)
+            text = text[cut:].lstrip()
+        text = clean_for_tts(text)
+        if text:
+            out.append(text)
+        return out
 
     def feed(self, token: str) -> list[str]:
         if not token:
             return []
         self.buffer += token
-        splits = [0] + [m.end() for m in self._pattern.finditer(self.buffer)]
+        out = [p for clause in self._boundaries() for p in self._cap_text(clause)]
+        while len(self.buffer) > TTS_MAX_CLAUSE_CHARS:          # no boundary yet, but too long to hold: cut at a space, keep every word
+            cut = self._cut_point(self.buffer)
+            piece = clean_for_tts(self.buffer[:cut])
+            self.buffer = self.buffer[cut:].lstrip()
+            if piece:
+                out.append(piece)
+                self._emitted = True
+        return out
+
+    def _boundaries(self) -> list[str]:
+        splits = [0] + [m.end() for m in self._pattern.finditer(self.buffer) if not self._is_abbreviation_stop(m.start())]
         if len(splits) > 1:
             ready = []
             cand = ""
@@ -355,13 +421,15 @@ class StreamingSentenceExtractor:
                     last_cut = splits[i + 1]
             if last_cut > 0:
                 self.buffer = self.buffer[last_cut:]
-            return ready
-        return []
+            if ready:
+                self._emitted = True
+                return ready
+        return self._soft_clause()
 
     def finish(self) -> list[str]:
-        remaining = clean_for_tts(self.buffer.strip())
+        remaining = self.buffer.strip()
         self.buffer = ""
-        return [remaining] if remaining else []
+        return self._cap_text(remaining) if remaining else []
 
 
 
@@ -412,102 +480,18 @@ def coalesce_user_runs(messages: list[dict]) -> list[dict]:
     return out
 
 
-def is_repeated_clause(
-    clause: str,
-    recent_replies: list[str],
-    current_heard: str,
-    last_heard: str,
-) -> bool:
-    """Detects whether a newly generated clause is an unwanted repeat of a recent assistant response.
-
-    Safety:
-    - Never flags short common acknowledgements or greetings ("haan", "ji", "theek hai", "sure", "namaste", "hello").
-    - Never flags if the caller repeated the exact same query.
-    - Detects exact and normalized sentence matches against recent turns.
-    - Detects semantic question repetition (e.g. asking if result has arrived when caller just disclosed their result/rank).
-    """
-    if not clause or not recent_replies:
-        return False
-
-    clean_curr_clause = clean_for_tts(clause).strip().lower()
-    if not clean_curr_clause:
-        return False
-
-    # 1. Never flag short greetings or legitimate conversational acknowledgments
-    ALLOWED_COMMON_PHRASES = {
-        "haan", "ji", "namaste", "hello", "theek hai", "thik hai", "sure", "yes",
-        "okay", "ok", "dhanyavaad", "dhanyawad", "thank you", "welcome", "नमस्ते",
-        "हाँ", "जी", "ठीक है", "धन्यवाद", "स्वागत है", "welcome to mme", "hello!"
-    }
-    norm_clause = re.sub(r"[^\w\s\u0900-\u097F]", "", clean_curr_clause).strip()
-    if norm_clause in ALLOWED_COMMON_PHRASES or len(norm_clause.split()) <= 1:
-        return False
-
-    # 2. Never flag if caller repeated the exact same query
-    clean_curr_heard = clean_for_tts(current_heard).strip().lower()
-    clean_last_heard = clean_for_tts(last_heard).strip().lower()
-    if clean_curr_heard and clean_last_heard and clean_curr_heard == clean_last_heard:
-        return False
-
-    # 3. Check against recent assistant replies
-    clause_words = set(re.findall(r"[\w\u0900-\u097F]+", clean_curr_clause))
-
-    for prev in recent_replies:
-        if not prev:
-            continue
-        clean_prev = clean_for_tts(prev).strip().lower()
-        norm_prev = re.sub(r"[^\w\s\u0900-\u097F]", "", clean_prev).strip()
-        if not norm_prev:
-            continue
-
-        # Exact normalized match
-        if norm_clause == norm_prev:
-            return True
-
-        # First clause match
-        first_prev_clause = re.split(r"[.!?।]", norm_prev)[0].strip()
-        if first_prev_clause and norm_clause == first_prev_clause:
-            return True
-        if norm_clause.startswith(first_prev_clause) or first_prev_clause.startswith(norm_clause):
-            if len(norm_clause.split()) >= 3 and len(first_prev_clause.split()) >= 3:
-                return True
-
-        # Substantial substring match (> 20 chars)
-        if len(norm_clause) > 20 and (norm_clause in norm_prev or norm_prev in norm_clause):
-            return True
-
-        # High Jaccard token overlap for substantive clauses (>= 4 words)
-        prev_words = set(re.findall(r"[\w\u0900-\u097F]+", clean_prev))
-        if len(clause_words) >= 4 and len(prev_words) >= 4:
-            overlap = len(clause_words & prev_words) / max(len(clause_words), len(prev_words))
-            if overlap >= 0.75:
-                return True
-
-        # 4. Semantic question repetition:
-        # Caller states result/rank available, but assistant repeats asking about result status
-        prev_lower = clean_prev
-        heard_lower = clean_curr_heard
-        clause_lower = clean_curr_clause
-
-        is_prev_asking_result = any(w in prev_lower for w in ("result", "रिजल्ट", "rijalt")) and \
-                                any(w in prev_lower for w in ("jee", "entrance", "exam", "admission")) and \
-                                any(w in prev_lower for w in ("aaya", "aana", "aa gaya", "chahiye ya", "dena hai", "?", "baaki"))
-
-        caller_disclosed_result = any(w in heard_lower for w in ("aa gaya", "aa chuka", "a chuka", "out", "result", "rijalt")) and \
-                                  any(w in heard_lower for w in ("rank", "raink", "lakh", "laakh", "ek lakh", "aaspaas", "95000", "100000"))
-
-        new_clause_asks_result_again = any(w in clause_lower for w in ("result", "रिजल्ट", "rijalt")) and \
-                                       any(w in clause_lower for w in ("chahiye ya", "aana baaki", "aa gaya hai ya", "dena hai", "exam ki jankari"))
-
-        if is_prev_asking_result and caller_disclosed_result and new_clause_asks_result_again:
-            return True
-
-    return False
+from app.ai.repetition_guard import (
+    ALLOWED_COMMON_PHRASES,
+    is_repeated_clause,
+    normalize_multilingual,
+    get_contextual_continuation,
+    caller_requested_repeat,
+)
 
 
 class Conversation:
     def __init__(self, clients: ModelClients | None = None, language: str = "auto", tools: dict | None = None,
-                 max_history: int = 12, devanagari_hindi: bool = False,
+                 max_history: int = 40, devanagari_hindi: bool = False,
                  script_enforcement: bool = False, counsellor_gender: str = "masculine",
                  counsellor_name: str = "MME AI counsellor", hint_placement: str = "user_suffix", streaming=None, duplex=None, glossary_correction: bool = False, strict_grounding: bool = False,
                  tts_overlap: bool = False, tts_stream: bool = False):
@@ -537,6 +521,7 @@ class Conversation:
         self.turns: list[dict] = []
         self.cancelled = False
         self.current_turn_id: str | None = None   # set by the media loop per utterance (unique, monotonically increasing)
+        self.echo_filter = None                   # set by the media loop for captures that began during playback: callable(heard) -> bool
         self._committed: set[str] = set()         # turn ids whose caller transcript is already in `messages` (no duplicate commits)
         self._task: asyncio.Task | None = None
         self._pending_tasks: set[asyncio.Task] = set()
@@ -569,13 +554,38 @@ class Conversation:
         rec["reply"] = ""
         self._trim()
 
+    # Spoken when an utterance could not be transcribed. Fixed phrases: nothing is sent to the LLM, no caller intent is invented, and the
+    # prompt is NOT added to `messages` (an assistant turn without a caller turn would corrupt the history).
+    CLARIFY_PHRASES = {
+        "en": ["Sorry, I couldn't hear that clearly. Could you please repeat?", "Could you say that once again, please?"],
+        "hi": ["माफ़ कीजिए, मैं आपकी बात साफ़ नहीं सुन पाया। क्या आप एक बार फिर से बता सकते हैं?", "क्या आप वही बात दोबारा कह सकते हैं, please?"],
+    }
+
+    async def clarification_audio(self, attempt: int = 0, language: str = "auto"):
+        """(pcm, rate, language, text) of a short spoken re-ask, or None if TTS failed (then the caller hears nothing, as before).
+        `language`: "en" | "hi" | "auto" (follow the conversation's current mode)."""
+        mode = language if language in ("en", "hi") else ("en" if self.current_mode == "en" else "hi")
+        phrases = self.CLARIFY_PHRASES[mode]
+        text = phrases[min(max(attempt, 0), len(phrases) - 1)]
+        try:
+            pcm, rate = await self.clients.synthesize(text, mode)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:      # AiError and anything else: the existing safe failure handling is "no audio", never an exception into the call
+            log.warning("clarification tts failed: %s", type(e).__name__)
+            return None
+        return (pcm, rate, mode, text) if pcm else None
+
     def close_open_turn(self) -> None:
         """Public hook for call teardown."""
         self._reconcile_open_turn()
 
     def _trim(self) -> None:
         head, rest = self.messages[:1], self.messages[1:]
-        self.messages = head + rest[-self.max_history:]
+        rest = rest[-self.max_history:]
+        while rest and rest[0].get("role") != "user":      # never start the window on an orphaned assistant/tool message
+            rest = rest[1:]
+        self.messages = head + rest
 
     async def turn(self, pcm: bytes, rate: int) -> TurnResult:
         """Run one full turn, aggregating streamed sentence chunks into a single result."""
@@ -615,16 +625,18 @@ class Conversation:
             res.script_check["fallback"] = bool(retried and retry_problems)
         return res
 
-    async def stream_turn(self, pcm: bytes, rate: int):
+    async def stream_turn(self, pcm: bytes, rate: int, pre_stt: dict | None = None):
         """Asynchronously stream a turn: STT -> Brain -> split into sentences -> stream synthesize each sentence.
-        Yields `TurnChunk` items so playback begins on sentence 1 while sentence 2 is synthesized in background."""
+        Yields `TurnChunk` items so playback begins on sentence 1 while sentence 2 is synthesized in background.
+        `pre_stt`: the transcription of THIS audio when the media loop already made it (pending-response classification): reused, not repeated."""
         self.cancelled = False
         try:
             self._task = asyncio.current_task()
         except RuntimeError:
             self._task = None
         self._reconcile_open_turn()
-        mark = len(self.messages)
+        start_mark = len(self.messages)
+        assistant_mark = start_mark
         turn_rec: dict | None = None
         res_timings: dict = {}
         # Sentences whose TTS is running while the LLM keeps streaming. FIFO: audio is yielded strictly in sentence order.
@@ -632,7 +644,7 @@ class Conversation:
         try:
             t = time.perf_counter()
             turn_trace.mark("t_stt_sent")
-            stt = await self.clients.transcribe(pcm, rate, self.language)
+            stt = pre_stt if pre_stt is not None else await self.clients.transcribe(pcm, rate, self.language)
             turn_trace.mark("t_stt_final")
             res_timings["stt"] = round((time.perf_counter() - t) * 1000, 1)
             raw_text = (stt.get("text") or "").strip()
@@ -643,6 +655,12 @@ class Conversation:
             if getattr(self, "glossary_correction", False):
                 from app.ai.glossary_correction import correct_glossary
                 heard = correct_glossary(heard)
+
+            ef = getattr(self, "echo_filter", None)
+            if ef is not None and ef(heard):
+                # Audio captured while the assistant played whose transcript is (near) the assistant's own words: echo, not a caller turn.
+                yield TurnChunk(error="likely_echo", timings_ms=res_timings, is_first=True, is_last=True)
+                return
 
             lang = self.language
             if lang == "auto" and stt.get("language"):
@@ -672,7 +690,7 @@ class Conversation:
                             "spoken": [], "timings_ms": res_timings, "mode": turn_mode}
                 self.turns.append(turn_rec)
                 m.AI_CALLER_COMMIT.labels("committed").inc()
-            mark = len(self.messages)
+            assistant_mark = len(self.messages)
 
             # Phase A: emit early TurnChunk with heard text & STT timing so dashboard shows caller transcription immediately
             yield TurnChunk(
@@ -686,18 +704,38 @@ class Conversation:
             )
 
             context = []
-            if self.clients.cfg.get("rag_url"):
+            rag_failed = False
+            rag_configured = bool(self.clients.cfg.get("rag_url"))
+            if rag_configured:
                 t = time.perf_counter()
+                turn_trace.mark("t_rag_start")
                 try:
                     context = await self.clients.retrieve(heard)
-                except AiError as e:  # RAG is optional: degrade, do not fail the turn
-                    log.warning("rag unavailable: %s", e.kind)
+                except Exception as e:  # RAG must not fail the turn (any retriever error, not only AiError), but the failure is never silent: counted, traced, and the Brain is told (below)
+                    log.warning("rag unavailable: %s", getattr(e, "kind", type(e).__name__))
+                    rag_failed = True
+                    turn_trace.note_count("rag_failure")
+                finally:
+                    turn_trace.mark("t_rag_end")      # also when the request failed or timed out: the time spent waiting is what counts
                 res_timings["rag"] = round((time.perf_counter() - t) * 1000, 1)
+            context = [c for c in (context or []) if isinstance(c, str) and c.strip()]       # blank passages are not evidence
+            if rag_configured and not rag_failed and not context:
+                turn_trace.note_count("rag_empty")                                          # a VALID empty result: distinct from rag_failure
+            # Strict grounding (per tenant): a college-fact question may only be answered from evidence. Otherwise the Brain is not asked at all.
+            grounding_reply: str | None = None
+            if G.needs_grounding(heard):
+                if not rag_configured:
+                    turn_trace.note_count("rag_unconfigured")
+                if self.strict_grounding:
+                    decision = G.assess(heard, context, configured=rag_configured, failed=rag_failed)
+                    turn_trace.note_count(f"grounding_{decision.outcome}")
+                    m.AI_GROUNDING.labels(decision.outcome).inc()
+                    if decision.refuse:
+                        grounding_reply = G.refusal_text(turn_mode)
+                        log.info("strict_grounding: no spoken college fact (%s)", decision.outcome)
             user = heard if not context else "CONTEXT:\n" + "\n---\n".join(context) + f"\n\nSTUDENT: {heard}"
             if user_msg is not None:
                 user_msg["content"] = user      # same committed message, now with the retrieved context
-            else:
-                self.messages.append({"role": "user", "content": user})
 
             t_llm_start = time.perf_counter()
             # Inject per-turn hint ONLY for request without mutating conversation history
@@ -706,9 +744,17 @@ class Conversation:
             else:
                 chat_messages = coalesce_user_runs(self.messages)
 
+            if rag_failed:
+                # Retrieval was configured but failed: the Brain must not answer college-specific facts from memory. Not stored in history.
+                chat_messages = list(chat_messages) + [{"role": "system", "content": RAG_UNAVAILABLE_NOTE}]
+
             turn_trace.mark("t_llm_sent")
 
             async def _stream_brain(msgs):
+                if grounding_reply is not None:                  # strict grounding: no evidence, so the Brain is not asked; the fixed reply goes through the normal clause/TTS path
+                    yield {"delta": grounding_reply}
+                    yield {"done": True, "text": grounding_reply}
+                    return
                 if hasattr(self.clients, "chat_stream"):
                     async for item in self.clients.chat_stream(msgs, TOOL_SCHEMAS if self.tools else None):
                         yield item
@@ -721,7 +767,8 @@ class Conversation:
                         yield {"delta": txt}
                     yield {"done": True, "text": txt}
 
-            extractor = StreamingSentenceExtractor(min_words=3)
+            first_clause_words = int(getattr(getattr(self.clients, "s", None), "ai_first_clause_split_words", 0) or 0)
+            extractor = StreamingSentenceExtractor(min_words=3, first_clause_words=first_clause_words)
             streamed_tokens: list[str] = []
             first_token_marked = False
             first_clause_marked = False
@@ -795,40 +842,25 @@ class Conversation:
                 nonlocal is_first_chunk, t_tts_total
                 task, sentence, spoken_clause, q = pending[0]
                 first_audio = True
-                while True:
-                    if self.cancelled:
-                        return
-                    if task.done() and q.empty():
-                        if task.cancelled():
-                            return
-                        exc = task.exception()
-                        if exc:
-                            raise exc
-                        break
-                    try:
-                        item = await q.get()
-                    except asyncio.CancelledError:
-                        return
-                    if item[0] == "err":
-                        raise item[1]
-                    if item[0] == "end":
-                        t_tts_total += item[1]
-                        break
-                    if self.cancelled:                          # barge-in: nothing of this clause may play; the caller's loop ends the turn
-                        return
-                    _, audio, srate, sent_ms = item
+                prebuffer: list[tuple[bytes, int, float]] = []
+                prebuffered_ms = 0.0
+                target_prebuffer_ms = getattr(getattr(self.clients, "s", None), "ai_tts_prebuffer_ms", 400) if self.tts_stream else 0
+                prebuffer_released = (target_prebuffer_ms <= 0)
+
+                def _build_chunk(audio_b: bytes, rate_i: int, sent_timing_ms: float) -> TurnChunk:
+                    nonlocal is_first_chunk, first_audio
                     if first_audio:
                         turn_trace.mark("t_tts_first_chunk")
                         first_audio = False
                         if turn_rec is not None:
                             turn_rec["spoken"].append(sentence)
                     if is_first_chunk:
-                        res_timings["tts"] = sent_ms            # time to the FIRST audio of the turn
-                    yield TurnChunk(
+                        res_timings["tts"] = sent_timing_ms            # time to the FIRST audio of the turn
+                    c_out = TurnChunk(
                         heard=heard if is_first_chunk else None,
                         reply=sentence if is_first_chunk else None,
-                        audio=audio,
-                        sample_rate=srate,
+                        audio=audio_b,
+                        sample_rate=rate_i,
                         language=lang,
                         timings_ms=res_timings if is_first_chunk else {},
                         sentence=spoken_clause,
@@ -846,6 +878,61 @@ class Conversation:
                         },
                     )
                     is_first_chunk = False
+                    return c_out
+
+                while True:
+                    if self.cancelled:
+                        prebuffer.clear()
+                        return
+                    if task.done() and q.empty():
+                        if task.cancelled():
+                            prebuffer.clear()
+                            return
+                        exc = task.exception()
+                        if exc:
+                            raise exc
+                        break
+                    try:
+                        # Wait for audio OR for the synthesis task to end: a task cancelled by `cancel()` (barge-in / newer caller turn) never
+                        # puts anything into `q`, and a bare `q.get()` would block this worker for the rest of the call.
+                        getter = asyncio.ensure_future(q.get())
+                        try:
+                            await asyncio.wait({getter, task}, return_when=asyncio.FIRST_COMPLETED)
+                        finally:
+                            if not getter.done():
+                                getter.cancel()
+                        if not getter.done() or getter.cancelled():
+                            continue                       # the task ended without audio: the checks at the top of the loop decide
+                        item = getter.result()
+                    except asyncio.CancelledError:
+                        # Only the consuming task itself can be cancelled here (hangup / worker stop; `cancel()` cancels the TTS pump tasks, not this one).
+                        # Swallowing it left the media worker alive, waiting for audio of a call that no longer exists.
+                        self.cancelled = True
+                        prebuffer.clear()
+                        raise
+                    if item[0] == "err":
+                        raise item[1]
+                    if item[0] == "end":
+                        t_tts_total += item[1]
+                        while prebuffer:
+                            buf_audio, buf_srate, buf_sent_ms = prebuffer.pop(0)
+                            yield _build_chunk(buf_audio, buf_srate, buf_sent_ms)
+                        break
+                    if self.cancelled:                          # barge-in: nothing of this clause may play; the caller's loop ends the turn
+                        prebuffer.clear()
+                        return
+                    _, audio, srate, sent_ms = item
+                    if not prebuffer_released:
+                        chunk_ms = (len(audio) / 2 / srate) * 1000.0 if srate > 0 else 0.0
+                        prebuffer.append((audio, srate, sent_ms))
+                        prebuffered_ms += chunk_ms
+                        if prebuffered_ms >= target_prebuffer_ms:
+                            prebuffer_released = True
+                            while prebuffer:
+                                buf_audio, buf_srate, buf_sent_ms = prebuffer.pop(0)
+                                yield _build_chunk(buf_audio, buf_srate, buf_sent_ms)
+                        continue
+                    yield _build_chunk(audio, srate, sent_ms)
                 pending.popleft()
 
             cur_messages = chat_messages
@@ -854,11 +941,23 @@ class Conversation:
             regeneration_count = 0
             max_regeneration = 1
             launched_clauses = 0
+            launched_clause_texts: list[str] = []
 
             # Gather recent assistant replies for early anti-repetition check
             prior_turns = [t for t in self.turns if t is not turn_rec]
-            recent_assistant_replies = [t.get("reply", "") for t in prior_turns[-2:] if t.get("reply")]
+            # What counts as "already said": the replies of the last two turns AND the clauses that were actually handed to playback in turns that
+            # were interrupted before they completed (their `reply` is empty by design, but the caller did hear those clauses).
+            recent_assistant_replies = [x for x in ((t.get("reply") or " ".join(t.get("spoken", []))) for t in prior_turns[-2:]) if x]
             last_heard = prior_turns[-1].get("heard", "") if prior_turns else ""
+            repeat_requested = caller_requested_repeat(heard) or grounding_reply is not None   # "dobara bataiye": repeating is the right answer, never blocked; the fixed grounding reply may repeat for a second fact question (a regeneration would call the Brain)
+
+            def _repeats(sentence: str) -> bool:
+                if repeat_requested:
+                    return False
+                hit = is_repeated_clause(sentence, recent_assistant_replies, heard, last_heard, current_turn_clauses=launched_clause_texts)
+                if hit and turn_rec is not None:
+                    turn_rec.setdefault("blocked", []).append(sentence)      # generated, rejected by the guard: never sent to TTS, never in history
+                return hit
 
             while True:
                 tool_calls_to_run = []
@@ -866,7 +965,7 @@ class Conversation:
 
                 async for item in _stream_brain(cur_messages):
                     if self.cancelled:
-                        del self.messages[mark:]
+                        del self.messages[assistant_mark:]
                         yield TurnChunk(error="cancelled", is_last=True)
                         return
 
@@ -887,14 +986,30 @@ class Conversation:
                                 yield TurnChunk(error="cancelled", is_last=True)
                                 return
 
-                            # Early First-Clause Repetition Check BEFORE _launch():
-                            if launched_clauses == 0 and is_repeated_clause(sentence, recent_assistant_replies, heard, last_heard):
-                                log.warning("early_anti_repetition_triggered: first clause repeats previous question")
+                            # Pre-TTS Anti-Repetition Check BEFORE _launch():
+                            if _repeats(sentence):
+                                log.warning("anti_repetition_triggered: clause (index %d) repeats dialogue context: %s", launched_clauses, sentence[:40])
                                 turn_trace.mark("t_anti_repetition_early_detected")
-                                repetition_aborted = True
-                                break
+                                if launched_clauses == 0:
+                                    # First clause: abort stream to allow bounded 1-shot turn regeneration
+                                    repetition_aborted = True
+                                    break
+                                else:
+                                    # Subsequent clause: earlier clauses already went to playback!
+                                    # Substitute contextually appropriate continuation without replaying prior clauses
+                                    continuation = get_contextual_continuation(heard, turn_mode=turn_mode)
+                                    if continuation not in launched_clause_texts:
+                                        log.info("launching continuation for blocked subsequent clause: %s", continuation[:40])
+                                        _launch(continuation)
+                                        launched_clause_texts.append(continuation)
+                                        launched_clauses += 1
+                                        if not self.tts_overlap:
+                                            async for out_chunk in _finish():
+                                                yield out_chunk
+                                    continue
 
                             _launch(sentence)
+                            launched_clause_texts.append(sentence)
                             launched_clauses += 1
                             if not self.tts_overlap:
                                 async for out_chunk in _finish():
@@ -911,39 +1026,61 @@ class Conversation:
                             if len(pending) == before:          # cancelled mid-clause: stop; the next token check ends the turn
                                 break
 
+                # Stream finished: check any final buffered sentence in extractor before deciding to regenerate
+                if not repetition_aborted:
+                    final_sentences = extractor.finish()
+                    for sentence in final_sentences:
+                        if self.cancelled:
+                            yield TurnChunk(error="cancelled", is_last=True)
+                            return
+                        if _repeats(sentence):
+                            log.warning("anti_repetition_triggered: clause (index %d) repeats dialogue context: %s", launched_clauses, sentence[:40])
+                            turn_trace.mark("t_anti_repetition_early_detected")
+                            if launched_clauses == 0:
+                                repetition_aborted = True
+                                break
+                            else:
+                                continuation = get_contextual_continuation(heard, turn_mode=turn_mode)
+                                if continuation not in launched_clause_texts:
+                                    _launch(continuation)
+                                    launched_clause_texts.append(continuation)
+                                    launched_clauses += 1
+                                    if not self.tts_overlap:
+                                        async for out_chunk in _finish():
+                                            yield out_chunk
+                                continue
+
+                        _launch(sentence)
+                        launched_clause_texts.append(sentence)
+                        launched_clauses += 1
+                        if not self.tts_overlap:
+                            async for out_chunk in _finish():
+                                yield out_chunk
+
                 if repetition_aborted:
                     if regeneration_count < max_regeneration:
                         regeneration_count += 1
                         log.info("triggering bounded regeneration (%d/%d)", regeneration_count, max_regeneration)
                         turn_trace.mark("t_anti_repetition_regeneration")
                         streamed_tokens.clear()
-                        extractor = StreamingSentenceExtractor()
-                        heard_lower = heard.lower()
+                        launched_clauses = 0
+                        launched_clause_texts.clear()
+                        extractor = StreamingSentenceExtractor(first_clause_words=first_clause_words)
+                        # The directive may only restate what the caller actually said (their own words) - never a value the caller did not give.
                         if turn_mode == "hi":
-                            if any(w in heard_lower for w in ("result", "rijalt", "rank", "raink", "ek lakh", "lakh")):
-                                directive = (
-                                    f"[CRITICAL: The student stated: '{heard}'. Their result is already available and their rank is approx 1 lakh. "
-                                    f"Do NOT ask whether their result is out or which exam result they need. "
-                                    f"Acknowledge their result and rank directly, and provide relevant engineering college admission options.]"
-                                )
-                            else:
-                                directive = f"[CRITICAL: Do NOT repeat your previous question. The student said: '{heard}'. Answer directly and guide them.]"
+                            directive = (f"[CRITICAL: Do NOT repeat your previous question or sentence. The student said: '{heard}'. "
+                                         f"Acknowledge exactly what they said, do not ask again for anything they have already told you, and move the conversation forward.]")
                         else:
-                            directive = f"[CRITICAL: Do NOT repeat your previous response. The student said: '{heard}'. Answer directly and guide them.]"
+                            directive = (f"[CRITICAL: Do NOT repeat your previous response. The student said: '{heard}'. "
+                                         f"Acknowledge exactly what they said, do not ask again for anything already given, and move forward.]")
                         cur_messages = list(cur_messages) + [{"role": "system", "content": directive}]
                         continue
                     else:
                         log.warning("regeneration exhausted; using contextual fallback")
                         turn_trace.mark("t_anti_repetition_fallback")
-                        heard_lower = heard.lower()
-                        if turn_mode == "hi":
-                            if any(w in heard_lower for w in ("result", "rijalt", "rank", "raink", "ek lakh", "lakh")):
-                                fallback_text = "जी, आपका रिजल्ट आ गया है और आपकी रैंक लगभग एक लाख है। इस रैंक पर आपको कई अच्छे इंजीनियरिंग कॉलेजों में एडमिशन मिल सकता है। क्या आप किसी खास ब्रांच या लोकेशन को प्राथमिकता देना चाहते हैं?"
-                            else:
-                                fallback_text = "जी, मैं आपकी बात समझ गया। बताइए, इस बारे में आप आगे क्या जानकारी चाहते हैं?"
-                        else:
-                            fallback_text = "Understood. Based on your input, I can guide you through the next admission steps. Which colleges or branches are you interested in?"
+                        fallback_text = get_contextual_continuation(heard, turn_mode=turn_mode)
                         _launch(fallback_text)
+                        launched_clause_texts.append(fallback_text)
                         launched_clauses += 1
                         streamed_tokens = [fallback_text]
                         break
@@ -966,34 +1103,7 @@ class Conversation:
                     continue
                 break
 
-            # Stream finished: process any final sentence in extractor if not aborted
-            if not repetition_aborted:
-                final_sentences = extractor.finish()
-                turn_trace.mark("t_llm_done")   # lifecycle 1: the LLM has produced its last token
-                for sentence in final_sentences:
-                    if self.cancelled:
-                        yield TurnChunk(error="cancelled", is_last=True)
-                        return
-                    if launched_clauses == 0 and is_repeated_clause(sentence, recent_assistant_replies, heard, last_heard):
-                        log.warning("early_anti_repetition_triggered on final sentence")
-                        turn_trace.mark("t_anti_repetition_early_detected")
-                        heard_lower = heard.lower()
-                        if turn_mode == "hi":
-                            if any(w in heard_lower for w in ("result", "rijalt", "rank", "raink", "ek lakh", "lakh")):
-                                sentence = "जी, आपका रिजल्ट आ गया है और आपकी रैंक लगभग एक लाख है। इस रैंक पर आपको कई अच्छे इंजीनियरिंग कॉलेजों में एडमिशन मिल सकता है। क्या आप किसी खास ब्रांच या लोकेशन को प्राथमिकता देना चाहते हैं?"
-                            else:
-                                sentence = "जी, मैं आपकी बात समझ गया। बताइए, इस बारे में आप आगे क्या जानकारी चाहते हैं?"
-                        else:
-                            sentence = "Understood. Based on your input, I can guide you through the next admission steps. Which colleges or branches are you interested in?"
-                        streamed_tokens = [sentence]
-
-                    _launch(sentence)
-                    launched_clauses += 1
-                    if not self.tts_overlap:
-                        async for out_chunk in _finish():
-                            yield out_chunk
-            else:
-                turn_trace.mark("t_llm_done")
+            turn_trace.mark("t_llm_done")
 
             while pending:
                 if self.cancelled:
@@ -1003,7 +1113,10 @@ class Conversation:
                     yield out_chunk
             turn_trace.mark("t_tts_done")   # lifecycle 2: every clause synthesized and its audio handed to the caller of stream_turn
 
-            reply = "".join(streamed_tokens).strip()
+            if launched_clause_texts:
+                reply = " ".join(launched_clause_texts).strip()
+            else:
+                reply = "".join(streamed_tokens).strip()
             reply = clean_for_tts(reply)
 
             if turn_mode == "hi" and reply:
@@ -1024,7 +1137,7 @@ class Conversation:
                         reply = "माफ़ कीजिए, क्या आप थोड़ा स्पष्ट बता सकते हैं कि आप किस कोर्स या कॉलेज के बारे में जानना चाहते हैं?"
 
             if not reply:
-                del self.messages[mark:]
+                del self.messages[assistant_mark:]   # keeps the committed caller turn
                 if turn_rec is not None:
                     turn_rec["status"] = "error"
                 yield TurnChunk(heard=heard, error="empty_reply", timings_ms=res_timings, is_first=True, is_last=True)
@@ -1077,21 +1190,22 @@ class Conversation:
             log.info("turn_script_log: mode=%s first_gen_passed=%s clauses_violated=%d roman_token_count=%d",
                      turn_mode, first_gen_passed, clauses_violated, len(set(found_roman_tokens)))   # a count: the tokens are reply words
         except asyncio.CancelledError:
-            del self.messages[mark:]
+            del self.messages[assistant_mark:]
             if turn_rec is not None and turn_rec.get("status") == "committed":
                 self._reconcile_open_turn()
             raise  # task cancellation must propagate: swallowing it left the media worker alive and hung the socket handler on hangup
         except AiError as e:
-            del self.messages[mark:]
+            del self.messages[assistant_mark:]
             if turn_rec is not None:
                 turn_rec["status"] = "error"
             yield TurnChunk(error=f"{e.service}_{e.kind}", is_last=True)
         except Exception as e:
-            del self.messages[mark:]
             if self.cancelled:
+                del self.messages[assistant_mark:]
                 self._reconcile_open_turn()
                 yield TurnChunk(error="cancelled", is_last=True)
                 return
+            del self.messages[assistant_mark:]
             log.exception("unexpected error in AI stream_turn")
             yield TurnChunk(error=f"internal_{type(e).__name__}", is_last=True)
         finally:

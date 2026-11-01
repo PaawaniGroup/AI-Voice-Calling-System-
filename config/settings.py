@@ -71,7 +71,8 @@ class Settings(BaseSettings):
     esl_port: int = F(8021, "ESL port.", ge=1, le=65535)
     esl_password: SecretStr = F(SecretStr(""), "ESL password (secret). Required unless fs_enabled=false.")
     esl_allow_non_private: bool = F(False, "Allow a non-private ESL address. Requires security review.")
-    fs_enabled: bool = F(True, "Enable the FreeSWITCH controller.")
+    fs_enabled: bool = F(False, "LEGACY: enable the FreeSWITCH controller (ESL). Off by default: the target architecture is the Plivo Application "
+                                "(provider=plivo_api), which needs no FreeSWITCH. Only provider=freeswitch_gateway requires this.")
     esl_connect_timeout_s: float = F(5.0, "ESL connect+auth timeout.", gt=0, le=60)
     esl_command_timeout_s: float = F(10.0, "Per ESL command timeout.", gt=0, le=120)
     esl_reconnect_initial_s: float = F(0.5, "Initial reconnect delay.", gt=0, le=60)
@@ -104,7 +105,8 @@ class Settings(BaseSettings):
 
     # ---- Provider -------------------------------------------------------------------
     provider: Literal["freeswitch_gateway", "plivo_api", "mock"] = F(
-        "freeswitch_gateway", "Call path. 'mock' is rejected outside development/test."
+        "mock", "Call path. Staging/production must set 'plivo_api' (the target architecture; 'mock' is rejected outside development/test). "
+                "'freeswitch_gateway' is LEGACY and requires FS_ENABLED=true."
     )
     plivo_auth_id: SecretStr = F(SecretStr(""), "Plivo Auth ID (secret).")
     plivo_auth_token: SecretStr = F(SecretStr(""), "Plivo Auth Token (secret); also verifies webhook signatures.")
@@ -212,10 +214,20 @@ class Settings(BaseSettings):
     ai_api_key: SecretStr = F(SecretStr(""), "Bearer key sent to model servers (secret; never shown in the UI).")
     ai_request_timeout_s: float = F(15.0, "Default timeout for model service requests.", gt=0, le=120)
     ai_max_concurrency: int = F(4, "Max concurrent model requests per process.", ge=1, le=64)
-    ai_stt_model: str = F("Oriserve/Whisper-Hindi2Hinglish-Prime", "STT model identifier (informational; the model server owns the weights).")
+    ai_stt_model: str = F("mmeog/mme_stt_model", "STT model identifier the deployment is EXPECTED to run (informational; the model server owns the weights - verify with the worker health response: model_id / model_revision / model_commit_hash).")
     ai_brain_model: str = F("Qwen3-30B-A3B-Instruct-2507", "Brain/LLM model identifier.")
     ai_tts_model: str = F("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "TTS model identifier.")
     ai_tts_reference_wav: str = F("", "Path to the reference voice WAV sent to RunPod TTS workers (voice cloning; the worker rejects requests without one).")
+    ai_stt_legacy_audio_aliases: bool = F(False, "Also send the STT audio as `audio` and `audio_base64` (the same base64 three times, 3x the upload). Off by default: the STT handler reads `audio_b64` "
+                                                 "(verified live 2026-10-23). Turn on only for an old worker that does not.")
+    ai_allow_plaintext_tenant_keys: bool = F(False, "LEGACY escape hatch: let AiService.put_config store plaintext API keys in the tenant document. Off by default: use the tenant "
+                                                    "`key_refs` (the NAME of an environment variable RUNPOD_* / MME_TEL_KEY_*). Reading an already stored plaintext key still works (warned).")
+    ai_tts_reference_adaptive: bool = F(True, "Stop uploading the reference audio (~1 MB of base64 per TTS request) to an endpoint whose worker answered with a baked voice "
+                                              "(response voice != 'request'): such a worker ignores it. Re-probed every 15 minutes; an older worker without a `voice` field "
+                                              "keeps receiving it. Does not unset AI_TTS_REFERENCE_WAV. Set false to always send it.")
+    ai_tts_output_format: Literal["wav", "ulaw8k"] = F("wav", "Audio format requested from RunPod TTS workers for complete clips. 'ulaw8k' = 8 kHz G.711 mu-law straight from the worker: about a 1/6 the bytes of a "
+                                                         "24 kHz WAV (less to fetch and decode) and exactly what Plivo plays. Needs a worker that supports `output_format` (V3 and V4 do; the response says which "
+                                                         "format it sent, so a worker that ignores the field still works). Default 'wav' = unchanged behaviour.")
     ai_tts_normalize: bool = F(True, "Write numbers, rupees, dates, phone numbers and acronyms as spoken Devanagari words before TTS (Chatterbox test level 1) and pick the hi/en language tag per sentence.")
     ai_store_transcripts: bool = F(False, "Store caller and assistant conversation text in MongoDB and transcript endpoint when enabled. Default False.")
     ai_greeting: str = F("Welcome to MME AI Voice Calling Agent.", "Greeting spoken when an inbound call answers before connecting to AI services.")
@@ -228,20 +240,21 @@ class Settings(BaseSettings):
     ai_tts_max_retries: int = F(1, "Max retry attempts for eligible transient TTS failures (0 disables).", ge=0, le=3)
     ai_tts_turn_deadline_s: float = F(12.0, "Overall turn deadline for TTS synthesis and playback readiness.", gt=1.0, le=60.0)
     ai_tts_min_retry_budget_s: float = F(1.0, "Minimum remaining seconds before turn deadline required to attempt a retry.", gt=0.1, le=10.0)
+    ai_tts_prebuffer_ms: int = F(400, "Initial playback jitter pre-buffer in ms for streaming TTS before releasing audio to prevent underruns (default 400ms).", ge=0, le=2000)
+    ai_first_clause_split_words: int = F(0, "Time-to-first-audio: when > 0, the FIRST clause of a reply may end at a comma/semicolon once it has at least this many words, "
+                                            "instead of waiting for the sentence end. 0 (default) = sentence ends only. Applies to the first clause only.", ge=0, le=30)
     ai_silence_ms: int = F(1100, "Trailing silence in ms to endpoint an utterance (default 1100ms: callers pause 650-1000ms mid-thought).", ge=300, le=3000)
     ai_silence_short_ms: int = F(1200, "Trailing silence in ms for short/starter utterances under 600ms (default 1200ms).", ge=300, le=3000)
     ai_vad_pre_roll_ms: int = F(300, "Audio pre-roll buffer in ms to prevent onset clipping (default 300ms).", ge=50, le=1000)
     ai_max_utterance_ms: int = F(8000, "Soft cap in ms: a longer utterance is split at its quietest frame and merged again before STT (default 8000ms).", ge=2000, le=30000)
     ai_vad_min_valid_ms: int = F(60, "Less loud audio than this in a whole capture is a noise burst: rejected with a reason, not sent to STT.", ge=20, le=500)
-    ai_queue_max: int = F(4, "Utterances waiting per call for the turn worker; when full the newest is merged into the last (no audio dropped).", ge=1, le=16)
+    ai_queue_max: int = F(8, "Finalized utterances waiting per call for the turn worker. Never merged; over the bound the OLDEST is rejected explicitly.", ge=1, le=32)
+    ai_max_history: int = F(40, "Messages (caller + assistant, system prompt excluded) kept in the LLM context per call. 12 dropped the caller's course/rank/location by turn 7; 40 = 20 turns.", ge=4, le=200)
+    ai_stt_reask_enabled: bool = F(True, "Say a short spoken clarification when an utterance could not be transcribed (timeout, empty, invalid or unavailable STT).")
+    ai_stt_max_consecutive_failures: int = F(2, "Consecutive STT failures per call answered with a spoken re-ask; after that failures are counted but silent. A good transcript resets the count.", ge=1, le=10)
+    ai_stt_reask_language: Literal["auto", "hi", "en"] = F("auto", "Language of the spoken STT re-ask: auto follows the conversation mode.")
+    ai_playback_quiet_capture: bool = F(True, "Keep and process caller audio captured while the assistant plays without strong barge-in evidence (decided after STT; likely echo is suppressed). False = discard it, counted.")
     ai_queue_expire_s: float = F(90.0, "A queued utterance older than this many seconds is EXPIRED (explicit terminal state).", gt=5.0, le=600.0)
-    ai_repetition_penalty: float = F(1.15, "Repetition penalty for Brain replies (default 1.15).", ge=1.0, le=2.0)
-    ai_presence_penalty: float = F(0.3, "Presence penalty for Brain replies (default 0.3).", ge=0.0, le=2.0)
-    ai_frequency_penalty: float = F(0.2, "Frequency penalty for Brain replies (default 0.2).", ge=0.0, le=2.0)
-    ai_silence_ms: int = F(850, "Trailing silence in ms to endpoint an utterance (default 850ms).", ge=300, le=3000)
-    ai_silence_short_ms: int = F(1000, "Trailing silence in ms for short/starter utterances under 600ms (default 1000ms).", ge=300, le=3000)
-    ai_vad_pre_roll_ms: int = F(200, "Audio pre-roll buffer in ms to prevent onset clipping (default 200ms).", ge=50, le=1000)
-    ai_max_utterance_ms: int = F(8000, "Max utterance duration cap in ms (default 8000ms).", ge=2000, le=30000)
     ai_repetition_penalty: float = F(1.15, "Repetition penalty for Brain replies (default 1.15).", ge=1.0, le=2.0)
     ai_presence_penalty: float = F(0.3, "Presence penalty for Brain replies (default 0.3).", ge=0.0, le=2.0)
     ai_frequency_penalty: float = F(0.2, "Frequency penalty for Brain replies (default 0.2).", ge=0.0, le=2.0)
@@ -277,10 +290,15 @@ class Settings(BaseSettings):
         w: list[str] = []
         if self.ai_media_bridge == "ws_fork" and self.is_prod_like and self.ai_media_ws_url.startswith("ws://") and "127.0.0.1" not in self.ai_media_ws_url:
             e.append("AI_MEDIA_WS_URL must use wss:// to a non-loopback host in staging/production")
-        if self.ai_enabled and self.ai_media_bridge == "none" and not self.plivo_inbound_enabled:
+        plivo_target = self.plivo_inbound_enabled or self.provider == "plivo_api"
+        if self.provider == "freeswitch_gateway" and not self.fs_enabled:
+            e.append("provider=freeswitch_gateway is LEGACY and requires FS_ENABLED=true; the target architecture is provider=plivo_api")
+        if self.ai_enabled and self.ai_media_bridge == "none" and not plivo_target:
             w.append("AI_ENABLED=true but AI_MEDIA_BRIDGE=none: AI sessions cannot start until a media bridge is verified")
         if self.ai_fs_autostart and not (self.ai_enabled and self.ai_media_bridge == "ws_fork"):
             e.append("AI_FS_AUTOSTART requires AI_ENABLED=true and AI_MEDIA_BRIDGE=ws_fork")
+        if self.provider == "plivo_api" and self.ai_enabled and not self.jwt_secret.get_secret_value():
+            e.append("provider=plivo_api with AI_ENABLED=true requires JWT_SECRET (the stream ticket key is derived from it)")
         if self.plivo_inbound_enabled:
             if not self.plivo_auth_token.get_secret_value():
                 e.append("plivo_inbound_enabled requires PLIVO_AUTH_TOKEN")
