@@ -1,0 +1,10 @@
+model_id: Qwen/Qwen3-ASR-1.7B
+# Pin to an exact HF commit SHA before publishing (resolve with: hf models info Qwen/Qwen3-ASR-1.7B).
+# "UNPINNED" is rejected when QWEN_ASR_REQUIRE_PINNED=1 (set in the Docker image).
+model_revision: "UNPINNED"
+dtype: bfloat16
+max_new_tokens: 256
+max_inference_batch_size: 1
+target_sample_rate: 16000
+max_audio_seconds: 60
+request_timeout_s: 30

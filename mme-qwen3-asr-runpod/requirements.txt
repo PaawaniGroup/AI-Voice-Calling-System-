@@ -1,0 +1,7 @@
+# Runtime deps. Torch comes from the CUDA base image. Exact qwen-asr/transformers versions MUST be frozen from a
+# GPU-validated build (pip freeze) before the image is published; the pins below are minimums to be tightened.
+qwen-asr>=0.0.1
+runpod>=1.7.0
+numpy>=1.26
+scipy>=1.11
+PyYAML>=6.0
